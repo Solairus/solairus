@@ -53,6 +53,39 @@ All colors MUST be HSL.
   }
 }
 
+/* Flip clock animations */
+@keyframes flipTop {
+  0% {
+    transform: rotateX(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: rotateX(-90deg);
+    opacity: 0.9;
+  }
+}
+
+@keyframes flipBottom {
+  0% {
+    transform: rotateX(90deg);
+    opacity: 0.9;
+  }
+  100% {
+    transform: rotateX(0deg);
+    opacity: 1;
+  }
+}
+
+.top-flip {
+  animation: flipTop 250ms ease-in forwards;
+  backface-visibility: hidden;
+}
+
+.bottom-flip {
+  animation: flipBottom 300ms ease-out forwards;
+  backface-visibility: hidden;
+}
+
 @layer base {
   * {
     @apply border-border;
