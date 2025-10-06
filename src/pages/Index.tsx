@@ -8,9 +8,9 @@ import CTA from "@/components/CTA";
 import CountdownFlip from "@/components/CountdownFlip";
 
 const Index = () => {
-  // Overlay shows only in production when the env flag is enabled.
+  // Overlay shows when the env flag is enabled (works in both dev and prod).
   // Note: Vite exposes client env vars only with the `VITE_` prefix.
-  const showComingSoon = import.meta.env.PROD && import.meta.env.VITE_SHOW_COMING_SOON === "true";
+  const showComingSoon = import.meta.env.VITE_SHOW_COMING_SOON === "true";
 
   return (
     <div className="min-h-screen">
