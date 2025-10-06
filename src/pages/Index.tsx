@@ -8,8 +8,8 @@ import CTA from "@/components/CTA";
 import CountdownFlip from "@/components/CountdownFlip";
 
 const Index = () => {
-  // Show countdown when VITE_SHOW_COMING_SOON is "true" (works in dev and production)
-  const showComingSoon = import.meta.env.VITE_SHOW_COMING_SOON === "true";
+  // Show countdown unless VITE_SHOW_COMING_SOON is explicitly "false"
+  const showComingSoon = import.meta.env.VITE_SHOW_COMING_SOON !== "false";
 
   return (
     <div className="min-h-screen">
