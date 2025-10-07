@@ -32,7 +32,7 @@ const Index = () => {
                 Coming Soon
               </h1>
               <p className="text-lg md:text-xl text-muted-foreground mb-6">
-                We’re putting the final touches on the Solairus yield engine.
+                We're putting the final touches on the Solairus Trading Agents.
               </p>
               
               <div className="mt-8">
