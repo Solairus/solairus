@@ -27,7 +27,7 @@ const Index = () => {
 
       {showComingSoon && <div className="fixed inset-0 z-[9999] bg-black/55 flex items-center justify-center select-none cursor-not-allowed" aria-hidden="true">
           <div className="container mx-auto px-6">
-            <div className="bg-card glow-card border border-border rounded-2xl max-w-2xl mx-auto p-10 text-center">
+            <div className="bg-card glow-card border border-border rounded-2xl max-w-2xl mx-auto p-12 md:p-16 text-center my-8">
               <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight gradient-text mb-4">
                 Coming Soon
               </h1>
