@@ -4,7 +4,6 @@ import BottomNav from "@/components/BottomNav";
 import FAB from "@/components/FAB";
 import { Card } from "@/components/Card";
 import OnboardingSlider from "@/components/OnboardingSlider";
-import { toast } from "@/components/ui/sonner";
 
 /**
  * Dapp
@@ -38,7 +37,6 @@ export default function Dapp() {
     } catch (err) {
       void err;
     }
-    toast("Splash hidden for 1 hour");
     setShowOnboarding(false);
   };
   return (
