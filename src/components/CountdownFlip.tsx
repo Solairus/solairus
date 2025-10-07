@@ -51,20 +51,20 @@ const FlipDigit = ({ value, prev, label }: FlipDigitProps) => {
 
         {/* static halves showing current value */}
         <div className="absolute inset-x-0 top-0 h-1/2 overflow-hidden border-b border-white/10 bg-black/40 flex items-end justify-center">
-          <span className="text-white font-mono text-4xl md:text-5xl font-extrabold tracking-tighter leading-none">{pad2(value)}</span>
+          <span className="text-white font-mono text-6xl md:text-7xl font-extrabold tracking-tighter leading-none">{pad2(value)}</span>
         </div>
         <div className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden bg-black/60 flex items-start justify-center">
-          <span className="text-white font-mono text-4xl md:text-5xl font-extrabold tracking-tighter leading-none">{pad2(value)}</span>
+          <span className="text-white font-mono text-6xl md:text-7xl font-extrabold tracking-tighter leading-none">{pad2(value)}</span>
         </div>
 
         {/* flip animation layers */}
         {animating && (
           <>
             <div className="top-flip absolute inset-x-0 top-0 h-1/2 overflow-hidden border-b border-white/10 bg-black/40 flex items-end justify-center origin-bottom">
-              <span className="text-white font-mono text-4xl md:text-5xl font-extrabold tracking-tighter leading-none">{pad2(prev)}</span>
+              <span className="text-white font-mono text-6xl md:text-7xl font-extrabold tracking-tighter leading-none">{pad2(prev)}</span>
             </div>
             <div className="bottom-flip absolute inset-x-0 bottom-0 h-1/2 overflow-hidden bg-black/60 flex items-start justify-center origin-top">
-              <span className="text-white font-mono text-4xl md:text-5xl font-extrabold tracking-tighter leading-none">{pad2(value)}</span>
+              <span className="text-white font-mono text-6xl md:text-7xl font-extrabold tracking-tighter leading-none">{pad2(value)}</span>
             </div>
           </>
         )}
