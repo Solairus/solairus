@@ -24,6 +24,16 @@ const Index = () => {
       <footer className="border-t border-border/50 glass py-8">
         <div className="container mx-auto px-4 text-center text-muted-foreground">
           <p>© 2025 SOLAIRUS. All rights reserved. Powered by Solana AI.</p>
+          <div className="mt-3 text-xs md:text-sm">
+            <span>
+              We comply with GDPR. By using this site, you agree to our
+              {" "}
+              <a href="/privacy" className="underline hover:text-foreground" aria-label="Privacy Policy">
+                Privacy Policy
+              </a>
+              .
+            </span>
+          </div>
         </div>
       </footer>
 
