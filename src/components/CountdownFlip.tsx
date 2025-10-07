@@ -50,20 +50,20 @@ const FlipDigit = ({ value, prev, label }: FlipDigitProps) => {
         <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-px bg-white/10" />
 
         {/* static halves showing current value */}
-        <div className="absolute inset-x-0 top-0 h-1/2 overflow-hidden border-b border-white/10 bg-black/40 flex items-end justify-center pb-[1px]">
+        <div className="absolute inset-x-0 top-0 h-1/2 overflow-hidden border-b border-white/10 bg-black/40 flex items-end justify-center">
           <span className="text-white font-mono text-4xl md:text-5xl font-extrabold tracking-tighter leading-none">{pad2(value)}</span>
         </div>
-        <div className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden bg-black/60 flex items-start justify-center pt-[1px]">
+        <div className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden bg-black/60 flex items-start justify-center">
           <span className="text-white font-mono text-4xl md:text-5xl font-extrabold tracking-tighter leading-none">{pad2(value)}</span>
         </div>
 
         {/* flip animation layers */}
         {animating && (
           <>
-            <div className="top-flip absolute inset-x-0 top-0 h-1/2 overflow-hidden border-b border-white/10 bg-black/40 flex items-end justify-center origin-bottom pb-[-15px]">
+            <div className="top-flip absolute inset-x-0 top-0 h-1/2 overflow-hidden border-b border-white/10 bg-black/40 flex items-end justify-center origin-bottom">
               <span className="text-white font-mono text-4xl md:text-5xl font-extrabold tracking-tighter leading-none">{pad2(prev)}</span>
             </div>
-            <div className="bottom-flip absolute inset-x-0 bottom-0 h-1/2 overflow-hidden bg-black/60 flex items-start justify-center origin-top pt-[-15px]">
+            <div className="bottom-flip absolute inset-x-0 bottom-0 h-1/2 overflow-hidden bg-black/60 flex items-start justify-center origin-top">
               <span className="text-white font-mono text-4xl md:text-5xl font-extrabold tracking-tighter leading-none">{pad2(value)}</span>
             </div>
           </>
