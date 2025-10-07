@@ -56,6 +56,13 @@ export default function OnboardingSlider({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const prev = () => {
+    if (!embla) return;
+    if (index > 0) {
+      embla.scrollPrev();
+    }
+  };
+
   const skip = () => onClose();
 
   return (
@@ -86,7 +93,7 @@ export default function OnboardingSlider({ onClose }: { onClose: () => void }) {
         </div>
       </div>
 
-      {/* Footer with dots and next */}
+      {/* Footer with dots and nav buttons */}
       <div className="safe-bottom px-4 pb-4 pt-3 border-t border-white/10">
         <div className="flex items-center justify-center gap-2 mb-3">
           {slides.map((_, i) => (
@@ -96,12 +103,21 @@ export default function OnboardingSlider({ onClose }: { onClose: () => void }) {
             />
           ))}
         </div>
-        <button
-          onClick={next}
-          className="w-full px-4 py-3 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 shadow-lg border border-white/10 active:scale-95 transition"
-        >
-          {index < slides.length - 1 ? "Next" : "Get Started"}
-        </button>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={prev}
+            disabled={index === 0}
+            className="px-4 py-3 rounded-lg border border-white/15 bg-white/5 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Back
+          </button>
+          <button
+            onClick={next}
+            className="px-4 py-3 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-600 to-amber-800 text-white shadow-lg border border-white/10 active:scale-95 transition"
+          >
+            {index < slides.length - 1 ? "Next" : "Get Started"}
+          </button>
+        </div>
       </div>
     </div>
   );

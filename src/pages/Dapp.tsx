@@ -4,6 +4,7 @@ import BottomNav from "@/components/BottomNav";
 import FAB from "@/components/FAB";
 import { Card } from "@/components/Card";
 import OnboardingSlider from "@/components/OnboardingSlider";
+import { toast } from "@/components/ui/sonner";
 
 /**
  * Dapp
@@ -18,17 +19,26 @@ export default function Dapp() {
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
-    const done = typeof window !== "undefined" && window.localStorage.getItem("solairus_onboarded");
-    setShowOnboarding(!done);
+    const now = Date.now();
+    try {
+      const hideUntilStr = window.localStorage.getItem("solairus_onboarding_hide_until");
+      const hideUntil = hideUntilStr ? parseInt(hideUntilStr, 10) : 0;
+      setShowOnboarding(!(hideUntil && now < hideUntil));
+    } catch {
+      // Storage may be unavailable; default to showing onboarding.
+      setShowOnboarding(true);
+    }
   }, []);
 
   const closeOnboarding = () => {
+    const ONE_HOUR_MS = 60 * 60 * 1000;
     try {
-      window.localStorage.setItem("solairus_onboarded", "1");
+      const until = Date.now() + ONE_HOUR_MS;
+      window.localStorage.setItem("solairus_onboarding_hide_until", String(until));
     } catch (err) {
-      // Gracefully ignore storage write failures (private mode, quotas, etc.)
       void err;
     }
+    toast("Splash hidden for 1 hour");
     setShowOnboarding(false);
   };
   return (
