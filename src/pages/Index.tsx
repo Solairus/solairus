@@ -6,6 +6,7 @@ import ContentSections from "@/components/ContentSections";
 import Affiliate from "@/components/Affiliate";
 import CTA from "@/components/CTA";
 import CountdownFlip from "@/components/CountdownFlip";
+import ConsentBanner from "@/components/ConsentBanner";
 const Index = () => {
   // Show countdown unless VITE_SHOW_COMING_SOON is explicitly "false"
   const showComingSoon = import.meta.env.VITE_SHOW_COMING_SOON !== "false";
@@ -36,6 +37,8 @@ const Index = () => {
           </div>
         </div>
       </footer>
+
+      <ConsentBanner />
 
       {showComingSoon && <div className="fixed inset-0 z-[9999] bg-background/65 flex items-center justify-center select-none cursor-not-allowed" aria-hidden="true">
           <div className="container mx-auto px-6">
