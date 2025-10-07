@@ -8,48 +8,53 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 220 30% 5%;
-    --foreground: 180 100% 90%;
+    /* New palette: #222831 (bg), #393E46 (surface), #FCDA05 (primary), #FFFFFF (fg) */
+    --background: 216 18% 16%; /* #222831 */
+    --foreground: 0 0% 100%;   /* #FFFFFF */
 
-    --card: 220 25% 8%;
-    --card-foreground: 180 100% 95%;
+    --card: 217 10% 25%;
+    --card-foreground: 0 0% 100%;
 
-    --popover: 220 30% 6%;
-    --popover-foreground: 180 100% 95%;
+    --popover: 217 10% 27%;
+    --popover-foreground: 0 0% 100%;
 
-    --primary: 180 100% 50%;
-    --primary-foreground: 220 30% 5%;
+    --primary: 52 98% 50%;       /* #FCDA05 */
+    --primary-foreground: 216 18% 16%; /* dark text on yellow */
 
-    --secondary: 195 100% 45%;
-    --secondary-foreground: 220 30% 5%;
+    --secondary: 217 10% 25%;    /* surface gray */
+    --secondary-foreground: 0 0% 100%;
 
-    --muted: 220 20% 15%;
-    --muted-foreground: 180 30% 60%;
+    --muted: 217 10% 35%;
+    --muted-foreground: 0 0% 90%;
 
-    --accent: 170 80% 50%;
-    --accent-foreground: 220 30% 5%;
+    --accent: 52 98% 55%;        /* lighter yellow accent */
+    --accent-foreground: 216 18% 16%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 220 20% 18%;
-    --input: 220 20% 18%;
-    --ring: 180 100% 50%;
+    --border: 217 10% 32%;
+    --input: 217 10% 32%;
+    --ring: 52 98% 50%;
 
     --radius: 0.75rem;
 
     /* Gradient tokens */
-    --gradient-cosmic: linear-gradient(135deg, hsl(220 30% 5%), hsl(220 50% 12%), hsl(180 80% 15%));
-    --gradient-primary: linear-gradient(135deg, hsl(180 100% 50%), hsl(195 100% 45%));
-    --gradient-glow: linear-gradient(135deg, hsl(180 100% 50% / 0.2), hsl(195 100% 45% / 0.1));
+    --gradient-cosmic: linear-gradient(135deg, hsl(216 18% 12%), hsl(216 18% 16%), hsl(217 10% 25%));
+    --gradient-primary: linear-gradient(135deg, hsl(52 98% 50%), hsl(52 98% 55%));
+    --gradient-glow: linear-gradient(135deg, hsl(52 98% 50% / 0.2), hsl(52 98% 55% / 0.1));
     
     /* Glow effects */
-    --glow-primary: 0 0 20px hsl(180 100% 50% / 0.5), 0 0 40px hsl(180 100% 50% / 0.3);
-    --glow-card: 0 8px 32px hsl(180 100% 50% / 0.15);
-    --glow-border: 0 0 15px hsl(180 100% 50% / 0.4);
+    --glow-primary: 0 0 20px hsl(52 98% 50% / 0.5), 0 0 40px hsl(52 98% 50% / 0.3);
+    --glow-card: 0 8px 32px hsl(52 98% 50% / 0.15);
+    --glow-border: 0 0 15px hsl(52 98% 50% / 0.4);
     
     /* Animation timing */
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* Safe area variables for mobile notch devices */
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
   }
 }
 
@@ -98,7 +103,7 @@ All colors MUST be HSL.
   }
   
   .gradient-text {
-    @apply bg-gradient-to-r from-primary via-secondary to-accent bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent;
   }
   
   .glass {
@@ -111,5 +116,13 @@ All colors MUST be HSL.
   
   .glow-card {
     box-shadow: var(--glow-card);
+  }
+
+  /* Safe area utilities */
+  .safe-top {
+    padding-top: var(--safe-top);
+  }
+  .safe-bottom {
+    padding-bottom: var(--safe-bottom);
   }
 }

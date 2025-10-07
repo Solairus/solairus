@@ -7,11 +7,8 @@ export default function Header() {
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center font-bold shadow-[0_0_20px_rgba(0,217,255,0.4)]">
-              S
-            </div>
-            <span className="text-xl font-bold gradient-text">SOLAIRUS</span>
+          <div className="flex items-center">
+            <img src="/logo.png" alt="SOLAIRUS logo" className="h-[60px] w-auto object-contain" />
           </div>
           
           {/* Navigation - Desktop */}
