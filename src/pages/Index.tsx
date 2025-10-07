@@ -9,10 +9,8 @@ import CountdownFlip from "@/components/CountdownFlip";
 const Index = () => {
   // Show countdown unless VITE_SHOW_COMING_SOON is explicitly "false"
   const showComingSoon = import.meta.env.VITE_SHOW_COMING_SOON !== "false";
-  // Original target date
-  const originalTarget = "2025-10-08T08:00:00Z";
-  // Add 8 hours to the existing target date
-  const countdownTarget = new Date(Date.parse(originalTarget) + 8 * 60 * 60 * 1000).toISOString();
+  // Updated target date (+8h)
+  const countdownTarget = "2025-10-08T16:00:00Z";
   return <div className="min-h-screen">
       <Header />
       <main>
