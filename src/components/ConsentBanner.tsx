@@ -24,7 +24,10 @@ export default function ConsentBanner() {
   const accept = () => {
     try {
       window.localStorage.setItem(CONSENT_KEY, "accepted");
-    } catch {}
+    } catch (err) {
+      // Storage may be unavailable (private mode, quotas, etc.)
+      void err;
+    }
     setConsent("accepted");
     setVisible(false);
   };
@@ -32,7 +35,10 @@ export default function ConsentBanner() {
   const reject = () => {
     try {
       window.localStorage.setItem(CONSENT_KEY, "rejected");
-    } catch {}
+    } catch (err) {
+      // Storage may be unavailable (private mode, quotas, etc.)
+      void err;
+    }
     setConsent("rejected");
     setVisible(false);
   };
@@ -40,7 +46,10 @@ export default function ConsentBanner() {
   const dismiss = () => {
     try {
       window.sessionStorage.setItem(CONSENT_DISMISSED_SESSION_KEY, "1");
-    } catch {}
+    } catch (err) {
+      // Storage may be unavailable (private mode, quotas, etc.)
+      void err;
+    }
     setVisible(false);
   };
 

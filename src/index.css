@@ -126,3 +126,38 @@ All colors MUST be HSL.
     padding-bottom: var(--safe-bottom);
   }
 }
+
+/* One-line news ticker animation and utilities */
+@keyframes ticker {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-ticker {
+  animation: ticker var(--speed, 30s) linear infinite;
+}
+
+/* Fade edges for scrolling content */
+.mask-fade-x {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+          mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+}
+
+/* Hide native scrollbars for cleaner mobile-like UI */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* AgentsOutcomesCard insert effect */
+@keyframes feedPush {
+  0% { transform: translateY(-10px); opacity: 0; }
+  60% { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+.feed-insert {
+  animation: feedPush 450ms cubic-bezier(0.33, 1, 0.68, 1);
+}
