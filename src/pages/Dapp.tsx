@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import TopBar from "@/components/TopBar";
 import BottomNav from "@/components/BottomNav";
 // import FAB from "@/components/FAB"; // removed per request
@@ -16,8 +16,6 @@ import { Outlet } from "react-router-dom";
  */
 export default function Dapp() {
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [fullView, setFullView] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const now = Date.now();
@@ -31,29 +29,7 @@ export default function Dapp() {
     }
   }, []);
 
-  // Enable full-view mode on mobile and keep height synced to the dynamic viewport
-  useEffect(() => {
-    const isMobile = () => window.innerWidth <= 480;
-    const applyVH = () => {
-      if (!containerRef.current) return;
-      const vh = window.innerHeight; // excludes browser UI in mobile when address bar is collapsed
-      containerRef.current.style.setProperty("--app-vh", `${vh}px`);
-    };
-    // Auto-enable full view on mobile
-    setFullView(isMobile());
-    applyVH();
-    const onResize = () => {
-      applyVH();
-      // Disable full view automatically if switching to desktop sizes
-      setFullView(isMobile());
-    };
-    window.addEventListener("resize", onResize);
-    window.addEventListener("orientationchange", onResize);
-    return () => {
-      window.removeEventListener("resize", onResize);
-      window.removeEventListener("orientationchange", onResize);
-    };
-  }, []);
+  // Removed dynamic viewport/full-view logic per request; always use full height (h-screen)
 
   const closeOnboarding = () => {
     const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -68,11 +44,10 @@ export default function Dapp() {
   return (
     <div className="flex justify-center items-center min-h-screen">
       <div
-        ref={containerRef}
-        className={`relative max-w-[390px] w-full ${fullView ? "h-[var(--app-vh)]" : "h-screen"} bg-background text-foreground overflow-hidden flex flex-col border border-border/50 shadow-2xl`}
+        className={`relative max-w-[390px] w-full h-screen bg-background text-foreground overflow-hidden flex flex-col border border-border/50 shadow-2xl`}
       >
         {/* Header */}
-        <TopBar title="SOLAIRUS" fullView={fullView} onToggleFullView={() => setFullView((v) => !v)} />
+        <TopBar title="SOLAIRUS" />
 
         {/* Scrollable main content */}
         <div className="flex-1 overflow-y-auto no-scrollbar px-4 pb-28 pt-4">

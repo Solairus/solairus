@@ -12,6 +12,7 @@ import DappHelp from "./pages/DappHelp";
 import DappHire from "./pages/DappHire";
 import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
+import InstallPrompt from "@/components/InstallPrompt";
 
 const queryClient = new QueryClient();
 
@@ -20,6 +21,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
+      <InstallPrompt />
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
