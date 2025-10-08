@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from "react";
 import TopBar from "@/components/TopBar";
 import BottomNav from "@/components/BottomNav";
-import FAB from "@/components/FAB";
-import { Card } from "@/components/Card";
+// import FAB from "@/components/FAB"; // removed per request
 import OnboardingSlider from "@/components/OnboardingSlider";
+import VaultBalanceCard from "@/components/VaultBalanceCard";
+import NewsTickerCard from "@/components/NewsTickerCard";
+import AgentsOutcomesCard from "@/components/AgentsOutcomesCard";
+import WalletActionsCard from "@/components/WalletActionsCard";
 
 /**
  * Dapp
@@ -47,32 +50,15 @@ export default function Dapp() {
 
         {/* Scrollable main content */}
         <div className="flex-1 overflow-y-auto px-4 pb-28 pt-4 space-y-4">
-          <Card title="Vault Balance" subtitle="USDT Rewards">
-            <div className="text-3xl font-bold">$0.00</div>
-            <div className="text-sm text-muted-foreground mt-2">Daily ROI: 1–5% (simulated)</div>
-          </Card>
-
-          <Card title="AI Agent" subtitle="Status">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Mode</span>
-              <span className="text-sm">Passive</span>
-            </div>
-            <div className="flex items-center justify-between mt-2">
-              <span className="text-sm text-muted-foreground">Uptime</span>
-              <span className="text-sm">24/7</span>
-            </div>
-          </Card>
-
-          <Card title="Actions" subtitle="Quick">
-            <div className="grid grid-cols-2 gap-3">
-              <button className="px-4 py-3 rounded-lg bg-primary text-primary-foreground hover:bg-secondary transition border border-primary/40">Deposit</button>
-              <button className="px-4 py-3 rounded-lg bg-primary text-primary-foreground hover:bg-secondary transition border border-primary/40">Claim</button>
-            </div>
-          </Card>
+          <VaultBalanceCard />
+          <WalletActionsCard />
+          <NewsTickerCard />
+          <AgentsOutcomesCard />
+          
         </div>
 
         {/* Floating action */}
-        <FAB label="Fuse" />
+        {/* FAB removed */}
 
         {/* Bottom nav */}
         <BottomNav />
