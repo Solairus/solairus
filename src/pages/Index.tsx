@@ -10,8 +10,8 @@ import ConsentBanner from "@/components/ConsentBanner";
 const Index = () => {
   // Show countdown unless VITE_SHOW_COMING_SOON is explicitly "false"
   const showComingSoon = import.meta.env.VITE_SHOW_COMING_SOON !== "false";
-  // Updated target date (+8h)
-  const countdownTarget = "2025-10-08T16:00:00Z";
+  // Fixed countdown target (24 hours from update time)
+  const countdownTarget = "2025-10-09T20:39:43.902Z";
   return <div className="min-h-screen">
       <Header />
       <main>
@@ -44,10 +44,13 @@ const Index = () => {
           <div className="container mx-auto px-6">
             <div className="bg-card glow-card border border-border rounded-2xl max-w-2xl mx-auto p-12 md:p-16 text-center my-8">
               <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight gradient-text mb-4">
-                Coming Soon
+                PRIVATE SALES
+                <span className="ml-3 align-middle px-2 py-0.5 text-[10px] md:text-xs text-white rounded bg-green-500 border border-white/20 uppercase tracking-widest animate-pulse shadow-lg">
+                  LIVE
+                </span>
               </h1>
               <p className="text-lg md:text-xl text-muted-foreground mb-6">
-                We're putting the final touches on the Solairus Trading Agents.
+                SOLAIRUS Protocol Approved and Validated, Private sales currently going on.
               </p>
               
               <div className="mt-8">
