@@ -1,5 +1,5 @@
 import React from "react";
-import { Settings, Maximize2, Minimize2 } from "lucide-react";
+import { Settings } from "lucide-react";
 
 /**
  * TopBar
@@ -11,12 +11,8 @@ import { Settings, Maximize2, Minimize2 } from "lucide-react";
  */
 export default function TopBar({
   title: _title = "App",
-  fullView = false,
-  onToggleFullView,
 }: {
   title?: string;
-  fullView?: boolean;
-  onToggleFullView?: () => void;
 }) {
   return (
     <header className="sticky top-0 z-20 bg-background/40 backdrop-blur-md border-b border-border/50">
@@ -25,14 +21,6 @@ export default function TopBar({
           <img src="/logo.png" alt="SOLAIRUS logo" className="h-[60px] w-auto object-contain" />
         </div>
         <div className="flex items-center gap-2">
-          {/* Full view toggle only relevant on mobile widths; harmless on desktop */}
-          <button
-            aria-label={fullView ? "Exit Full View" : "Enter Full View"}
-            className="p-2 rounded-lg hover:bg-foreground/10 border border-border/50"
-            onClick={onToggleFullView}
-          >
-            {fullView ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-          </button>
           <button
             aria-label="Settings"
             className="p-2 rounded-lg hover:bg-foreground/10 border border-border/50"
