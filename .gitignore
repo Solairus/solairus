@@ -25,3 +25,7 @@ dist-ssr
 
 # Ignore the contract folder
 solairus-contract/
+
+# Environment files (never commit secrets)
+.env*
+!.env.example
