@@ -245,8 +245,7 @@ export default function AgentRow({
   }, [plOutcome]);
 
   return (
-    <li className={`flex items-center gap-3 ${justInserted ? "feed-insert" : ""}`}>
-      <div className={`w-2 h-2 rounded-full ${accent}`} />
+    <li className={`flex items-center gap-2 ${justInserted ? "feed-insert" : ""}`}>
       <div className="flex-1">
         <div className="flex items-center gap-1 whitespace-nowrap text-[10px] md:text-xs">
           <span className="text-xs font-semibold opacity-90">{`${tier}-${id.slice(-4).toUpperCase()}`}:</span>

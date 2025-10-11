@@ -43,6 +43,14 @@ They extend the global rules and are **strictly enforced** to maintain scope, qu
    - Never assume missing logic, dependencies, or structure.
    - Always **inspect existing code** or **ask for clarification** before acting.
 
+6. **Folder Structure**
+   - Our workspace has multiple folders each dedicated for a different part of the project:
+     - /Users/nouvic/Desktop/Projects/solairus/solairus-contract referred to as `solairus-contract` — Smart contract code (Anchor, Rust)
+     - /Users/nouvic/Desktop/Projects/solairus referred to as `solairus-ui` — Frontend code (React, Next.js, TailwindCSS)
+     
+     please ensure that you are working in the correct folder for the task.
+     If you are unsure, ask for clarification.
+
 ---
 
 #### 🔐 Solana-Specific Rules

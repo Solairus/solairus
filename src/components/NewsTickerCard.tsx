@@ -20,17 +20,17 @@ export default function NewsTickerCard({
     "--speed": `${speedSeconds}s`,
   };
   return (
-    <div className="relative rounded-2xl border border-border/50 bg-card/60 backdrop-blur-sm overflow-hidden">
-      <div className="h-12 flex items-center">
+    <div className="relative m-0 rounded-2xl border border-border/50 bg-card/60 backdrop-blur-sm overflow-hidden">
+      <div className="h-5 flex items-center">
         <div
           className="w-full whitespace-nowrap mask-fade-x"
         >
           <div
-            className="inline-flex gap-8 px-4 animate-ticker"
+            className="inline-flex gap-1 p-1 animate-ticker"
             style={tickerStyle}
           >
             {loopItems.map((text, idx) => (
-              <span key={idx} className="text-sm text-white/85">
+              <span key={idx} className="text-sm leading-none text-white/85">
                 {text}
               </span>
             ))}

@@ -1,7 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
+import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
 
 export default function Header() {
+  const { openModal } = useWalletConnection();
   return (
     <header className="fixed top-0 left-0 right-0 z-50 border-b border-border/50 glass">
       <div className="container mx-auto px-4">
@@ -29,7 +31,7 @@ export default function Header() {
           
           {/* CTA */}
           <div className="flex items-center gap-4">
-            <Button variant="ghost" className="hidden md:inline-flex">
+            <Button variant="ghost" className="hidden md:inline-flex" onClick={openModal}>
               Connect Wallet
             </Button>
             <Button variant="hero">

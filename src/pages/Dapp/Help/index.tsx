@@ -1,5 +1,5 @@
 import React from "react";
-import UnderConstruction from "./UnderConstruction";
+import UnderConstruction from "../../UnderConstruction";
 
 export default function DappHelp() {
   return <UnderConstruction title="Help" />;

@@ -31,8 +31,7 @@ export default function TerminalRow({ id }: { id: string }) {
   }, []);
 
   return (
-    <li className="flex items-center gap-3">
-      <div className={`w-2 h-2 rounded-full bg-white/30`} />
+    <li className="flex items-center gap-2">
       <div className="flex-1">
         <div className="mt-0 flex items-center gap-1 whitespace-nowrap text-[10px] md:text-xs">
           <span className="font-mono text-white/70">{id.slice(-6)}</span>
