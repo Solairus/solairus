@@ -1,7 +1,16 @@
 import { Button } from "@/components/ui/button";
-import { Share2 } from "lucide-react";
+import { Share2, Copy } from "lucide-react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { encryptAddress } from "@/lib/address-crypto";
+import { toast } from "sonner";
 
 export default function Affiliate() {
+  const { publicKey } = useWallet();
+  const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+  const account = publicKey ? publicKey.toBase58() : "";
+  const referralCode = account ? encryptAddress(account) : "CONNECT_WALLET";
+  const referralLink = `${baseUrl}/dapp/ref/${referralCode}`;
+
   return (
     <section className="py-24 relative">
       <div className="container mx-auto px-4">
@@ -39,9 +48,27 @@ export default function Affiliate() {
               </div>
             </div>
             
-            <div className="text-center">
+            <div className="text-center space-y-3">
+              <div className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-background/60 border text-sm">
+                <span className="opacity-75">Your link:</span>
+                <span className="font-medium">{referralLink}</span>
+                <button
+                  aria-label="Copy referral link"
+                  className="hover:opacity-100 opacity-70 transition"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(referralLink);
+                    } catch (err) {
+                      toast.error("Failed to copy referral link.");
+                    }
+                    toast.success("Referral link copied.");
+                  }}
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+              </div>
               <Button variant="hero" size="lg">
-                Get Your Referral Link
+                <Share2 className="w-4 h-4 mr-2" /> Get Your Referral Link
               </Button>
             </div>
           </div>

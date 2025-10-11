@@ -29,3 +29,6 @@ solairus-contract/
 # Environment files (never commit secrets)
 .env*
 !.env.example
+
+# ignore kriptiz
+kriptiz/
