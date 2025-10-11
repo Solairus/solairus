@@ -5,13 +5,13 @@ import Features from "@/components/Features";
 import ContentSections from "@/components/ContentSections";
 import Affiliate from "@/components/Affiliate";
 import CTA from "@/components/CTA";
-import CountdownFlip from "@/components/CountdownFlip";
+import ComingSoonOverlay from "./ComingSoonOverlay";
 import ConsentBanner from "@/components/ConsentBanner";
 const Index = () => {
   // Show countdown unless VITE_SHOW_COMING_SOON is explicitly "false"
   const showComingSoon = import.meta.env.VITE_SHOW_COMING_SOON !== "false";
-  // Fixed countdown target (24 hours from update time)
-  const countdownTarget = "2025-10-13T15:00:00+08:00";
+  // Countdown target
+  const countdownTarget = "2025-10-13T00:00:00+08:00";
   return <div className="min-h-screen">
       <Header />
       <main>
@@ -40,22 +40,13 @@ const Index = () => {
 
       <ConsentBanner />
 
-      {showComingSoon && <div className="fixed inset-0 z-[9999] bg-background/65 flex items-center justify-center select-none cursor-not-allowed" aria-hidden="true">
-          <div className="container mx-auto px-6">
-            <div className="bg-card glow-card border border-border rounded-2xl max-w-2xl mx-auto p-12 md:p-16 text-center my-8">
-              <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight gradient-text mb-4">
-                Deploying Trainned AI Agents
-              </h1>
-              <p className="text-lg md:text-xl text-muted-foreground mb-6">
-                we are currently deploying our ai agents to the cloud...
-              </p>
-              
-              <div className="mt-8">
-                <CountdownFlip targetDate={countdownTarget} />
-              </div>
-            </div>
-          </div>
-        </div>}
+      {showComingSoon && (
+        <ComingSoonOverlay
+          targetDate={countdownTarget}
+          title="Deploying Trainned AI Agents"
+          message="we are currently deploying our ai agents to the cloud..."
+        />
+      )}
     </div>;
 };
 export default Index;
