@@ -15,6 +15,8 @@ const WalletGate = ({ children }: WalletGateProps) => {
       .trim() === "true"
   );
 
+
+
   // If guard is disabled via env, allow previewing dApp pages without gating
   if (!guardEnabled) {
     return <>{children}</>;

@@ -1,13 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Share2, Copy } from "lucide-react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWallet } from "@/contexts/wallet-context";
 import { encryptAddress } from "@/lib/address-crypto";
 import { toast } from "sonner";
 
 export default function Affiliate() {
-  const { publicKey } = useWallet();
+  const { account } = useWallet();
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
-  const account = publicKey ? publicKey.toBase58() : "";
   const referralCode = account ? encryptAddress(account) : "CONNECT_WALLET";
   const referralLink = `${baseUrl}/dapp/ref/${referralCode}`;
 
