@@ -24,6 +24,23 @@
       ]
     },
     {
+      "name": "depositUsdt",
+      "accounts": [
+        { "name": "user", "isMut": true, "isSigner": true },
+        { "name": "config", "isMut": true, "isSigner": false },
+        { "name": "vault", "isMut": true, "isSigner": false },
+        { "name": "mint", "isMut": false, "isSigner": false },
+        { "name": "userAta", "isMut": true, "isSigner": false },
+        { "name": "vaultAta", "isMut": true, "isSigner": false },
+        { "name": "userDeposit", "isMut": true, "isSigner": false },
+        { "name": "userHistory", "isMut": true, "isSigner": false },
+        { "name": "systemProgram", "isMut": false, "isSigner": false },
+        { "name": "tokenProgram", "isMut": false, "isSigner": false },
+        { "name": "associatedTokenProgram", "isMut": false, "isSigner": false }
+      ],
+      "args": [ { "name": "amountUsdt", "type": "u64" } ]
+    },
+    {
       "name": "updateLicenseConfig",
       "accounts": [
         { "name": "authority", "isMut": false, "isSigner": true },
@@ -77,10 +94,19 @@
           { "name": "admin", "type": "publicKey" },
           { "name": "marketer1", "type": "publicKey" },
           { "name": "marketer2", "type": "publicKey" },
+          { "name": "trader", "type": "publicKey" },
+          { "name": "systemReserve", "type": "publicKey" },
+          { "name": "hireAgentProgram", "type": "publicKey" },
           { "name": "usdtPriceCents", "type": "u64" },
           { "name": "durationDays", "type": "u16" },
           { "name": "usdtMint", "type": "publicKey" },
           { "name": "balances", "type": { "defined": "Balances" } },
+          { "name": "internalAdminUsdt", "type": "u64" },
+          { "name": "internalDevUsdt", "type": "u64" },
+          { "name": "internalMarketer1Usdt", "type": "u64" },
+          { "name": "internalMarketer2Usdt", "type": "u64" },
+          { "name": "internalTraderUsdt", "type": "u64" },
+          { "name": "internalSystemReserveUsdt", "type": "u64" },
           { "name": "bumpConfig", "type": "u8" },
           { "name": "bumpVault", "type": "u8" }
         ]
@@ -90,6 +116,14 @@
     {
       "name": "userLicense",
       "type": { "kind": "struct", "fields": [ { "name": "user", "type": "publicKey" }, { "name": "expirationTs", "type": "i64" }, { "name": "bump", "type": "u8" } ] }
+    },
+    {
+      "name": "userDeposit",
+      "type": { "kind": "struct", "fields": [ { "name": "user", "type": "publicKey" }, { "name": "totalDepositUsdt", "type": "u64" } ] }
+    },
+    {
+      "name": "userDepositHistory",
+      "type": { "kind": "struct", "fields": [ { "name": "user", "type": "publicKey" }, { "name": "bump", "type": "u8" }, { "name": "records", "type": { "vec": { "defined": "DepositRecord" } } } ] }
     }
   ],
   "types": [
@@ -109,6 +143,18 @@
     {
       "name": "Role",
       "type": { "kind": "enum", "variants": [ { "name": "Admin" }, { "name": "Dev" }, { "name": "Marketer1" }, { "name": "Marketer2" }, { "name": "Reserve" } ] }
+    },
+    {
+      "name": "DepositRecord",
+      "type": { "kind": "struct", "fields": [ { "name": "amountUsdt", "type": "u64" }, { "name": "timestamp", "type": "i64" }, { "name": "source", "type": { "defined": "Source" } }, { "name": "action", "type": { "defined": "Action" } } ] }
+    },
+    {
+      "name": "Source",
+      "type": { "kind": "enum", "variants": [ { "name": "Admin" }, { "name": "User" } ] }
+    },
+    {
+      "name": "Action",
+      "type": { "kind": "enum", "variants": [ { "name": "Credit" }, { "name": "Debit" } ] }
     }
   ]
 }

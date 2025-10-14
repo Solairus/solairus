@@ -87,14 +87,41 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
         setIsConnected(true)
         setWalletProvider(provider)
 
-        const clusterStr = (import.meta.env.VITE_SOLANA_CLUSTER ?? "devnet").toLowerCase()
-        const endpoint = clusterApiUrl(
-          clusterStr === "mainnet" || clusterStr === "mainnet-beta"
-            ? "mainnet-beta"
-            : clusterStr === "testnet"
-              ? "testnet"
-              : "devnet"
-        )
+        // Determine effective cluster: prefer AppKit selected network, then localStorage override, then env
+        const appKit = walletManager.getAppKit()
+        const selectedNetworkId = (() => {
+          try {
+            const state = appKit?.getState?.()
+            return (state as { selectedNetworkId?: string })?.selectedNetworkId
+          } catch {
+            return undefined
+          }
+        })()
+        const overrideCluster = (() => {
+          try { return (localStorage.getItem("solana_cluster_override") ?? "").toLowerCase() } catch { return "" }
+        })()
+        const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? "devnet").toLowerCase()
+        const appKitCluster = selectedNetworkId && selectedNetworkId.includes("solana:")
+          ? (() => {
+              const parts = selectedNetworkId.split(":")
+              // e.g., "solana:devnet:<address>" or "solana:mainnet:<address>"
+              if (parts.length >= 2) {
+                const chainPart = parts[1]
+                if (chainPart.startsWith("mainnet")) return "mainnet-beta"
+                if (chainPart.startsWith("devnet")) return "devnet"
+                if (chainPart.startsWith("testnet")) return "testnet"
+              }
+              return undefined
+            })()
+          : undefined
+        const effectiveCluster = (appKitCluster || overrideCluster || envCluster)
+        const normalizedCluster = effectiveCluster.startsWith("mainnet")
+          ? "mainnet-beta"
+          : effectiveCluster === "testnet"
+            ? "testnet"
+            : "devnet"
+        const endpoint = clusterApiUrl(normalizedCluster)
+        console.log("Solana connection endpoint:", endpoint, "cluster:", normalizedCluster)
         const conn = new Connection(endpoint, "confirmed")
         setProvider(conn)
         setChainId(null)
@@ -103,18 +130,19 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
         const pubKey = new PublicKey(address)
         setPublicKey(pubKey)
 
-        // Create Anchor provider if wallet provider is available
-        if (provider && typeof provider === 'object' && 'signTransaction' in provider) {
+        // Create Anchor provider only if wallet provider supports signing
+        if (provider && typeof (provider as WalletProviderWithSigning).signTransaction === 'function') {
           try {
             const anchorWallet = {
               publicKey: pubKey,
-              signTransaction: provider.signTransaction?.bind(provider),
-              signAllTransactions: provider.signAllTransactions?.bind(provider) ||
+              signTransaction: (provider as WalletProviderWithSigning).signTransaction!.bind(provider),
+              signAllTransactions: (provider as WalletProviderWithSigning).signAllTransactions?.bind(provider) ||
                 (async (txs: (Transaction | VersionedTransaction)[]) => {
                   const signed = []
                   for (const tx of txs) {
-                    if (provider.signTransaction) {
-                      signed.push(await provider.signTransaction(tx))
+                    const wp = provider as WalletProviderWithSigning
+                    if (typeof wp.signTransaction === 'function') {
+                      signed.push(await wp.signTransaction(tx))
                     }
                   }
                   return signed

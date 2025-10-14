@@ -47,7 +47,7 @@ export default function CoreUITest() {
     }
   }, [anchorProvider, provider, publicKey]);
 
-  const { config, vault, userDeposit, license } = derivePdas(publicKey);
+  const { config, vault, userDeposit, userHistory, license } = derivePdas(publicKey);
   const pa = program ? accountNs(program) : undefined;
 
   // Auto-read config on load when program becomes available
@@ -111,17 +111,45 @@ export default function CoreUITest() {
 
   const deposit = async () => {
     try {
-      if (!program || !pa || !publicKey) throw new Error("Connect wallet");
+      // Connection guard: only gate on missing publicKey
+      if (!publicKey) throw new Error("Connect wallet");
+      if (!program || !pa) throw new Error("Program not available. Please refresh the page.");
+      // Require a signing-capable provider to avoid wallet action errors
+      if (!anchorProvider) {
+        throw new Error("Wallet connected but not ready for signing. Please reconnect with a signing-capable Solana wallet (e.g., Phantom or Solflare). ");
+      }
+      const hasSigner = typeof (anchorProvider.wallet as unknown as { signTransaction?: unknown }).signTransaction === 'function';
+      if (!hasSigner) {
+        throw new Error("Wallet connected but cannot sign transactions. Please switch to a signing-capable Solana wallet.");
+      }
+
+      // Debug: Check if config exists
+      console.log("Checking config at:", config.toBase58());
       const cfg = await safeFetchAccount<ConfigAccount>(program, pa.config, config);
+      console.log("Config loaded:", cfg);
+      
       const mint: PublicKey = (cfg as ConfigAccount).usdtMint;
+      console.log("Using mint:", mint.toBase58());
+      
       const userAta = getAssociatedTokenAddressSync(mint, publicKey);
       const vaultAta = getAssociatedTokenAddressSync(mint, vault, true);
+      
+      console.log("User ATA:", userAta.toBase58());
+      console.log("Vault ATA:", vaultAta.toBase58());
+      console.log("UserDeposit PDA:", userDeposit?.toBase58());
+      console.log("UserHistory PDA:", userHistory?.toBase58());
+      
       const amountBN = new anchor.BN(amount.trim());
-      const sig = await depositIx(program, publicKey, { config, vault, userDeposit: userDeposit! }, { mint, userAta, vaultAta }, amountBN);
+      console.log("Amount:", amountBN.toString());
+      
+      const sig = await depositIx(program, publicKey, { config, vault, userDeposit: userDeposit!, userHistory: userHistory! }, { mint, userAta, vaultAta }, amountBN);
       toast.success("Deposit sent");
       addDepositEntry(amount.trim(), sig);
       await refreshDeposit();
-    } catch (err) { toast.error(getErrorMessage(err)); }
+    } catch (err) { 
+      console.error("Deposit error:", err);
+      toast.error(getErrorMessage(err)); 
+    }
   };
 
   const activateLicense = async () => {
