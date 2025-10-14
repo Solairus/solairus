@@ -24,12 +24,28 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
 
+  // Ignore unsupported schemes (e.g., chrome-extension://, devtools://) and non-HTTP(S)
+  const url = new URL(request.url);
+  const isHttp = url.protocol === 'http:' || url.protocol === 'https:';
+  if (!isHttp) return;
+
+  // Avoid caching Vite HMR/WebSocket or other dynamic endpoints
+  const isHmr = url.pathname.startsWith('/@vite') || url.pathname.startsWith('/__vite') || url.pathname.includes('hmr');
+  if (isHmr) {
+    event.respondWith(fetch(request));
+    return;
+  }
+
   event.respondWith(
     caches.match(request).then((cached) => {
       const fetchPromise = fetch(request)
         .then((networkResponse) => {
-          const clone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+          // Only cache successful same-origin responses
+          const sameOrigin = url.origin === self.location.origin;
+          if (networkResponse && networkResponse.ok && sameOrigin) {
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone)).catch(() => {});
+          }
           return networkResponse;
         })
         .catch(() => cached);

@@ -11,7 +11,7 @@ const Index = () => {
   // Show countdown unless VITE_SHOW_COMING_SOON is explicitly "false"
   const showComingSoon = import.meta.env.VITE_SHOW_COMING_SOON !== "false";
   // Countdown target
-  const countdownTarget = "2025-10-13T00:00:00+08:00";
+  const countdownTarget = "2025-10-13T23:00:00+08:00";
   return <div className="min-h-screen">
       <Header />
       <main>

@@ -1,15 +1,41 @@
-import { useEffect, type ReactNode, type ReactElement } from "react"
+import { useEffect, useState } from "react"
+import type { ReactNode } from "react"
 import { WalletManager } from "@/services/wallet/wallet-manager"
 
 export function AppKitProvider({ children }: { children: ReactNode }) {
+  const [isInitialized, setIsInitialized] = useState(false)
+
   useEffect(() => {
-    try {
-      const walletManager = WalletManager.getInstance()
-      walletManager.getAppKit()
-    } catch (error) {
-      console.error("AppKitProvider: Failed to initialize AppKit:", error)
+    const initializeAppKit = async () => {
+      try {
+        // Add a small delay to ensure React is fully initialized
+        await new Promise(resolve => setTimeout(resolve, 100))
+        
+        const walletManager = WalletManager.getInstance()
+        // Clear rotation cache per user request
+        WalletManager.clearRotationCache()
+        
+        // Initialize AppKit without preflight gating
+        if (walletManager.hasProjectId()) {
+          await walletManager.getAppKit()
+          setIsInitialized(true)
+        } else {
+          console.warn("AppKitProvider: VITE_WALLETCONNECT_PROJECT_ID not set; skipping AppKit init")
+          setIsInitialized(true)
+        }
+      } catch (error) {
+        console.error("AppKitProvider: Failed to initialize AppKit:", error)
+        setIsInitialized(true) // Still render children even if AppKit fails
+      }
     }
+
+    initializeAppKit()
   }, [])
 
-  return children as ReactElement
+  // Only render children after AppKit is initialized to prevent hook conflicts
+  if (!isInitialized) {
+    return <div>Initializing wallet...</div>
+  }
+
+  return <>{children}</>
 }

@@ -1,0 +1,177 @@
+{
+  "version": "0.1.0",
+  "name": "license_activation",
+  "metadata": {
+    "address": "EVtKMmqAjnPJ25uPfsJycFWLABjrJRNUKJB8pJYGmUvt"
+  },
+  "instructions": [
+    {
+      "name": "initializeConfig",
+      "accounts": [
+        { "name": "dev", "isMut": true, "isSigner": true },
+        { "name": "config", "isMut": true, "isSigner": false },
+        { "name": "vault", "isMut": true, "isSigner": false },
+        { "name": "systemProgram", "isMut": false, "isSigner": false }
+      ],
+      "args": [
+        { "name": "admin", "type": "publicKey" },
+        { "name": "marketer1", "type": "publicKey" },
+        { "name": "marketer2", "type": "publicKey" },
+        { "name": "usdtPriceCents", "type": "u64" },
+        { "name": "durationDays", "type": "u16" },
+        { "name": "usdtMint", "type": "publicKey" }
+      ]
+    },
+    {
+      "name": "updateLicenseConfig",
+      "accounts": [
+        { "name": "authority", "isMut": false, "isSigner": true },
+        { "name": "config", "isMut": true, "isSigner": false }
+      ],
+      "args": [
+        { "name": "usdtPriceCents", "type": { "option": "u64" } },
+        { "name": "durationDays", "type": { "option": "u16" } },
+        { "name": "usdtMint", "type": { "option": "publicKey" } }
+      ]
+    },
+    {
+      "name": "updateWallets",
+      "accounts": [
+        { "name": "authority", "isMut": false, "isSigner": true },
+        { "name": "config", "isMut": true, "isSigner": false }
+      ],
+      "args": [
+        { "name": "admin", "type": "publicKey" },
+        { "name": "marketer1", "type": "publicKey" },
+        { "name": "marketer2", "type": "publicKey" }
+      ]
+    },
+    {
+      "name": "manualActivate",
+      "accounts": [
+        { "name": "authority", "isMut": true, "isSigner": true },
+        { "name": "config", "isMut": false, "isSigner": false },
+        { "name": "user", "isMut": false, "isSigner": false },
+        { "name": "license", "isMut": true, "isSigner": false },
+        { "name": "systemProgram", "isMut": false, "isSigner": false }
+      ],
+      "args": [
+        { "name": "extendDays", "type": "u16" }
+      ]
+    },
+    {
+      "name": "activateLicense",
+      "accounts": [
+        { "name": "user", "isMut": true, "isSigner": true },
+        { "name": "config", "isMut": true, "isSigner": false },
+        { "name": "vault", "isMut": true, "isSigner": false },
+        { "name": "mint", "isMut": false, "isSigner": false },
+        { "name": "userAta", "isMut": true, "isSigner": false },
+        { "name": "vaultAta", "isMut": true, "isSigner": false },
+        { "name": "license", "isMut": true, "isSigner": false },
+        { "name": "systemProgram", "isMut": false, "isSigner": false },
+        { "name": "tokenProgram", "isMut": false, "isSigner": false },
+        { "name": "associatedTokenProgram", "isMut": false, "isSigner": false }
+      ],
+      "args": [
+        { "name": "l1", "type": { "option": "publicKey" } },
+        { "name": "l2", "type": { "option": "publicKey" } },
+        { "name": "l3", "type": { "option": "publicKey" } }
+      ]
+    },
+    {
+      "name": "withdrawEarnings",
+      "accounts": [
+        { "name": "authority", "isMut": true, "isSigner": true },
+        { "name": "config", "isMut": true, "isSigner": false },
+        { "name": "vault", "isMut": true, "isSigner": false },
+        { "name": "mint", "isMut": false, "isSigner": false },
+        { "name": "authorityAta", "isMut": true, "isSigner": false },
+        { "name": "vaultAta", "isMut": true, "isSigner": false },
+        { "name": "systemProgram", "isMut": false, "isSigner": false },
+        { "name": "tokenProgram", "isMut": false, "isSigner": false },
+        { "name": "associatedTokenProgram", "isMut": false, "isSigner": false }
+      ],
+      "args": [
+        { "name": "role", "type": { "defined": "Role" } },
+        { "name": "amountOpt", "type": { "option": "u64" } }
+      ]
+    },
+    {
+      "name": "viewLicense",
+      "accounts": [
+        { "name": "user", "isMut": false, "isSigner": false },
+        { "name": "license", "isMut": false, "isSigner": false }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "config",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "dev", "type": "publicKey" },
+          { "name": "admin", "type": "publicKey" },
+          { "name": "marketer1", "type": "publicKey" },
+          { "name": "marketer2", "type": "publicKey" },
+          { "name": "usdtPriceCents", "type": "u64" },
+          { "name": "durationDays", "type": "u16" },
+          { "name": "usdtMint", "type": "publicKey" },
+          { "name": "balances", "type": { "defined": "Balances" } },
+          { "name": "bumpConfig", "type": "u8" },
+          { "name": "bumpVault", "type": "u8" }
+        ]
+      }
+    },
+    {
+      "name": "vault",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "bump", "type": "u8" }
+        ]
+      }
+    },
+    {
+      "name": "userLicense",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "user", "type": "publicKey" },
+          { "name": "expirationTs", "type": "i64" },
+          { "name": "bump", "type": "u8" }
+        ]
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Balances",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "admin", "type": "u64" },
+          { "name": "dev", "type": "u64" },
+          { "name": "marketer1", "type": "u64" },
+          { "name": "marketer2", "type": "u64" },
+          { "name": "reserve", "type": "u64" }
+        ]
+      }
+    },
+    {
+      "name": "Role",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          { "name": "Admin" },
+          { "name": "Dev" },
+          { "name": "Marketer1" },
+          { "name": "Marketer2" },
+          { "name": "Reserve" }
+        ]
+      }
+    }
+  ]
+}

@@ -11,10 +11,12 @@ import DappHistory from "./pages/Dapp/History";
 import DappHelp from "./pages/Dapp/Help";
 import DappHire from "./pages/Dapp/Hire";
 import DappReferral from "./pages/Dapp/Referral";
+import CoreUITest from "./pages/uitests/core";
 import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
 import InstallPrompt from "@/components/InstallPrompt";
 import WalletGate from "@/components/WalletGate";
+import LicenseActivationUITest from "./pages/uitests/license_activation";
 
 const queryClient = new QueryClient();
 
@@ -24,7 +26,12 @@ const App = () => (
       <Toaster />
       <Sonner />
       <InstallPrompt />
-      <BrowserRouter>
+      <BrowserRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/dapp/ref/:code" element={<DappReferral />} />
@@ -43,6 +50,22 @@ const App = () => (
             <Route path="hire" element={<DappHire />} />
           </Route>
           <Route path="/privacy" element={<Privacy />} />
+          <Route
+            path="/uitests/license_activation"
+            element={
+              <WalletGate>
+                <LicenseActivationUITest />
+              </WalletGate>
+            }
+          />
+          <Route
+            path="/uitests/core"
+            element={
+              <WalletGate>
+                <CoreUITest />
+              </WalletGate>
+            }
+          />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
