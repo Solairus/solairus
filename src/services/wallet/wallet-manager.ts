@@ -213,6 +213,34 @@ export class WalletManager {
       appKit.disconnect()
     }
   }
+
+  public getConnectionState(): { isConnected: boolean; address?: string } {
+    try {
+      const appKit = this.getAppKit()
+      if (!appKit) {
+        return { isConnected: false }
+      }
+
+      const state = appKit.getState()
+      const selectedNetworkId = (state as { selectedNetworkId?: string })?.selectedNetworkId
+      
+      if (selectedNetworkId && selectedNetworkId.includes('solana:')) {
+        const parts = selectedNetworkId.split(':')
+        if (parts.length === 3) {
+          const walletAddress = parts[2]
+          return { 
+            isConnected: !!walletAddress, 
+            address: walletAddress 
+          }
+        }
+      }
+      
+      return { isConnected: false }
+    } catch (error) {
+      console.debug("Failed to get connection state:", error)
+      return { isConnected: false }
+    }
+  }
 }
 
 // Use library function types to stay aligned with expected shapes

@@ -17,6 +17,7 @@ import Privacy from "./pages/Privacy";
 import InstallPrompt from "@/components/InstallPrompt";
 import WalletGate from "@/components/WalletGate";
 import LicenseActivationUITest from "./pages/uitests/license_activation";
+// Removed RpcDebug and env-debug to prevent unnecessary RPC calls
 
 const queryClient = new QueryClient();
 

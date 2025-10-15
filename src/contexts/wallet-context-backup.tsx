@@ -103,16 +103,16 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
         const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? "devnet").toLowerCase()
         const appKitCluster = selectedNetworkId && selectedNetworkId.includes("solana:")
           ? (() => {
-              const parts = selectedNetworkId.split(":")
-              // e.g., "solana:devnet:<address>" or "solana:mainnet:<address>"
-              if (parts.length >= 2) {
-                const chainPart = parts[1]
-                if (chainPart.startsWith("mainnet")) return "mainnet-beta"
-                if (chainPart.startsWith("devnet")) return "devnet"
-                if (chainPart.startsWith("testnet")) return "testnet"
-              }
-              return undefined
-            })()
+            const parts = selectedNetworkId.split(":")
+            // e.g., "solana:devnet:<address>" or "solana:mainnet:<address>"
+            if (parts.length >= 2) {
+              const chainPart = parts[1]
+              if (chainPart.startsWith("mainnet")) return "mainnet-beta"
+              if (chainPart.startsWith("devnet")) return "devnet"
+              if (chainPart.startsWith("testnet")) return "testnet"
+            }
+            return undefined
+          })()
           : undefined
         const effectiveCluster = (appKitCluster || overrideCluster || envCluster)
         const normalizedCluster = effectiveCluster.startsWith("mainnet")
@@ -194,11 +194,11 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
 
     const handleConnect = (event: AppKitStateEvent) => {
       console.log("AppKit connected:", event)
-      
+
       // Only handle connections that are user-initiated, not automatic
       // Check if this is a manual connection by looking for user interaction
       const isUserInitiated = event?.data?.wallet?.name || event?.data?.wallet?.id
-      
+
       if (isUserInitiated) {
         // Check the current state after connection
         const state = appKit.getState()

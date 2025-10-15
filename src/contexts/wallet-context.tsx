@@ -8,6 +8,7 @@ import {
 } from "react"
 import { Connection, PublicKey, clusterApiUrl, Transaction, VersionedTransaction } from "@solana/web3.js"
 import { WalletManager } from "@/services/wallet/wallet-manager"
+import { getHealthyRpcConnection, handleRpcError, onNetworkChange } from "@/utils/rpc-switcher"
 import * as anchor from "@coral-xyz/anchor"
 
 // Interface for wallet provider with signing capabilities
@@ -25,6 +26,13 @@ interface AppKitAccountEvent {
 interface AppKitStateEvent {
   selectedNetworkId?: string
   address?: string
+  data?: {
+    wallet?: {
+      name?: string
+      id?: string
+      type?: string
+    }
+  }
 }
 
 type WalletContextType = {
@@ -48,6 +56,8 @@ type WalletContextType = {
   publicKey: PublicKey | null
   signTransaction: ((transaction: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>) | null
   signAllTransactions: ((transactions: (Transaction | VersionedTransaction)[]) => Promise<(Transaction | VersionedTransaction)[]>) | null
+  // Manual balance refresh
+  refreshBalance: () => Promise<void>
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined)
@@ -64,21 +74,89 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
   const [anchorProvider, setAnchorProvider] = useState<anchor.AnchorProvider | null>(null)
   const [publicKey, setPublicKey] = useState<PublicKey | null>(null)
   const [walletProvider, setWalletProvider] = useState<WalletProviderWithSigning | null>(null)
+  const [lastBalanceUpdate, setLastBalanceUpdate] = useState<number>(0)
+  const [balanceUpdateInProgress, setBalanceUpdateInProgress] = useState(false)
 
   const walletManager = WalletManager.getInstance()
 
-  const updateBalance = async (
+  // Balance update throttling - only update every 30 seconds
+  const BALANCE_UPDATE_INTERVAL = 30000 // 30 seconds
+
+  const updateBalance = useCallback(async (
     solanaConn: Connection,
-    address: string
+    address: string,
+    forceUpdate: boolean = false
   ) => {
+    // Throttle balance updates to prevent excessive RPC calls
+    const now = Date.now()
+    if (!forceUpdate && balanceUpdateInProgress) {
+      console.log("⏳ Balance update already in progress, skipping")
+      return
+    }
+    
+    if (!forceUpdate && (now - lastBalanceUpdate) < BALANCE_UPDATE_INTERVAL) {
+      console.log("⏱️ Balance update throttled, last update was", Math.round((now - lastBalanceUpdate) / 1000), "seconds ago")
+      return
+    }
+
+    setBalanceUpdateInProgress(true)
+    
     try {
       const pubkey = new PublicKey(address)
+      console.log("💰 Fetching balance for", address.slice(0, 8) + "...")
       const lamports = await solanaConn.getBalance(pubkey)
       setBalance((lamports / 1_000_000_000).toString())
+      setLastBalanceUpdate(now)
+      console.log("✅ Balance updated:", (lamports / 1_000_000_000).toFixed(4), "SOL")
     } catch (error) {
-      console.error("Failed to get balance:", error)
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      
+      // Handle specific RPC errors
+      if (errorMessage.includes("429") || errorMessage.includes("Too Many Requests")) {
+        console.warn("🔄 RPC rate limit hit - switching to next endpoint")
+        try {
+          // Determine current cluster
+          const overrideCluster = (() => {
+            try { return (localStorage.getItem("solana_cluster_override") ?? "").toLowerCase() } catch { return "" }
+          })()
+          const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? "devnet").toLowerCase()
+          const effectiveCluster = (overrideCluster || envCluster)
+          const normalizedCluster = effectiveCluster.startsWith("mainnet")
+            ? "mainnet-beta"
+            : effectiveCluster === "testnet"
+              ? "testnet"
+              : "devnet"
+          
+          // Switch to next RPC and update provider
+          const newConnection = await handleRpcError(error, normalizedCluster as 'mainnet-beta' | 'devnet' | 'testnet')
+          setProvider(newConnection)
+          
+          // Retry balance fetch with new connection
+          const pubkey = new PublicKey(address)
+          const newLamports = await newConnection.getBalance(pubkey)
+          setBalance((newLamports / 1_000_000_000).toString())
+          setLastBalanceUpdate(now)
+          console.log("✅ Balance updated after RPC switch:", (newLamports / 1_000_000_000).toFixed(4), "SOL")
+          return
+        } catch (switchError) {
+          console.error("Failed to switch RPC and retry balance:", switchError)
+          setBalance("Rate limited")
+          setLastError(new Error("All RPC endpoints are rate limited. Please wait a moment and try again."))
+          return
+        }
+      } else if (errorMessage.includes("403") || errorMessage.includes("Access forbidden")) {
+        console.warn("RPC access forbidden - balance unavailable")
+        setBalance("Access denied")
+        setLastError(new Error("RPC access denied. Consider using a custom RPC endpoint for mainnet."))
+      } else {
+        console.error("Failed to get balance:", error)
+        setBalance("Error")
+        setLastError(error as Error)
+      }
+    } finally {
+      setBalanceUpdateInProgress(false)
     }
-  }
+  }, [lastBalanceUpdate, balanceUpdateInProgress, BALANCE_UPDATE_INTERVAL])
 
   const handleWalletConnection = useCallback(
     async (address: string, provider: WalletProviderWithSigning) => {
@@ -87,42 +165,33 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
         setIsConnected(true)
         setWalletProvider(provider)
 
-        // Determine effective cluster: prefer AppKit selected network, then localStorage override, then env
-        const appKit = walletManager.getAppKit()
-        const selectedNetworkId = (() => {
-          try {
-            const state = appKit?.getState?.()
-            return (state as { selectedNetworkId?: string })?.selectedNetworkId
-          } catch {
-            return undefined
-          }
-        })()
+        // Determine effective cluster: prioritize localStorage override (UI network switcher), then env
         const overrideCluster = (() => {
           try { return (localStorage.getItem("solana_cluster_override") ?? "").toLowerCase() } catch { return "" }
         })()
         const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? "devnet").toLowerCase()
-        const appKitCluster = selectedNetworkId && selectedNetworkId.includes("solana:")
-          ? (() => {
-              const parts = selectedNetworkId.split(":")
-              // e.g., "solana:devnet:<address>" or "solana:mainnet:<address>"
-              if (parts.length >= 2) {
-                const chainPart = parts[1]
-                if (chainPart.startsWith("mainnet")) return "mainnet-beta"
-                if (chainPart.startsWith("devnet")) return "devnet"
-                if (chainPart.startsWith("testnet")) return "testnet"
-              }
-              return undefined
-            })()
-          : undefined
-        const effectiveCluster = (appKitCluster || overrideCluster || envCluster)
+        const effectiveCluster = overrideCluster || envCluster
         const normalizedCluster = effectiveCluster.startsWith("mainnet")
           ? "mainnet-beta"
           : effectiveCluster === "testnet"
             ? "testnet"
             : "devnet"
-        const endpoint = clusterApiUrl(normalizedCluster)
-        console.log("Solana connection endpoint:", endpoint, "cluster:", normalizedCluster)
-        const conn = new Connection(endpoint, "confirmed")
+        // Use smart RPC switcher for better reliability
+        console.log(`🌐 Getting RPC connection for: ${normalizedCluster} (override: ${overrideCluster || 'none'}, env: ${envCluster})`)
+        let conn: Connection
+        try {
+          conn = await getHealthyRpcConnection(normalizedCluster as 'mainnet-beta' | 'devnet' | 'testnet')
+          console.log("✅ Connected to healthy RPC:", conn.rpcEndpoint)
+        } catch (error) {
+          console.warn("⚠️ Smart RPC failed, falling back to legacy method:", error)
+          // Fallback to legacy RPC selection
+          const { getCustomRpcUrl, getRpcEndpoint } = await import('@/utils/rpc-endpoints')
+          const customRpcUrl = getCustomRpcUrl(normalizedCluster)
+          const endpoint = customRpcUrl || getRpcEndpoint(normalizedCluster)
+          
+          console.log("Using fallback endpoint:", endpoint, "cluster:", normalizedCluster)
+          conn = new Connection(endpoint, "confirmed")
+        }
         setProvider(conn)
         setChainId(null)
 
@@ -160,58 +229,120 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        await updateBalance(conn, address)
+        // Skip initial balance fetch to avoid unnecessary RPC calls
+        // Balance will be fetched only when user explicitly requests it
+        console.log("✅ Wallet connected - skipping automatic balance fetch to preserve RPC limits")
       } catch (error) {
         console.error("Wallet connection failed:", error)
         setLastError(error as Error)
       }
     },
-    []
+    [] // Remove walletManager dependency to prevent recreation
   )
 
   // WalletConnect/Reown integration - listen to AppKit events
   useEffect(() => {
-    const appKit = walletManager.getAppKit()
-    if (!appKit) return
+    const initializeWalletContext = async () => {
+      try {
+        console.log("WalletContextProvider: Starting initialization...")
+        // Add a small delay to ensure AppKitProvider has finished initialization
+        await new Promise(resolve => setTimeout(resolve, 200))
 
-    const handleAccountChange = (event: AppKitAccountEvent) => {
-      console.log("AppKit account changed:", event)
-      const address = event?.address
-      if (address && address !== account) {
-        const provider = appKit.getWalletProvider()
-        handleWalletConnection(address, provider)
-      } else if (!address && isConnected) {
-        // Wallet disconnected
-        setAccount(null)
-        setIsConnected(false)
-        setWalletProvider(null)
-        setProvider(null)
-        setAnchorProvider(null)
-        setPublicKey(null)
-        setBalance(null)
-      }
-    }
+        console.log("WalletContextProvider: Getting AppKit instance...")
+        const appKit = walletManager.getAppKit()
+        if (!appKit) {
+          console.log("WalletContextProvider: No AppKit instance available")
+          return
+        }
+        console.log("WalletContextProvider: AppKit instance obtained, subscribing to events...")
 
-    const handleConnect = (event: AppKitStateEvent) => {
-      console.log("AppKit connected:", event)
-      // Check the current state after connection
-      const state = appKit.getState()
-      const selectedNetworkId = (state as { selectedNetworkId?: string })?.selectedNetworkId
+        const handleAccountChange = (event: AppKitAccountEvent) => {
+          console.log("AppKit account changed:", event)
+          const address = event?.address
+          const isConnectedState = event?.isConnected
 
-      if (selectedNetworkId && selectedNetworkId.includes('solana:')) {
-        const parts = selectedNetworkId.split(':')
-        if (parts.length === 3) {
-          const walletAddress = parts[2]
-          if (walletAddress && walletAddress !== account) {
+          if (address && isConnectedState && address !== account) {
+            console.log("User connected wallet:", address)
             const provider = appKit.getWalletProvider()
-            handleWalletConnection(walletAddress, provider)
+            handleWalletConnection(address, provider)
+          } else if (!address || !isConnectedState) {
+            console.log("User disconnected wallet")
+            // Wallet disconnected
+            setAccount(null)
+            setIsConnected(false)
+            setWalletProvider(null)
+            setProvider(null)
+            setAnchorProvider(null)
+            setPublicKey(null)
+            setBalance(null)
           }
         }
+
+        const handleStateChange = (event: AppKitStateEvent) => {
+          console.log("AppKit state changed:", event)
+
+          // Check if this is a connection event with wallet address
+          if (event?.address && event.address !== account) {
+            console.log("Connection state change detected:", event.address)
+            const provider = appKit.getWalletProvider()
+            handleWalletConnection(event.address, provider)
+          }
+        }
+
+        // Subscribe to AppKit events
+        try {
+          appKit.subscribeAccount(handleAccountChange)
+          appKit.subscribeState(handleStateChange)
+
+          console.log("WalletContextProvider: Successfully subscribed to AppKit events")
+
+          // Check for existing connection (auto-reconnect without modal)
+          // This only reconnects if the user was previously connected and hasn't explicitly disconnected
+          const connectionState = walletManager.getConnectionState()
+          if (connectionState.isConnected && connectionState.address) {
+            console.log("WalletContextProvider: Found existing connection, auto-reconnecting:", connectionState.address)
+            const provider = appKit.getWalletProvider()
+            if (provider) {
+              handleWalletConnection(connectionState.address, provider)
+            }
+          } else {
+            console.log("WalletContextProvider: No existing connection found")
+          }
+        } catch (error) {
+          console.error("Failed to subscribe to AppKit events:", error)
+        }
+
+        // Cleanup function
+        return () => {
+          try {
+            // AppKit might not have unsubscribe methods, so we'll just ignore cleanup errors
+            console.log("WalletContextProvider: Cleaning up event subscriptions")
+          } catch (error) {
+            console.debug("AppKit cleanup error:", error)
+          }
+        }
+      } catch (error) {
+        console.error("Failed to initialize wallet context:", error)
       }
     }
 
-    const handleDisconnect = () => {
-      console.log("AppKit disconnected")
+    initializeWalletContext()
+  }, [account, handleWalletConnection, walletManager]) // Remove account and handleWalletConnection from dependencies to prevent infinite loop
+
+  // Removed automatic balance updates to prevent unnecessary RPC calls
+  // Balance will only be fetched when explicitly requested by user actions
+
+  // Removed periodic balance updates to prevent unnecessary RPC calls
+  // Balance will only update when account/provider changes or user manually refreshes
+
+  const connectWallet = async (providerType: string) => {
+    setIsConnecting(true)
+    setLastError(null)
+
+    try {
+      console.log("Connecting wallet:", providerType)
+
+      // Clear any previous connection state
       setAccount(null)
       setIsConnected(false)
       setWalletProvider(null)
@@ -219,70 +350,14 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
       setAnchorProvider(null)
       setPublicKey(null)
       setBalance(null)
-    }
 
-    // Subscribe to AppKit events
-    try {
-      appKit.subscribeAccount(handleAccountChange)
-      appKit.subscribeState(handleConnect)
-
-      // Also check initial state
-      const initialState = appKit.getState()
-      const selectedNetworkId = (initialState as { selectedNetworkId?: string })?.selectedNetworkId
-
-      if (selectedNetworkId && selectedNetworkId.includes('solana:')) {
-        const parts = selectedNetworkId.split(':')
-        if (parts.length === 3) {
-          const walletAddress = parts[2]
-          if (walletAddress && walletAddress !== account) {
-            const provider = appKit.getWalletProvider()
-            handleWalletConnection(walletAddress, provider)
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Failed to subscribe to AppKit events:", error)
-      // Fallback: check state once
-      try {
-        const state = appKit.getState()
-        const selectedNetworkId = (state as { selectedNetworkId?: string })?.selectedNetworkId
-
-        if (selectedNetworkId && selectedNetworkId.includes('solana:')) {
-          const parts = selectedNetworkId.split(':')
-          if (parts.length === 3) {
-            const walletAddress = parts[2]
-            if (walletAddress && walletAddress !== account) {
-              const provider = appKit.getWalletProvider()
-              handleWalletConnection(walletAddress, provider)
-            }
-          }
-        }
-      } catch (stateError) {
-        console.error("Failed to check initial AppKit state:", stateError)
-      }
-    }
-
-    // Cleanup function
-    return () => {
-      try {
-        // AppKit might not have unsubscribe methods, so we'll just ignore cleanup errors
-      } catch (error) {
-        console.debug("AppKit cleanup error:", error)
-      }
-    }
-  }, [account, isConnected, handleWalletConnection, walletManager])
-
-  useEffect(() => {
-    if (account && provider) {
-      updateBalance(provider, account)
-    }
-  }, [account, provider])
-
-  const connectWallet = async (providerType: string) => {
-    setIsConnecting(true)
-    try {
+      // Store the requested provider type
       localStorage.setItem("connectedWallet", providerType)
+
+      // Open the AppKit modal
       walletManager.openConnectModal()
+
+      console.log("Wallet connection modal opened")
     } catch (error) {
       console.error("Error connecting wallet:", error)
       setLastError(error as Error)
@@ -324,11 +399,34 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
       })()
       const effective = override || current
       const next = effective === "mainnet" || effective === "mainnet-beta" ? "devnet" : "mainnet-beta"
+      
+      console.log(`Switching network from ${effective} to ${next}`)
+      
+      // 1. Update localStorage
       try {
         localStorage.setItem("solana_cluster_override", next)
+        // Clear RPC cache when network changes
+        onNetworkChange()
       } catch {
         // ignore storage errors
       }
+      
+      // 2. Try to switch the wallet network via AppKit
+      try {
+        const appKit = walletManager.getAppKit()
+        if (appKit && typeof appKit.switchNetwork === 'function') {
+          // Import the network objects
+          const { solana, solanaDevnet } = await import('@reown/appkit/networks')
+          const targetNetwork = next === "mainnet-beta" ? solana : solanaDevnet
+          
+          console.log(`Switching AppKit to network: ${targetNetwork.name}`)
+          await appKit.switchNetwork(targetNetwork)
+        }
+      } catch (switchError) {
+        console.warn("AppKit network switch failed, will reload page:", switchError)
+      }
+      
+      // 3. Reload page to ensure clean state
       window.location.reload()
     } catch (error) {
       console.error("Failed to switch network:", error)
@@ -370,6 +468,15 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
   const clearError = () => {
     setLastError(null)
   }
+
+  const refreshBalance = useCallback(async () => {
+    if (!account || !provider) {
+      console.warn("Cannot refresh balance - no account or provider")
+      return
+    }
+    console.log("🔄 Manual balance refresh requested")
+    await updateBalance(provider, account, true)
+  }, [account, provider, updateBalance])
 
   // Transaction signing methods
   const signTransaction = useCallback(async (transaction: Transaction | VersionedTransaction) => {
@@ -435,6 +542,8 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
     publicKey,
     signTransaction: isConnected ? signTransaction : null,
     signAllTransactions: isConnected ? signAllTransactions : null,
+    // Manual balance refresh
+    refreshBalance,
   }
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>
