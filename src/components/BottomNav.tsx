@@ -1,5 +1,5 @@
 import React from "react";
-import { Home, BarChart3, History, HelpCircle, Bot } from "lucide-react";
+import { Home, BarChart3, DollarSign, HelpCircle, Bot } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
 /**
@@ -21,7 +21,7 @@ export default function BottomNav() {
     { key: "market", label: "Market", icon: BarChart3 },
   ];
   const rightItems = [
-    { key: "history", label: "History", icon: History },
+    { key: "affiliate", label: "Affiliate", icon: DollarSign },
     { key: "help", label: "Help", icon: HelpCircle },
   ];
 
