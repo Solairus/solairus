@@ -1,5 +1,5 @@
 {
-  "address": "CXK63PkidRsKhnYCF3kMHqEX3RGgy9JJkebN3S91VHD3",
+  "address": "HWS1jafjZrK7M2GX2jZpEoszxAnieRzefih6bNsEL8Mu",
   "metadata": {
     "name": "solairus_main",
     "version": "0.1.0",
@@ -312,87 +312,6 @@
           }
         },
         {
-          "name": "aff_l1",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  97,
-                  102,
-                  102,
-                  105,
-                  108,
-                  105,
-                  97,
-                  116,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "profile.sponsor_l1",
-                "account": "UserProfile"
-              }
-            ]
-          }
-        },
-        {
-          "name": "aff_l2",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  97,
-                  102,
-                  102,
-                  105,
-                  108,
-                  105,
-                  97,
-                  116,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "profile.sponsor_l2",
-                "account": "UserProfile"
-              }
-            ]
-          }
-        },
-        {
-          "name": "aff_l3",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  97,
-                  102,
-                  102,
-                  105,
-                  108,
-                  105,
-                  97,
-                  116,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "profile.sponsor_l3",
-                "account": "UserProfile"
-              }
-            ]
-          }
-        },
-        {
           "name": "counter",
           "writable": true,
           "pda": {
@@ -520,6 +439,7 @@
         },
         {
           "name": "profile",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -730,82 +650,26 @@
           }
         },
         {
-          "name": "aff_l1",
+          "name": "dev_profile",
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  97,
-                  102,
+                  112,
+                  114,
+                  111,
                   102,
                   105,
                   108,
-                  105,
-                  97,
-                  116,
                   101
                 ]
               },
               {
                 "kind": "account",
-                "path": "profile.sponsor_l1",
-                "account": "UserProfile"
-              }
-            ]
-          }
-        },
-        {
-          "name": "aff_l2",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  97,
-                  102,
-                  102,
-                  105,
-                  108,
-                  105,
-                  97,
-                  116,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "profile.sponsor_l2",
-                "account": "UserProfile"
-              }
-            ]
-          }
-        },
-        {
-          "name": "aff_l3",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  97,
-                  102,
-                  102,
-                  105,
-                  108,
-                  105,
-                  97,
-                  116,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "profile.sponsor_l3",
-                "account": "UserProfile"
+                "path": "config.dev",
+                "account": "Config"
               }
             ]
           }
@@ -829,6 +693,69 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "migrate_user_profile",
+      "discriminator": [
+        52,
+        43,
+        137,
+        134,
+        136,
+        226,
+        254,
+        119
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "profile.user",
+                "account": "UserProfile"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": []
     },
     {
       "name": "register_user",
@@ -897,10 +824,8 @@
       ],
       "args": [
         {
-          "name": "sponsor_l1",
-          "type": {
-            "option": "pubkey"
-          }
+          "name": "sponsor",
+          "type": "pubkey"
         }
       ]
     },
@@ -937,9 +862,30 @@
           }
         },
         {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "authority",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "usdt_mint"
         },
         {
           "name": "system_program",
@@ -958,21 +904,20 @@
       ]
     },
     {
-      "name": "withdraw_commissions",
+      "name": "withdraw_affiliate_earnings",
       "discriminator": [
-        21,
-        65,
-        53,
-        142,
-        139,
-        220,
-        155,
-        19
+        117,
+        50,
+        89,
+        157,
+        24,
+        37,
+        86,
+        130
       ],
       "accounts": [
         {
           "name": "config",
-          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -990,15 +935,245 @@
           }
         },
         {
-          "name": "affiliate",
-          "writable": true
+          "name": "vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
         },
         {
-          "name": "caller",
+          "name": "user",
+          "writable": true,
           "signer": true
+        },
+        {
+          "name": "profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdt_mint"
+        },
+        {
+          "name": "user_usdt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "usdt_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "vault_usdt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "usdt_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "withdraw_roi",
@@ -1543,19 +1718,6 @@
   ],
   "accounts": [
     {
-      "name": "AffiliateEarnings",
-      "discriminator": [
-        224,
-        54,
-        232,
-        227,
-        105,
-        22,
-        73,
-        63
-      ]
-    },
-    {
       "name": "Config",
       "discriminator": [
         155,
@@ -1646,25 +1808,24 @@
       "code": 6004,
       "name": "InvalidAmount",
       "msg": "Invalid amount"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidMint",
+      "msg": "Invalid mint"
+    },
+    {
+      "code": 6006,
+      "name": "InsufficientFunds",
+      "msg": "Insufficient affiliate earnings"
+    },
+    {
+      "code": 6007,
+      "name": "SponsorNotRegistered",
+      "msg": "Sponsor not registered"
     }
   ],
   "types": [
-    {
-      "name": "AffiliateEarnings",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "accrued_usdt",
-            "type": "u64"
-          }
-        ]
-      }
-    },
     {
       "name": "Bucket",
       "type": {
@@ -1731,6 +1892,10 @@
           {
             "name": "activation_fee_usdt",
             "type": "u64"
+          },
+          {
+            "name": "license_duration_days",
+            "type": "u16"
           },
           {
             "name": "roi_daily_bps",
@@ -1838,6 +2003,10 @@
           },
           {
             "name": "roi_daily_bps",
+            "type": "u16"
+          },
+          {
+            "name": "license_duration_days",
             "type": "u16"
           },
           {
@@ -1965,15 +2134,7 @@
             "type": "pubkey"
           },
           {
-            "name": "sponsor_l1",
-            "type": "pubkey"
-          },
-          {
-            "name": "sponsor_l2",
-            "type": "pubkey"
-          },
-          {
-            "name": "sponsor_l3",
+            "name": "sponsor",
             "type": "pubkey"
           },
           {
@@ -1987,6 +2148,30 @@
           {
             "name": "last_roi_withdraw_at",
             "type": "i64"
+          },
+          {
+            "name": "license_expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "total_affiliate_earnings",
+            "type": "u64"
+          },
+          {
+            "name": "total_affiliate_withdrawn",
+            "type": "u64"
+          },
+          {
+            "name": "level1_earnings",
+            "type": "u64"
+          },
+          {
+            "name": "level2_earnings",
+            "type": "u64"
+          },
+          {
+            "name": "level3_earnings",
+            "type": "u64"
           }
         ]
       }

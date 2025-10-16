@@ -1,5 +1,6 @@
 import React from "react";
 import { Settings } from "lucide-react";
+import LicenseStatusWidget from "@/components/license/LicenseStatusWidget";
 
 /**
  * TopBar
@@ -21,6 +22,12 @@ export default function TopBar({
           <img src="/logo.png" alt="SOLAIRUS logo" className="h-[60px] w-auto object-contain" />
         </div>
         <div className="flex items-center gap-2">
+          {/* License Status Indicator */}
+          <LicenseStatusWidget 
+            variant="compact"
+            className="px-2 py-1 rounded-md bg-background/50 border border-border/50"
+          />
+          
           <button
             aria-label="Settings"
             className="p-2 rounded-lg hover:bg-foreground/10 border border-border/50"

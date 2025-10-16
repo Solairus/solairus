@@ -1,7 +1,8 @@
 import React, { useMemo } from "react";
 import cardBg from "@/assets/card-bg.jpg";
-import { Info, Copy, RefreshCcw, Repeat, LogOut } from "lucide-react";
+import { Info, Copy, RefreshCcw, Repeat, LogOut, Shield, AlertTriangle } from "lucide-react";
 import { useWallet } from "@/contexts/wallet-context";
+import { useLicense } from "@/contexts/license-context";
 import Swal from "sweetalert2";
 
 type VaultBalanceCardProps = {
@@ -18,6 +19,7 @@ export default function VaultBalanceCard({
   delta = "+$0.00 · +0.00%",
 }: VaultBalanceCardProps) {
   const { account, formatAddress, getChainInfo, switchNetwork, openConnectModal, disconnectWallet } = useWallet();
+  const { hasValidLicense, isNearExpiry, daysRemaining, licenseInfo } = useLicense();
   const guardEnabled = useMemo(() => {
     return (
       (import.meta.env.VITE_ENABLE_WALLET_GUARD ?? "true")
@@ -109,6 +111,25 @@ export default function VaultBalanceCard({
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {/* License Status Indicator */}
+              {account && (
+                <div className="flex items-center gap-1">
+                  {hasValidLicense ? (
+                    <>
+                      <Shield className={`w-3 h-3 ${isNearExpiry ? 'text-yellow-400' : 'text-green-400'}`} />
+                      <span className={`text-xs ${isNearExpiry ? 'text-yellow-400' : 'text-green-400'}`}>
+                        {isNearExpiry ? `${daysRemaining}d` : 'Licensed'}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <AlertTriangle className="w-3 h-3 text-red-400" />
+                      <span className="text-xs text-red-400">No License</span>
+                    </>
+                  )}
+                </div>
+              )}
+              
               <span className={`text-xs font-medium ${networkColorClass}`}>{networkLabel}</span>
               <button
                 aria-label="Switch network"

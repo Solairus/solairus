@@ -32,3 +32,6 @@ solairus-contract/
 
 # ignore kriptiz
 kriptiz/
+
+# Debug and temporary files
+.debugs/

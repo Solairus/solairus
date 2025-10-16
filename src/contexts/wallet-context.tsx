@@ -327,7 +327,7 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
     }
 
     initializeWalletContext()
-  }, [account, handleWalletConnection, walletManager]) // Remove account and handleWalletConnection from dependencies to prevent infinite loop
+  }, [account, handleWalletConnection, walletManager]) // Empty dependency array - only initialize once on mount
 
   // Removed automatic balance updates to prevent unnecessary RPC calls
   // Balance will only be fetched when explicitly requested by user actions
