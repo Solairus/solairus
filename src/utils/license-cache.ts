@@ -1,13 +1,14 @@
-import { LicenseInfo } from "@/lib/solairus-main";
+import { LicenseInfo, PROGRAM_ID } from "@/lib/solairus-main";
 import { PublicKey } from "@solana/web3.js";
 
 /**
- * License Cache Utility
- * Purpose: Efficient caching and background refresh for license data
+ * Smart License Cache Utility
+ * Purpose: Intelligent caching for license data with contract change detection
  * Features:
- * - localStorage persistence
- * - TTL-based expiration
- * - Background refresh
+ * - localStorage persistence with contract versioning
+ * - Long TTL for stable license data (24 hours)
+ * - Contract change detection and cache invalidation
+ * - Page load validation
  * - Request deduplication
  */
 
@@ -15,6 +16,8 @@ interface CachedLicenseData {
   licenseInfo: LicenseInfo;
   timestamp: number;
   expiresAt: number;
+  programId: string; // Track which contract version this cache is for
+  pageLoadValidated: boolean; // Track if validated on current page load
 }
 
 interface PendingRequest {
@@ -24,9 +27,10 @@ interface PendingRequest {
 
 export class LicenseCache {
   private static readonly CACHE_PREFIX = 'solairus_license_';
-  private static readonly DEFAULT_TTL = 30 * 60 * 1000; // 30 minutes (longer cache)
-  private static readonly BACKGROUND_REFRESH_THRESHOLD = 25 * 60 * 1000; // 25 minutes (less frequent refresh)
+  private static readonly DEFAULT_TTL = 24 * 60 * 60 * 1000; // 24 hours (long cache for stable license data)
+  private static readonly PAGE_LOAD_KEY = 'solairus_page_load_validation';
   private static pendingRequests = new Map<string, PendingRequest>();
+  private static pageLoadValidated = false;
 
   /**
    * Get cache key for a user
@@ -36,7 +40,7 @@ export class LicenseCache {
   }
 
   /**
-   * Get cached license data
+   * Get cached license data with smart validation
    */
   static getCached(userPubkey: PublicKey): LicenseInfo | null {
     try {
@@ -50,8 +54,26 @@ export class LicenseCache {
 
       // Check if expired
       if (now > data.expiresAt) {
+        console.log('🗑️ License cache expired, removing');
         this.removeCached(userPubkey);
         return null;
+      }
+
+      // Check if contract has changed (invalidate cache)
+      const currentProgramId = PROGRAM_ID.toString();
+      if (data.programId !== currentProgramId) {
+        console.log('🔄 Contract changed, invalidating cache:', {
+          cached: data.programId,
+          current: currentProgramId
+        });
+        this.removeCached(userPubkey);
+        return null;
+      }
+
+      // Check if page load validation is needed
+      if (!this.pageLoadValidated && !data.pageLoadValidated) {
+        console.log('📄 Page load validation needed, cache not validated yet');
+        return null; // Force fresh validation on page load
       }
 
       // Restore Date objects
@@ -59,6 +81,7 @@ export class LicenseCache {
         data.licenseInfo.expirationDate = new Date(data.licenseInfo.expirationDate);
       }
 
+      console.log('✅ Using valid cached license data');
       return data.licenseInfo;
     } catch (error) {
       console.debug('Failed to get cached license data:', error);
@@ -67,7 +90,7 @@ export class LicenseCache {
   }
 
   /**
-   * Cache license data
+   * Cache license data with contract version tracking
    */
   static setCached(userPubkey: PublicKey, licenseInfo: LicenseInfo, ttl: number = this.DEFAULT_TTL): void {
     try {
@@ -78,9 +101,12 @@ export class LicenseCache {
         licenseInfo,
         timestamp: now,
         expiresAt: now + ttl,
+        programId: PROGRAM_ID.toString(),
+        pageLoadValidated: this.pageLoadValidated,
       };
 
       localStorage.setItem(cacheKey, JSON.stringify(data));
+      console.log('💾 Cached license data with contract version:', PROGRAM_ID.toString());
     } catch (error) {
       console.debug('Failed to cache license data:', error);
     }
@@ -99,9 +125,9 @@ export class LicenseCache {
   }
 
   /**
-   * Check if cached data needs background refresh
+   * Check if fresh validation is needed (page load or contract change)
    */
-  static needsBackgroundRefresh(userPubkey: PublicKey): boolean {
+  static needsFreshValidation(userPubkey: PublicKey): boolean {
     try {
       const cacheKey = this.getCacheKey(userPubkey);
       const cached = localStorage.getItem(cacheKey);
@@ -109,12 +135,79 @@ export class LicenseCache {
       if (!cached) return true;
 
       const data: CachedLicenseData = JSON.parse(cached);
-      const now = Date.now();
-      const age = now - data.timestamp;
+      
+      // Check if contract has changed
+      const currentProgramId = PROGRAM_ID.toString();
+      if (data.programId !== currentProgramId) {
+        return true;
+      }
 
-      return age > this.BACKGROUND_REFRESH_THRESHOLD;
+      // Check if page load validation is needed
+      if (!this.pageLoadValidated && !data.pageLoadValidated) {
+        return true;
+      }
+
+      // Check if cache is expired
+      const now = Date.now();
+      if (now > data.expiresAt) {
+        return true;
+      }
+
+      return false;
     } catch (error) {
       return true;
+    }
+  }
+
+  /**
+   * Mark page load validation as complete
+   */
+  static markPageLoadValidated(): void {
+    this.pageLoadValidated = true;
+    localStorage.setItem(this.PAGE_LOAD_KEY, Date.now().toString());
+    console.log('✅ Page load validation marked complete');
+  }
+
+  /**
+   * Check if page load validation was done in this session
+   */
+  static isPageLoadValidated(): boolean {
+    return this.pageLoadValidated;
+  }
+
+  /**
+   * Reset page load validation (for testing or manual refresh)
+   */
+  static resetPageLoadValidation(): void {
+    this.pageLoadValidated = false;
+    localStorage.removeItem(this.PAGE_LOAD_KEY);
+    console.log('🔄 Page load validation reset');
+  }
+
+  /**
+   * Clear all cache for contract change
+   */
+  static clearAllForContractChange(): void {
+    try {
+      const keysToRemove: string[] = [];
+      
+      // Find all license cache keys
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith(this.CACHE_PREFIX)) {
+          keysToRemove.push(key);
+        }
+      }
+
+      // Remove all license cache entries
+      keysToRemove.forEach(key => localStorage.removeItem(key));
+      
+      // Reset page load validation
+      this.resetPageLoadValidation();
+      
+      console.log(`🗑️ Cleared ${keysToRemove.length} cache entries for contract change`);
+    } catch (error) {
+      console.debug('Failed to clear cache for contract change:', error);
     }
   }
 
@@ -219,7 +312,7 @@ export class LicenseCache {
 }
 
 /**
- * Hook for optimized license caching
+ * Hook for smart license caching with contract change detection
  */
 export function useLicenseCache(userPubkey: PublicKey | null) {
   const getCached = () => {
@@ -232,9 +325,13 @@ export function useLicenseCache(userPubkey: PublicKey | null) {
     LicenseCache.setCached(userPubkey, licenseInfo, ttl);
   };
 
-  const needsRefresh = () => {
+  const needsFreshValidation = () => {
     if (!userPubkey) return true;
-    return LicenseCache.needsBackgroundRefresh(userPubkey);
+    return LicenseCache.needsFreshValidation(userPubkey);
+  };
+
+  const markPageLoadValidated = () => {
+    LicenseCache.markPageLoadValidated();
   };
 
   const deduplicateRequest = <T>(requestFn: () => Promise<T>) => {
@@ -245,8 +342,10 @@ export function useLicenseCache(userPubkey: PublicKey | null) {
   return {
     getCached,
     setCached,
-    needsRefresh,
+    needsFreshValidation,
+    markPageLoadValidated,
     deduplicateRequest,
+    isPageLoadValidated: LicenseCache.isPageLoadValidated(),
   };
 }
 

@@ -10,16 +10,43 @@ import { Sparkles, Shield, Zap, TrendingUp } from "lucide-react";
 import { PublicKey } from "@solana/web3.js";
 import { LicenseInfo } from "@/lib/solairus-main";
 import { LicenseErrorHandler } from "@/utils/license-error-handler";
+import * as anchor from "@coral-xyz/anchor";
+import { getHealthyRpcConnection } from "@/utils/rpc-switcher";
 
 // Helper function to get USDT balance
-async function getUsdtBalance(_userPubkey: PublicKey, _usdtMint: PublicKey): Promise<string> {
+async function getUsdtBalance(userPubkey: PublicKey, usdtMint: PublicKey): Promise<string> {
   try {
-    // This would typically use the wallet's connection to fetch token balance
-    // For now, return a placeholder - this should be implemented with actual token balance fetching
-    return "100.00"; // Placeholder balance
+    // Get USDT mint from env or use provided mint
+    const mintAddress = import.meta.env.VITE_USDT_MINT || usdtMint.toString();
+    const mint = new PublicKey(mintAddress);
+
+    // Create associated token account address
+    const associatedTokenAccount = anchor.utils.token.associatedAddress({
+      mint,
+      owner: userPubkey,
+    });
+
+    // Use the same RPC switcher as the rest of the app for consistency
+    // This handles comma-separated RPC URLs, fallbacks, and network switching
+    const currentCluster = (() => {
+      const override = localStorage.getItem("solana_cluster_override")?.toLowerCase();
+      const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? "devnet").toLowerCase();
+      const effective = override || envCluster;
+      return effective.startsWith("mainnet") ? "mainnet-beta" :
+             effective === "testnet" ? "testnet" : "devnet";
+    })() as 'mainnet-beta' | 'devnet' | 'testnet';
+
+    const connection = await getHealthyRpcConnection(currentCluster);
+
+    // Get token account info
+    const tokenAccountInfo = await connection.getTokenAccountBalance(associatedTokenAccount);
+
+    // Convert from base units (6 decimals) to display units
+    const balance = Number(tokenAccountInfo.value.amount) / 1_000_000;
+    return balance.toFixed(2);
   } catch (error) {
-    console.error('Error fetching USDT balance:', error);
-    return "0";
+    console.warn('Could not fetch USDT balance, account may not exist:', error);
+    return "0.00";
   }
 }
 
@@ -77,11 +104,8 @@ export default function LicenseActivationPage() {
         // Try to get license fee from contract, use fallback if not deployed
         try {
           const { amount, usdtMint } = await licenseService.getLicenseFee();
-          // Format USDT amount safely to avoid precision issues
-          const amountStr = amount.toString();
-          const wholePart = amountStr.slice(0, -6) || '0';
-          const decimalPart = amountStr.slice(-6).padStart(6, '0');
-          const feeInUsdt = `${wholePart}.${decimalPart.slice(0, 2)}`;
+          // Format USDT amount safely using proper decimal conversion
+          const feeInUsdt = (Number(amount.toString()) / 1_000_000).toFixed(2);
           setLicenseFee(feeInUsdt);
 
           // Get USDT balance
@@ -126,16 +150,22 @@ export default function LicenseActivationPage() {
 
   const handleActivation = async () => {
     if (!account) return;
-    
+
     if (!licenseService) {
       setError('License system is not yet available. Please try again later.');
+      return;
+    }
+
+    // Check if user has valid license and less than 30 days remaining
+    if (licenseInfo.isValid && licenseInfo.daysRemaining !== undefined && licenseInfo.daysRemaining > 30) {
+      setError('Your license is still valid for more than 30 days. You can only extend when you have 30 days or less remaining.');
       return;
     }
 
     // Check USDT balance first
     const balanceNum = parseFloat(usdtBalance);
     const feeNum = parseFloat(licenseFee);
-    
+
     if (balanceNum < feeNum) {
       setError(`Insufficient USDT balance. You have ${usdtBalance} USDT but need ${licenseFee} USDT.`);
       return;
@@ -152,8 +182,19 @@ export default function LicenseActivationPage() {
       setError(null);
       setShowConfirmation(false);
 
-      await activateLicense();
-      
+      const txSignature = await activateLicense();
+
+      // Capture the transaction hash for display
+      try {
+        // activateLicense returns a string transaction signature
+        const signature = txSignature as unknown as string;
+        if (signature && typeof signature === 'string') {
+          setTransactionHash(signature);
+        }
+      } catch (error) {
+        console.warn('Could not capture transaction signature:', error);
+      }
+
       setActivationSuccess(true);
 
       // Redirect to home after a brief success display
@@ -164,8 +205,8 @@ export default function LicenseActivationPage() {
     } catch (err) {
       console.error('License activation failed:', err);
       setRetryCount(prev => prev + 1);
-      
-      // Use improved error handler for better categorization
+
+      // Use enhanced error handler for actionable error messages
       const licenseError = LicenseErrorHandler.parseError(err);
       setError(licenseError.message);
     }

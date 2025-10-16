@@ -1,6 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 import idl from "@/idl/solairus_main.json";
+import { buildSponsorHierarchy } from "@/lib/sponsor-tree";
 
 // Lightweight client helpers for the solairus_main program, following existing patterns.
 
@@ -127,9 +128,7 @@ export function deriveAgentActivationPda(user: PublicKey, nextId: anchor.BN) {
 // TypeScript interfaces for smart contract data
 export interface UserProfile {
   user: PublicKey;              // User's wallet address
-  sponsorL1: PublicKey;         // Level 1 sponsor (direct referrer)
-  sponsorL2: PublicKey;         // Level 2 sponsor (sponsor's sponsor)
-  sponsorL3: PublicKey;         // Level 3 sponsor (L2's sponsor)
+  sponsor: PublicKey;           // Direct sponsor (only one sponsor stored)
   createdAt: anchor.BN;         // Profile creation timestamp
   activePrincipalUsdt: anchor.BN; // Active investment amount
   lastRoiWithdrawAt: anchor.BN; // Last ROI withdrawal timestamp
@@ -176,20 +175,72 @@ export interface LicenseInfo {
 
 // License validation helpers
 export function isLicenseActive(userProfile: UserProfile): boolean {
-  const now = Math.floor(Date.now() / 1000);
-  // Use toString() and comparison for large numbers to avoid precision issues
-  return userProfile.licenseExpiresAt.gt(new anchor.BN(now));
+  try {
+    // Check for zero or null expiration (no license)
+    if (userProfile.licenseExpiresAt.eq(new anchor.BN(0))) {
+      return false;
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    
+    // Validate the expiration timestamp is reasonable
+    const expirationSeconds = userProfile.licenseExpiresAt.toString();
+    const expirationNum = parseInt(expirationSeconds);
+    
+    // Check for invalid timestamps
+    if (isNaN(expirationNum) || expirationNum <= 0) {
+      console.warn('⚠️ Invalid license expiration timestamp:', expirationSeconds);
+      return false;
+    }
+    
+    // Use toString() and comparison for large numbers to avoid precision issues
+    return userProfile.licenseExpiresAt.gt(new anchor.BN(now));
+  } catch (error) {
+    console.warn('⚠️ Error checking license active status:', error);
+    return false;
+  }
 }
 
 export function getLicenseExpiryDate(userProfile: UserProfile): Date {
-  // Handle large BN values safely
-  const timestampSeconds = userProfile.licenseExpiresAt.toString();
-  const timestampMs = parseInt(timestampSeconds) * 1000;
-  return new Date(timestampMs);
+  try {
+    // Handle large BN values safely
+    const timestampSeconds = userProfile.licenseExpiresAt.toString();
+    const timestampMs = parseInt(timestampSeconds) * 1000;
+    
+    // Validate the timestamp is reasonable (not 0, not negative, not too far in future)
+    if (timestampMs <= 0 || timestampMs > Date.now() + 10 * 365 * 24 * 60 * 60 * 1000) {
+      console.warn('⚠️ Invalid timestamp detected:', timestampMs);
+      return new Date(NaN); // Return Invalid Date
+    }
+    
+    return new Date(timestampMs);
+  } catch (error) {
+    console.warn('⚠️ Error parsing license expiry date:', error);
+    return new Date(NaN); // Return Invalid Date
+  }
 }
 
 export function getLicenseInfo(userProfile: UserProfile | null): LicenseInfo {
-  if (!userProfile || userProfile.licenseExpiresAt.eq(new anchor.BN(0))) {
+  if (!userProfile) {
+    return {
+      status: 'none',
+      isValid: false,
+    };
+  }
+
+  // Check if user is properly registered
+  const hasValidCreatedAt = userProfile.createdAt && !userProfile.createdAt.eq(new anchor.BN(0));
+  const hasValidSponsor = userProfile.sponsor && !userProfile.sponsor.equals(PublicKey.default);
+  
+  if (!hasValidCreatedAt || !hasValidSponsor) {
+    return {
+      status: 'none',
+      isValid: false,
+    };
+  }
+
+  // Check license expiration
+  if (userProfile.licenseExpiresAt.eq(new anchor.BN(0))) {
     return {
       status: 'none',
       isValid: false,
@@ -197,8 +248,27 @@ export function getLicenseInfo(userProfile: UserProfile | null): LicenseInfo {
   }
 
   const expirationDate = getLicenseExpiryDate(userProfile);
+  
+  // CRITICAL FIX: Check for Invalid Date (prevents false positives)
+  if (isNaN(expirationDate.getTime())) {
+    console.warn('⚠️ Invalid license expiration date detected, treating as no license');
+    return {
+      status: 'none',
+      isValid: false,
+    };
+  }
+
   const now = new Date();
   const daysRemaining = Math.ceil((expirationDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+  // Additional safety check for invalid calculations
+  if (isNaN(daysRemaining)) {
+    console.warn('⚠️ Invalid days remaining calculation, treating as no license');
+    return {
+      status: 'none',
+      isValid: false,
+    };
+  }
 
   if (daysRemaining <= 0) {
     return {
@@ -250,7 +320,7 @@ export async function activateLicenseUsdt(
   amount: number | anchor.BN,
   usdtMint: PublicKey,
 ) {
-  console.log('🚨 License activation with simplified affiliate system');
+  console.log('🚨 License activation with affiliate system');
   console.log('🚨 Function called with user:', user.toString());
   const { config, vault, profile } = derivePdas(user);
   console.log('🚨 Derived PDAs - profile:', profile?.toString());
@@ -281,31 +351,42 @@ export async function activateLicenseUsdt(
     owner: vault,
   });
 
-  // STEP 3: Get config to find dev account
-  const configData = await program.account["config"].fetch(config) as Config;
-  const devProfile = derivePdas(configData.dev).profile!;
+  // STEP 3: Build sponsor hierarchy for affiliate earnings
+  console.log('🌳 Building sponsor hierarchy for affiliate earnings...');
+  const sponsorHierarchy = await buildSponsorHierarchy(program.provider as anchor.AnchorProvider, user);
+  const sponsorProfiles = [
+    derivePdas(sponsorHierarchy.sponsorL1).profile!,
+    derivePdas(sponsorHierarchy.sponsorL2).profile!,
+    derivePdas(sponsorHierarchy.sponsorL3).profile!,
+  ];
+  console.log('✅ Sponsor profiles derived:', sponsorProfiles.map(p => p.toString()));
 
-  // STEP 4: Build simplified accounts object (no sponsor profiles needed)
+  // STEP 4: Build accounts object with sponsor profiles in remaining_accounts
   const accounts = {
     config,                    // Program configuration PDA
-    vault,                     // Program vault PDA  
+    vault,                     // Program vault PDA
     profile,                   // User's profile PDA
     user,                      // User's wallet (signer)
     usdtMint,                  // USDT token mint
     userUsdt,                  // User's USDT token account
     vaultUsdt,                 // Vault's USDT token account
-    devProfile,                // Dev profile (receives all affiliate earnings)
+    devProfile: sponsorProfiles[0], // Dev profile (fallback for all affiliate earnings)
     tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
     associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
     systemProgram: anchor.web3.SystemProgram.programId,
   };
 
-  // STEP 5: Submit license activation transaction
-  console.log('🚀 Submitting transaction with simplified accounts');
+  // STEP 5: Submit license activation transaction with sponsor profiles
+  console.log('🚀 Submitting transaction with sponsor profiles in remaining_accounts');
   try {
     const txSignature = await program.methods
       .activateLicenseUsdt(bn)
       .accounts(accounts)
+      .remainingAccounts(sponsorProfiles.map(pubkey => ({
+        pubkey,
+        isSigner: false,
+        isWritable: true,
+      }))) // ← ADD SPONSOR PROFILES AS AccountMeta
       .rpc();
     console.log('✅ Transaction successful:', txSignature);
     return txSignature;

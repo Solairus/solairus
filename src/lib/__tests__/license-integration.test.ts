@@ -23,9 +23,7 @@ const mockUsdtMint = new PublicKey('22222222222222222222222222222222');
 
 const mockUserProfile: UserProfile = {
   user: mockUserPubkey,
-  sponsorL1: PublicKey.default,
-  sponsorL2: PublicKey.default,
-  sponsorL3: PublicKey.default,
+  sponsor: PublicKey.default,
   createdAt: new anchor.BN(Date.now() / 1000),
   activePrincipalUsdt: new anchor.BN(0),
   lastRoiWithdrawAt: new anchor.BN(0),
@@ -153,7 +151,7 @@ describe('License Integration', () => {
   });
 
   describe('Registration Check', () => {
-    let mockProgram: any;
+    let mockProgram: unknown;
 
     beforeEach(() => {
       mockProgram = {
