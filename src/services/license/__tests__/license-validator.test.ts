@@ -15,9 +15,7 @@ const mockProgramId = new PublicKey('11111111111111111111111111111113');
 
 const mockActiveProfile: UserProfile = {
   user: mockUserPubkey,
-  sponsorL1: PublicKey.default,
-  sponsorL2: PublicKey.default,
-  sponsorL3: PublicKey.default,
+  sponsor: PublicKey.default,
   createdAt: new anchor.BN(Date.now() / 1000),
   activePrincipalUsdt: new anchor.BN(0),
   lastRoiWithdrawAt: new anchor.BN(0),
@@ -68,7 +66,7 @@ describe('LicenseStatusValidator Core', () => {
       },
     };
 
-    validator = new LicenseStatusValidator(mockProgram as any, mockProvider as unknown);
+    validator = new LicenseStatusValidator(mockProgram as unknown, mockProvider as unknown);
     vi.clearAllMocks();
   });
 

@@ -5,23 +5,27 @@ import * as anchor from '@coral-xyz/anchor';
 
 // Get program ID from environment variable
 const PROGRAM_ID = new PublicKey(
-  import.meta.env.VITE_SOLAIRUS_MAIN_PROGRAM_ID || 'E7Xtvh1AV6rWPhk85QfjVeCCbuxRbFvRzzi3BKmcofK1'
+  import.meta.env.VITE_SOLAIRUS_MAIN_PROGRAM_ID
 );
 
 /**
- * Sponsor hierarchy for new user registration
+ * Computed sponsor hierarchy for license activation
+ *
+ * IMPORTANT: This is NOT stored data - it's computed off-chain from on-chain sponsor relationships.
+ * The smart contract only stores the direct sponsor (L1) in each user profile.
+ * L2 and L3 are derived by traversing the sponsor chain: L2 = L1's sponsor, L3 = L2's sponsor.
  */
 export interface SponsorHierarchy {
-  sponsorL1: PublicKey;  // Direct sponsor (from referral link)
-  sponsorL2: PublicKey;  // Sponsor's sponsor  
-  sponsorL3: PublicKey;  // Sponsor's sponsor's sponsor
+  sponsorL1: PublicKey;  // Direct sponsor (stored in user profile)
+  sponsorL2: PublicKey;  // Computed: L1's sponsor (looked up on-chain)
+  sponsorL3: PublicKey;  // Computed: L2's sponsor (looked up on-chain)
 }
 
 /**
  * Get the default sponsor address (dev key)
  */
 function getDefaultSponsor(): PublicKey {
-  const defaultAddress = import.meta.env.VITE_DEFAULT_SPONSOR_ADDRESS || '4YXNGAsEgmcPAoBL6974oqAZwZqKNQkx9GSzs67jkdez';
+  const defaultAddress = import.meta.env.VITE_DEFAULT_SPONSOR_ADDRESS;
   return new PublicKey(defaultAddress);
 }
 

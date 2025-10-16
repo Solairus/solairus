@@ -321,19 +321,42 @@ export class LicenseStatusValidator {
   }
 
   /**
-   * Get comprehensive license status with validation
-   * ALWAYS fetches fresh on-chain data first, cache is only for fallback
+   * Get comprehensive license status with smart caching
+   * Uses cache-first approach with fresh validation only when needed
    */
-  async getValidatedLicenseStatus(userPubkey: PublicKey, useCache: boolean = false): Promise<EnhancedLicenseInfo> {
+  async getValidatedLicenseStatus(userPubkey: PublicKey, forceRefresh: boolean = false): Promise<EnhancedLicenseInfo> {
     try {
-      // ALWAYS validate on-chain first (critical for contract changes/upgrades)
+      // Check if we need fresh validation (page load, contract change, or force refresh)
+      const needsFresh = forceRefresh || LicenseCache.needsFreshValidation(userPubkey);
+      
+      if (!needsFresh) {
+        // Try cache first for performance
+        const cachedInfo = LicenseCache.getCached(userPubkey);
+        if (cachedInfo) {
+          console.log('📦 Using valid cached license data');
+          return {
+            ...cachedInfo,
+            source: 'cache',
+            lastValidated: Date.now(),
+            validationMethod: 'cached',
+            debugInfo: {
+              profileExists: cachedInfo.status !== 'none',
+              cacheHit: true,
+              errors: [],
+            },
+          };
+        }
+      }
+
+      // Need fresh validation - fetch from blockchain
       console.log('🔍 Fetching fresh on-chain license data for:', userPubkey.toString());
       const onChainResult = await this.validateOnChain(userPubkey);
       
-      // If on-chain validation successful, use it and update cache
+      // If on-chain validation successful, cache it and mark page load validated
       if (onChainResult.errors.length === 0) {
         console.log('✅ On-chain validation successful, caching fresh data');
         LicenseCache.setCached(userPubkey, onChainResult.licenseInfo);
+        LicenseCache.markPageLoadValidated();
         
         return {
           ...onChainResult.licenseInfo,
@@ -348,25 +371,23 @@ export class LicenseStatusValidator {
         };
       }
 
-      // On-chain failed, try cache as fallback only if explicitly allowed
-      if (useCache) {
-        console.log('⚠️ On-chain validation failed, trying cache fallback');
-        const cacheValidation = this.validateCache(userPubkey);
-        
-        if (cacheValidation.isValid && cacheValidation.cachedInfo) {
-          console.log('📦 Using cached data as fallback');
-          return {
-            ...cacheValidation.cachedInfo,
-            source: 'cache',
-            lastValidated: Date.now(),
-            validationMethod: 'cached',
-            debugInfo: {
-              profileExists: cacheValidation.cachedInfo.status !== 'none',
-              cacheHit: true,
-              errors: [...onChainResult.errors, ...cacheValidation.issues],
-            },
-          };
-        }
+      // On-chain failed, try cache as fallback
+      console.log('⚠️ On-chain validation failed, trying cache fallback');
+      const cacheValidation = this.validateCache(userPubkey);
+      
+      if (cacheValidation.isValid && cacheValidation.cachedInfo) {
+        console.log('📦 Using cached data as fallback');
+        return {
+          ...cacheValidation.cachedInfo,
+          source: 'cache',
+          lastValidated: Date.now(),
+          validationMethod: 'cached',
+          debugInfo: {
+            profileExists: cacheValidation.cachedInfo.status !== 'none',
+            cacheHit: true,
+            errors: [...onChainResult.errors, ...cacheValidation.issues],
+          },
+        };
       }
 
       // Both on-chain and cache failed, return error state
@@ -403,35 +424,10 @@ export class LicenseStatusValidator {
   }
 
   /**
-   * Get license status with cache preference (for performance-sensitive operations)
+   * Get license status optimized for performance (cache-first with smart validation)
    */
-  async getLicenseStatusCacheFirst(userPubkey: PublicKey): Promise<EnhancedLicenseInfo> {
-    try {
-      // Check cache first for performance
-      const cacheValidation = this.validateCache(userPubkey);
-      
-      // If cache is valid and fresh, use it
-      if (cacheValidation.isValid && !cacheValidation.shouldRefresh && cacheValidation.cachedInfo) {
-        console.log('📦 Using fresh cached data');
-        return {
-          ...cacheValidation.cachedInfo,
-          source: 'cache',
-          lastValidated: Date.now(),
-          validationMethod: 'cached',
-          debugInfo: {
-            profileExists: cacheValidation.cachedInfo.status !== 'none',
-            cacheHit: true,
-            errors: cacheValidation.issues,
-          },
-        };
-      }
-
-      // Cache is stale or invalid, fetch fresh data
-      console.log('🔄 Cache is stale, fetching fresh on-chain data');
-      return await this.getValidatedLicenseStatus(userPubkey, false);
-    } catch (error) {
-      console.error('Cache-first license status failed:', error);
-      return await this.getValidatedLicenseStatus(userPubkey, true);
-    }
+  async getLicenseStatusOptimized(userPubkey: PublicKey): Promise<EnhancedLicenseInfo> {
+    // Use the main method without forcing refresh - it will use cache when appropriate
+    return await this.getValidatedLicenseStatus(userPubkey, false);
   }
 }
