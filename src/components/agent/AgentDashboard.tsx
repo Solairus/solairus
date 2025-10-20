@@ -3,6 +3,7 @@ import { PublicKey, Connection } from '@solana/web3.js';
 import * as anchor from '@coral-xyz/anchor';
 import { AgentData, getUserAgents, GetUserAgentsOptions, GetUserAgentsResult } from '@/services/agent/agent-service';
 import { WithdrawalLimitDisplay, getWithdrawalLimitDisplay } from '@/services/agent/withdrawal-limit-service';
+import { getCurrentRpcConnection, shouldSwitchRpc, switchRpcEndpoint } from '@/utils/rpc-connection-manager';
 import { AgentCard } from './AgentCard';
 import { WithdrawalLimitDisplay as WithdrawalLimitDisplayComponent } from './WithdrawalLimitDisplay';
 import { AgentActivationModal } from './AgentActivationModal';
@@ -59,27 +60,47 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         setState(prev => ({ ...prev, loading: true, error: null }));
       }
 
-      // Load agents and withdrawal limit status in parallel
-      const [agentsResult, withdrawalStatus] = await Promise.all([
-        getUserAgents(connection, userPublicKey, {
-          limit: 50,
-          offset: 0,
-          sortBy,
-          sortOrder,
-        }),
-        getWithdrawalLimitDisplay(connection, userPublicKey),
-      ]);
+      // Get current RPC connection (no retries, just use what's available)
+      let currentConnection = getCurrentRpcConnection();
 
-      setState(prev => ({
-        ...prev,
-        agents: agentsResult.agents,
-        totalCount: agentsResult.totalCount,
-        hasMore: agentsResult.hasMore,
-        withdrawalLimitStatus: withdrawalStatus,
-        loading: false,
-        refreshing: false,
-        error: null,
-      }));
+      try {
+        // Load agents and withdrawal limit status in parallel
+        const [agentsResult, withdrawalStatus] = await Promise.all([
+          getUserAgents(currentConnection, userPublicKey, {
+            limit: 50,
+            offset: 0,
+            sortBy,
+            sortOrder,
+          }),
+          getWithdrawalLimitDisplay(currentConnection, userPublicKey),
+        ]);
+
+        setState(prev => ({
+          ...prev,
+          agents: agentsResult.agents,
+          totalCount: agentsResult.totalCount,
+          hasMore: agentsResult.hasMore,
+          withdrawalLimitStatus: withdrawalStatus,
+          loading: false,
+          refreshing: false,
+          error: null,
+        }));
+      } catch (rpcError) {
+        // If RPC error, switch endpoint and show user-friendly message
+        if (shouldSwitchRpc(rpcError)) {
+          console.log('🔄 RPC error detected, switching endpoint for next request');
+          switchRpcEndpoint(); // Switch for next time, don't retry now
+          
+          setState(prev => ({
+            ...prev,
+            loading: false,
+            refreshing: false,
+            error: 'RPC endpoint issue detected. Please try again - we\'ve switched to a different server.',
+          }));
+        } else {
+          throw rpcError; // Let other errors bubble up
+        }
+      }
     } catch (error) {
       console.error('❌ Error loading dashboard data:', error);
       setState(prev => ({
@@ -89,7 +110,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         error: error instanceof Error ? error.message : 'Failed to load dashboard data',
       }));
     }
-  }, [connection, userPublicKey, sortBy, sortOrder]);
+  }, [userPublicKey, sortBy, sortOrder]);
 
   // Initial load
   useEffect(() => {

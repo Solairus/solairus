@@ -65,16 +65,16 @@ export function useBucketBalances(): UseBucketBalancesReturn {
     fetchBalances();
   }, [fetchBalances]);
 
-  // Auto-refresh every 30 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!loading) {
-        fetchBalances();
-      }
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, [fetchBalances, loading]);
+  // DISABLED: Auto-refresh to prevent rate limits
+  // Users can manually refresh if needed
+  // useEffect(() => {
+  //   const interval = setInterval(() => {
+  //     if (!loading) {
+  //       fetchBalances();
+  //     }
+  //   }, 30000);
+  //   return () => clearInterval(interval);
+  // }, [fetchBalances, loading]);
 
   return {
     balances,

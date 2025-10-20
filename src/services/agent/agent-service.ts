@@ -8,6 +8,7 @@ import {
   canWithdrawRoi,
   calculateYieldCapProgress
 } from "@/lib/solairus-main";
+import { handleRpcError, getHealthyRpcConnection } from "@/utils/rpc-switcher";
 import { getAgentServiceConfig } from "@/config/agent-config";
 import { getContractSecondsPerDay } from "./contract-timing-service";
 
@@ -74,6 +75,7 @@ export async function getUserAgents(
     } = options;
 
     // Query all UserAgentActivation PDAs for the user using memcmp filter
+    // If this RPC fails, the error will bubble up and the UI can handle it
     const agentAccounts = await connection.getProgramAccounts(PROGRAM_ID, {
       filters: [
         {

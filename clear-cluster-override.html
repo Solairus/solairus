@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clear Cluster Override</title>
+</head>
+<body>
+    <h1>Clear Solana Cluster Override</h1>
+    <button onclick="clearOverride()">Clear localStorage Override</button>
+    <div id="status"></div>
+    
+    <script>
+        function clearOverride() {
+            try {
+                localStorage.removeItem('solana_cluster_override');
+                document.getElementById('status').innerHTML = '✅ Cleared solana_cluster_override from localStorage';
+                console.log('Cleared cluster override');
+            } catch (error) {
+                document.getElementById('status').innerHTML = '❌ Error: ' + error.message;
+            }
+        }
+        
+        // Show current override
+        const current = localStorage.getItem('solana_cluster_override');
+        if (current) {
+            document.getElementById('status').innerHTML = `Current override: ${current}`;
+        } else {
+            document.getElementById('status').innerHTML = 'No override set';
+        }
+    </script>
+</body>
+</html>

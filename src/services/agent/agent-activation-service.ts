@@ -1,8 +1,9 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import * as anchor from '@coral-xyz/anchor';
-import { 
-  getProgram, 
-  derivePdas, 
+import { createAssociatedTokenAccountInstruction } from '@solana/spl-token';
+import {
+  getProgram,
+  derivePdas,
   deriveAgentActivationPda,
   AgentTier,
   getErrorMessage,
@@ -56,21 +57,44 @@ export async function activateAgent(
 
     const program = getProgram(provider);
     const { config, vault, profile: profilePda, counter: counterPda } = derivePdas(params.userPublicKey);
-    
+
     // Get USDT mint from config for USDT transactions
     const configAccount = await (program.account as ProgramAccountAccess).config.fetch(config) as ConfigAccount;
     const usdtMint = configAccount.usdtMint;
-    
-    // Derive USDT token accounts
+
+    // Derive USDT token accounts (required even for credit activation due to shared account structure)
     const userUsdt = anchor.utils.token.associatedAddress({
       mint: usdtMint,
       owner: params.userPublicKey,
     });
-    
+
     const vaultUsdt = anchor.utils.token.associatedAddress({
       mint: usdtMint,
       owner: vault,
     });
+
+    // For credit activation, ensure USDT token accounts exist (even if unused)
+    // This is required because both USDT and credit activation use the same account structure
+    if (params.paymentMethod === 'credit') {
+      console.log('🔧 Credit activation: Ensuring USDT token accounts exist...');
+
+      try {
+        // Check if user's USDT token account exists
+        const connection = provider.connection;
+        const userUsdtInfo = await connection.getAccountInfo(userUsdt);
+
+        if (!userUsdtInfo) {
+          console.log('⚠️ User USDT token account does not exist, will be created automatically');
+          console.log('💡 Credit activation will include USDT token account creation instruction');
+          // Don't throw error - let the contract handle account creation
+        } else {
+          console.log('✅ User USDT token account already exists');
+        }
+      } catch (error) {
+        console.log('⚠️ Could not verify USDT token account, proceeding with activation:', error);
+        // Don't throw error - let the contract handle any issues
+      }
+    }
 
     // Get user's profile to verify registration
     let profileAccount;
@@ -94,7 +118,7 @@ export async function activateAgent(
 
     // Derive the agent activation PDA
     const activationPda = deriveAgentActivationPda(
-      params.userPublicKey, 
+      params.userPublicKey,
       new anchor.BN(nextActivationId)
     );
 
@@ -108,10 +132,10 @@ export async function activateAgent(
       console.log('🌳 Building sponsor hierarchy for affiliate earnings...');
       console.log('🔧 Provider:', provider.publicKey?.toString());
       console.log('🔧 User:', params.userPublicKey.toString());
-      
+
       const sponsorHierarchy = await buildSponsorHierarchy(provider, params.userPublicKey);
       console.log('✅ Sponsor hierarchy built:', sponsorHierarchy);
-      
+
       // Construct remaining accounts exactly like license activation
       const sponsorAddresses = [
         sponsorHierarchy.sponsorL1,  // User address (not PDA)
@@ -119,7 +143,7 @@ export async function activateAgent(
         sponsorHierarchy.sponsorL3,  // User address (not PDA)
       ];
       console.log('✅ Sponsor user addresses:', sponsorAddresses.map(addr => addr.toString()));
-      
+
       // Also need to pass the corresponding PDAs for the contract to write to
       const sponsorPDAs = [
         derivePdas(sponsorHierarchy.sponsorL1).profile!,
@@ -127,18 +151,18 @@ export async function activateAgent(
         derivePdas(sponsorHierarchy.sponsorL3).profile!,
       ];
       console.log('✅ Sponsor PDAs for writing:', sponsorPDAs.map(pda => pda.toString()));
-      
+
       // Check for duplicates in user addresses (contract expects this)
       const uniqueAddresses = new Set(sponsorAddresses.map(addr => addr.toString()));
       console.log(`🔍 Unique sponsor addresses: ${uniqueAddresses.size}, Total levels: ${sponsorAddresses.length}`);
-      
+
       if (uniqueAddresses.size < sponsorAddresses.length) {
         console.log('🎯 DUPLICATE SPONSORS DETECTED: Contract will accumulate earnings per unique user');
         console.log('💡 Same sponsor at multiple levels will receive combined earnings');
       } else {
         console.log('✅ All sponsors are unique, each will receive their level-specific earnings');
       }
-      
+
       // Pass both user addresses AND their PDAs to contract
       // Contract expects: [userAddr1, userAddr2, userAddr3, pda1, pda2, pda3]
       const finalRemainingAccounts: Array<{
@@ -146,19 +170,19 @@ export async function activateAgent(
         isSigner: boolean;
         isWritable: boolean;
       }> = [
-        // First pass user addresses (for deduplication logic)
-        ...sponsorAddresses.map(pubkey => ({
-          pubkey,
-          isSigner: false,
-          isWritable: false, // User addresses are read-only
-        })),
-        // Then pass corresponding PDAs (for writing earnings)
-        ...sponsorPDAs.map(pubkey => ({
-          pubkey,
-          isSigner: false,
-          isWritable: true, // PDAs need to be writable
-        }))
-      ];
+          // First pass user addresses (for deduplication logic)
+          ...sponsorAddresses.map(pubkey => ({
+            pubkey,
+            isSigner: false,
+            isWritable: false, // User addresses are read-only
+          })),
+          // Then pass corresponding PDAs (for writing earnings)
+          ...sponsorPDAs.map(pubkey => ({
+            pubkey,
+            isSigner: false,
+            isWritable: true, // PDAs need to be writable
+          }))
+        ];
 
       // SECURITY: Validate exactly 6 remaining accounts before sending to contract
       if (finalRemainingAccounts.length !== 6) {
@@ -191,7 +215,7 @@ export async function activateAgent(
       console.log('🚀 Submitting transaction with remaining_accounts:', finalRemainingAccounts.length, 'sponsor profiles');
       console.log('📋 Remaining accounts:', finalRemainingAccounts.map(acc => `${acc.pubkey.toString()} (writable: ${acc.isWritable})`));
       console.log('📋 Main accounts:', Object.keys(accounts).map(key => `${key}: ${accounts[key as keyof typeof accounts]?.toString()}`));
-      
+
       try {
         txSignature = await program.methods
           .activateAgentUsdt(amountBN, params.tier)
@@ -209,7 +233,7 @@ export async function activateAgent(
     } else {
       // Credit payment method - NO remaining accounts needed (no affiliate earnings for credits)
       console.log('🎫 Credit payment method - no affiliate earnings distribution');
-      
+
       // Get the actual dev profile from config
       console.log('🔧 Using actual dev profile from config...');
       const { profile: actualDevProfile } = derivePdas(configAccount.dev);
@@ -234,17 +258,57 @@ export async function activateAgent(
 
       console.log('🎫 Activating agent with credit payment...');
       console.log('📋 Main accounts:', Object.keys(accounts).map(key => `${key}: ${accounts[key as keyof typeof accounts]?.toString()}`));
-      
+
       try {
+        // For credit activation, we don't actually need the user's USDT account to exist
+        // since no USDT transfer occurs. The contract just needs the account addresses
+        // for the instruction structure, but they won't be used.
+        console.log('💡 Credit activation: USDT accounts are for instruction structure only');
+
         txSignature = await program.methods
           .activateAgentCredit(amountBN, params.tier)
           .accounts(accounts)
-          // ← NO .remainingAccounts() for credit activation - contract doesn't expect them
           .rpc();
+
         console.log('✅ Credit activation transaction successful:', txSignature);
       } catch (error) {
         console.error('❌ Credit activation transaction failed:', error);
-        throw error;
+        console.error('❌ Error details:', JSON.stringify(error, null, 2));
+
+        // Check if it's specifically a USDT account error
+        if (error instanceof Error && error.message.includes('AccountNotInitialized')) {
+          console.log('🔧 USDT account error detected, creating account and retrying...');
+
+          try {
+            // Create the USDT token account as a pre-instruction
+            const createAccountIx = createAssociatedTokenAccountInstruction(
+              params.userPublicKey, // payer
+              userUsdt, // associated token account
+              params.userPublicKey, // owner
+              usdtMint // mint
+            );
+
+            // Retry with account creation
+            txSignature = await program.methods
+              .activateAgentCredit(amountBN, params.tier)
+              .accounts(accounts)
+              .preInstructions([createAccountIx])
+              .rpc();
+
+            console.log('✅ Credit activation with USDT account creation successful:', txSignature);
+          } catch (retryError) {
+            console.error('❌ Retry with account creation failed:', retryError);
+            throw new Error(
+              'Failed to create required token account. Please ensure you have sufficient SOL for transaction fees.'
+            );
+          }
+        } else if (error instanceof Error && error.message.includes('insufficient funds')) {
+          throw new Error(
+            'Insufficient SOL for transaction fees. Please add some SOL to your wallet.'
+          );
+        } else {
+          throw error;
+        }
       }
     }
 
@@ -260,10 +324,10 @@ export async function activateAgent(
 
   } catch (error: unknown) {
     console.error('❌ Agent activation failed:', error);
-    
+
     // Use the agent error handler to parse and format the error
     const agentError = AgentErrorHandler.parseError(error as Error, 'Agent activation');
-    
+
     return {
       success: false,
       error: agentError.message,

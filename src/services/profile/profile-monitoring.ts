@@ -718,8 +718,8 @@ export class ProfileMonitoringService {
     // Initial health check
     await checkHealth();
 
-    // Schedule periodic health checks (every 5 minutes)
-    setInterval(checkHealth, 5 * 60 * 1000);
+    // DISABLED: Periodic health checks to prevent rate limits
+    // setInterval(checkHealth, 5 * 60 * 1000);
   }
 
   private getActiveOperationsCount(): number {

@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
 import { useLicense } from "@/contexts/license-context";
 import LicenseStatusCard from "@/components/license/LicenseStatusCard";
-import { Sparkles, Shield, Zap, TrendingUp } from "lucide-react";
+import { Sparkles, Shield, Zap, TrendingUp, LogOut } from "lucide-react";
 import { PublicKey } from "@solana/web3.js";
 import { LicenseInfo } from "@/lib/solairus-main";
 import { LicenseErrorHandler } from "@/utils/license-error-handler";
@@ -63,7 +63,7 @@ async function getUsdtBalance(userPubkey: PublicKey, usdtMint: PublicKey): Promi
  * - Responsive mobile-first design
  */
 export default function LicenseActivationPage() {
-  const { account, isConnected } = useWalletConnection();
+  const { account, isConnected, disconnect } = useWalletConnection();
   const {
     licenseInfo,
     isLoading: licenseLoading,
@@ -86,6 +86,7 @@ export default function LicenseActivationPage() {
   const [showOrderSummary, setShowOrderSummary] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [transactionHash, setTransactionHash] = useState<string>('');
+  const [usingFallbackData, setUsingFallbackData] = useState(false);
 
   // Note: License guard check is now handled at the router level in App.tsx
 
@@ -110,9 +111,21 @@ export default function LicenseActivationPage() {
         // Try to get license fee from contract, use fallback if not deployed
         try {
           const { amount, usdtMint } = await licenseService.getLicenseFee();
+          
+          // DEBUG: Log the raw amount and conversion
+          console.log('🔍 DEBUG License Fee:');
+          console.log('  Raw amount from contract:', amount.toString());
+          console.log('  USDT mint:', usdtMint.toString());
+          console.log('  Environment:', import.meta.env.MODE);
+          console.log('  Cluster:', import.meta.env.VITE_SOLANA_CLUSTER);
+          console.log('  Program ID:', import.meta.env.VITE_SOLAIRUS_MAIN_PROGRAM_ID);
+          
           // Format USDT amount safely using proper decimal conversion
           const feeInUsdt = (Number(amount.toString()) / 1_000_000).toFixed(2);
+          console.log('  Converted fee:', feeInUsdt, 'USDT');
+          
           setLicenseFee(feeInUsdt);
+          setUsingFallbackData(false);
 
           // Get USDT balance
           try {
@@ -126,8 +139,12 @@ export default function LicenseActivationPage() {
         } catch (contractError) {
           console.warn('Contract not deployed yet, using fallback values:', contractError);
           // Use fallback values when contract is not deployed
-          setLicenseFee('25.00'); // Default license fee
-          setUsdtBalance('100.00'); // Placeholder balance
+          setLicenseFee('25.00'); // FALLBACK: Default license fee (contract not deployed)
+          setUsdtBalance('100.00'); // FALLBACK: Placeholder balance
+          setUsingFallbackData(true);
+          
+          // Show clear indication this is fallback data
+          console.log('⚠️ USING FALLBACK LICENSE FEE: 25.00 USDT (contract not deployed on current network)');
         }
 
         // If already has valid license, redirect to intended page
@@ -245,10 +262,8 @@ export default function LicenseActivationPage() {
 
   return (
     <div className="max-w-sm mx-auto space-y-3 p-3">
-      {/* Back Button */}
-      <div className="flex items-center justify-start">
-        <BackButton to="/dapp" />
-      </div>
+      {/* Back Button, Network Switcher, and Wallet Disconnect */}
+      <HeaderControls disconnect={disconnect} />
       
       {/* Welcome Header */}
       <WelcomeHeader />
@@ -267,6 +282,8 @@ export default function LicenseActivationPage() {
           </Badge>
         </div>
       )}
+
+
 
       {/* Main License Card */}
       <Card className="bg-gradient-to-br from-slate-50 to-gray-100 border-gray-200">
@@ -297,10 +314,20 @@ export default function LicenseActivationPage() {
 
               {/* License Fee Display */}
               {licenseFee && (
-                <div className="bg-white/60 rounded-lg p-3 border border-gray-200">
-                  <p className="text-xs text-gray-500 mb-1">License Fee (365 Days)</p>
-                  <p className="text-2xl font-bold text-gray-800">{licenseFee} <span className="text-sm font-normal text-gray-500">USDT</span></p>
-                  <p className="text-xs text-gray-500 mt-1">1 Year of full access to all Solairus features</p>
+                <div className={`bg-white/60 rounded-lg p-3 border ${usingFallbackData ? 'border-orange-200 bg-orange-50/50' : 'border-gray-200'}`}>
+                  <p className="text-xs text-gray-500 mb-1">
+                    License Fee (365 Days)
+                    {usingFallbackData && <span className="text-orange-600 ml-1">⚠️ Fallback Data</span>}
+                  </p>
+                  <p className="text-2xl font-bold text-gray-800">
+                    {licenseFee} <span className="text-sm font-normal text-gray-500">USDT</span>
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {usingFallbackData 
+                      ? "⚠️ Contract not deployed on current network - switch to Mainnet for real pricing"
+                      : "1 Year of full access to all Solairus features"
+                    }
+                  </p>
                 </div>
               )}
 
@@ -512,6 +539,72 @@ function FeaturesOverview() {
           </CardContent>
         </Card>
       ))}
+    </div>
+  );
+}
+
+// Header Controls Component
+function HeaderControls({ disconnect }: { disconnect: () => void }) {
+  const [currentCluster, setCurrentCluster] = useState<string>('');
+
+  useEffect(() => {
+    // Get current cluster info
+    const override = localStorage.getItem("solana_cluster_override")?.toLowerCase();
+    const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? "devnet").toLowerCase();
+    const effective = override || envCluster;
+    const cluster = effective.startsWith("mainnet") ? "mainnet-beta" :
+                   effective === "testnet" ? "testnet" : "devnet";
+    
+    setCurrentCluster(cluster);
+  }, []);
+
+  const switchNetwork = () => {
+    const current = currentCluster;
+    const next = current === "mainnet-beta" ? "devnet" : "mainnet-beta";
+    
+    try {
+      localStorage.setItem("solana_cluster_override", next);
+      window.location.reload();
+    } catch (error) {
+      console.error('Failed to switch network:', error);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-between">
+      <BackButton to="/dapp" />
+      
+      <div className="flex items-center gap-2">
+        {/* Network Badge and Switcher */}
+        <div className="flex items-center gap-1">
+          <Badge 
+            variant={currentCluster === "mainnet-beta" ? "default" : "secondary"} 
+            className="text-xs px-2 py-1"
+          >
+            {currentCluster === "mainnet-beta" ? "Mainnet" : "Devnet"}
+          </Badge>
+          <Button
+            onClick={switchNetwork}
+            variant="ghost"
+            size="sm"
+            className="text-xs px-1 py-1 h-6 w-6 hover:bg-gray-100"
+            title={`Switch to ${currentCluster === "mainnet-beta" ? "Devnet" : "Mainnet"}`}
+          >
+            🔄
+          </Button>
+        </div>
+        
+        {/* Disconnect Button */}
+        <Button
+          onClick={disconnect}
+          variant="outline"
+          size="sm"
+          className="flex items-center gap-1 text-xs px-2 py-1 h-8"
+        >
+          <LogOut className="w-3 h-3" />
+          Disconnect
+        </Button>
+      </div>
     </div>
   );
 }

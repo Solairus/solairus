@@ -150,12 +150,15 @@ export function useLiveRoi(
     // Initial fetch
     fetchLiveRoi();
 
-    // Set up interval for updates
-    const intervalId = setInterval(fetchLiveRoi, refreshInterval);
-
-    return () => {
-      clearInterval(intervalId);
-    };
+    // DISABLED: Auto-refresh to prevent rate limits
+    // Users can manually refresh if needed
+    // const intervalId = setInterval(fetchLiveRoi, refreshInterval);
+    // return () => {
+    //   clearInterval(intervalId);
+    // };
+    
+    // Just return empty cleanup function
+    return () => {};
   }, [connection, userPublicKey, activationId, refreshInterval]);
 
   return { liveRoi, loading, error };

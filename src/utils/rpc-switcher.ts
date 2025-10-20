@@ -430,14 +430,34 @@ export function onNetworkChange(): void {
 
 export async function handleRpcError(error: unknown, cluster: ClusterName = 'mainnet-beta'): Promise<Connection> {
   const errorStr = String(error).toLowerCase()
+  const errorJson = typeof error === 'object' && error !== null ? JSON.stringify(error) : ''
   
-  // If it's a rate limit error, automatically switch to next RPC
-  if (errorStr.includes('429') || errorStr.includes('too many requests')) {
-    console.warn('🔄 Rate limit detected, switching to next RPC endpoint')
+  // Check for various RPC failure conditions that warrant switching
+  const shouldSwitch = 
+    errorStr.includes('429') || errorStr.includes('too many requests') || // Rate limits
+    errorStr.includes('403') || errorStr.includes('forbidden') || // Access denied
+    errorStr.includes('plan upgrade') || errorStr.includes('requires plan') || // Plan limits (Chainstack)
+    errorStr.includes('32602') || // Method not allowed / plan upgrade required
+    errorStr.includes('timeout') || errorStr.includes('timed out') || // Timeouts
+    errorStr.includes('502') || errorStr.includes('503') || errorStr.includes('504') || // Server errors
+    errorStr.includes('network error') || errorStr.includes('connection') // Network issues
+  
+  if (shouldSwitch) {
+    const errorType = 
+      errorStr.includes('plan upgrade') || errorStr.includes('32602') ? 'Plan upgrade required' :
+      errorStr.includes('429') ? 'Rate limit' :
+      errorStr.includes('403') ? 'Access forbidden' :
+      errorStr.includes('timeout') ? 'Timeout' :
+      errorStr.includes('50') ? 'Server error' :
+      'Network error'
+    
+    console.warn(`🔄 ${errorType} detected, switching to next RPC endpoint`)
+    console.log('📋 Error details:', errorJson.slice(0, 200) + (errorJson.length > 200 ? '...' : ''))
+    
     try {
       return await switchRpcEndpoint(cluster)
     } catch (switchError) {
-      console.error('Failed to switch RPC after rate limit:', switchError)
+      console.error('❌ Failed to switch RPC after error:', switchError)
       throw error
     }
   }

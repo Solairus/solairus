@@ -83,8 +83,9 @@ export default function AgentsOutcomesCard() {
       }
     };
     fetchPrices();
-    const t = setInterval(fetchPrices, 10000);
-    return () => clearInterval(t);
+    // DISABLED: Auto-refresh to prevent rate limits
+    // const t = setInterval(fetchPrices, 10000);
+    // return () => clearInterval(t);
   }, []);
 
   const handleCompleted = () => {

@@ -121,7 +121,17 @@ export class LicenseService {
   async getConfig(): Promise<Config> {
     try {
       const { config } = derivePdas();
-      const configData = await this.program.account["config"].fetch(config);
+      
+      // Force fresh data by using 'confirmed' commitment and bypassing cache
+      const configData = await this.program.account["config"].fetch(config, 'confirmed');
+      
+      // DEBUG: Log config data to verify we're getting fresh data
+      console.log('🔍 Fresh config data fetched:', {
+        activationFeeUsdt: configData.activationFeeUsdt?.toString(),
+        timestamp: new Date().toISOString(),
+        configPda: config.toString()
+      });
+      
       return configData as Config;
     } catch (error) {
       const errorMsg = getErrorMessage(error);
@@ -636,8 +646,10 @@ export class LicenseService {
           return;
         }
 
-        // Wait longer between retries to avoid 429s
-        await new Promise(resolve => setTimeout(resolve, 3000 * retryCount));
+        // DISABLED: Aggressive retries to prevent rate limits
+        // await new Promise(resolve => setTimeout(resolve, 3000 * retryCount));
+        console.warn('❌ Retry disabled to prevent rate limits');
+        return;
       }
     }
 
@@ -674,10 +686,12 @@ export class LicenseService {
           break;
         }
 
-        // Wait before retry
-        const waitTime = 1000 * attempt;
-        console.log(`⏳ Waiting ${waitTime}ms before license activation retry...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
+        // DISABLED: Retry mechanism to prevent rate limits
+        // const waitTime = 1000 * attempt;
+        // console.log(`⏳ Waiting ${waitTime}ms before license activation retry...`);
+        // await new Promise(resolve => setTimeout(resolve, waitTime));
+        console.log('❌ Retry disabled to prevent rate limits');
+        break;
       }
     }
 
