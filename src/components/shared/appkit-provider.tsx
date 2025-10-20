@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import type { ReactNode } from "react"
 import { WalletManager } from "@/services/wallet/wallet-manager"
 import { logEnvironmentStatus, validateEnvironmentVariables } from "@/utils/env-validation"
+import { debugEnvironmentVariables } from "@/utils/env-debug-vercel"
 
 export function AppKitProvider({ children }: { children: ReactNode }) {
   const [isInitialized, setIsInitialized] = useState(false)
@@ -20,6 +21,9 @@ export function AppKitProvider({ children }: { children: ReactNode }) {
         }
         
         // Log environment status for debugging
+        const envDebug = debugEnvironmentVariables()
+        console.log('📊 Environment Summary:', envDebug)
+        
         if (import.meta.env.DEV || import.meta.env.VITE_SHOW_DETAILED_ERRORS === 'true') {
           logEnvironmentStatus()
         }
