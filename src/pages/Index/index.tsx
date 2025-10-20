@@ -11,7 +11,7 @@ const Index = () => {
   // Show countdown unless VITE_SHOW_COMING_SOON is explicitly "false"
   const showComingSoon = import.meta.env.VITE_SHOW_COMING_SOON !== "false";
   // Countdown target
-  const countdownTarget = "2025-10-13T23:00:00+08:00";
+  const countdownTarget = "2025-11-01T20:00:00+08:00";
   return <div className="min-h-screen">
       <Header />
       <main>
@@ -43,8 +43,8 @@ const Index = () => {
       {showComingSoon && (
         <ComingSoonOverlay
           targetDate={countdownTarget}
-          title="Deploying Trainned AI Agents"
-          message="we are currently deploying our ai agents to the cloud..."
+          title="Solairus Public Access In"
+          message="We will be open to the public soon. Early bird access currently enabled by special invites."
         />
       )}
     </div>;
