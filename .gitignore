@@ -32,7 +32,7 @@ solairus-contract/
 !.env.example
 
 # ignore kriptiz
-kriptiz/
+kriptiz
 
 # Debug and temporary files
-.debugs/
+.debugs
