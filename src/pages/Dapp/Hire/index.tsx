@@ -794,7 +794,7 @@ export default function DappHire() {
               style={{ borderRadius: '48px 8px 8px 48px' }}>
               <div className="flex items-center h-full px-3 py-3">
                 {/* Profile Image - Left Circle */}
-                <div className="h-20 rounded-full overflow-hidden border-2 border-cyan-400/30 flex-shrink-0">
+                <div className="h-20 w-20 rounded-full overflow-hidden border-2 border-cyan-400/30 flex-shrink-0">
                   <img
                     src="/media/agents/nova.jpeg"
                     alt="NOVA Agent"
@@ -830,7 +830,7 @@ export default function DappHire() {
             <div className="relative bg-gradient-to-r from-emerald-500/10 to-emerald-600/5 border border-emerald-500/20 min-h-[6rem] h-auto"
               style={{ borderRadius: '48px 8px 8px 48px' }}>
               <div className="flex items-center h-full px-3 py-3">
-                <div className="h-20 rounded-full overflow-hidden border-2 border-emerald-400/30 flex-shrink-0">
+                <div className="h-20 w-20 rounded-full overflow-hidden border-2 border-emerald-400/30 flex-shrink-0">
                   <img
                     src="/media/agents/vega.jpeg"
                     alt="VEGA Agent"
@@ -864,7 +864,7 @@ export default function DappHire() {
             <div className="relative bg-gradient-to-r from-indigo-500/10 to-indigo-600/5 border border-indigo-500/20 min-h-[6rem] h-auto"
               style={{ borderRadius: '48px 8px 8px 48px' }}>
               <div className="flex items-center h-full px-3 py-3">
-                <div className="h-20 rounded-full overflow-hidden border-2 border-indigo-400/30 flex-shrink-0">
+                <div className="h-20 w-20 rounded-full overflow-hidden border-2 border-indigo-400/30 flex-shrink-0">
                   <img
                     src="/media/agents/orion.jpeg"
                     alt="ORION Agent"
@@ -898,7 +898,7 @@ export default function DappHire() {
             <div className="relative bg-gradient-to-r from-amber-500/10 to-amber-600/5 border border-amber-500/20 min-h-[6rem] h-auto"
               style={{ borderRadius: '48px 8px 8px 48px' }}>
               <div className="flex items-center h-full px-3 py-3">
-                <div className="h-20 rounded-full overflow-hidden border-2 border-amber-400/30 flex-shrink-0">
+                <div className="h-20 w-20 rounded-full overflow-hidden border-2 border-amber-400/30 flex-shrink-0">
                   <img
                     src="/media/agents/prime.jpeg"
                     alt="PRIME Agent"
