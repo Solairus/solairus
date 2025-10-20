@@ -58,6 +58,12 @@ export default defineConfig(({ mode }) => {
     optimizeDeps: {
       include: ["react", "react-dom"],
     },
+    define: {
+      global: 'globalThis',
+      'process.env': {},
+    },
+    // Ensure environment variables are available
+    envPrefix: ['VITE_'],
     // Use default dependency optimization for simplicity
   };
 });

@@ -32,6 +32,34 @@ export function AppKitProvider({ children }: { children: ReactNode }) {
     initializeAppKit()
   }, [])
 
+  // Suppress RPC connection notifications
+  useEffect(() => {
+    const style = document.createElement('style')
+    style.textContent = `
+      /* Hide wallet connection notifications */
+      [data-testid="w3m-toast"],
+      .w3m-toast,
+      .wallet-adapter-toast,
+      .solana-wallet-toast,
+      w3m-toast,
+      w3m-modal w3m-toast,
+      .appkit-toast,
+      [data-testid="appkit-toast"] {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+      }
+    `
+    document.head.appendChild(style)
+    
+    return () => {
+      if (document.head.contains(style)) {
+        document.head.removeChild(style)
+      }
+    }
+  }, [])
+
   // Only render children after AppKit is initialized to prevent hook conflicts
   if (!isInitialized) {
     return <div>Initializing wallet...</div>

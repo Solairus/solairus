@@ -15,16 +15,6 @@ import {
 import { getSponsorL1, type SponsorHierarchy } from "@/lib/sponsor-tree";
 import { LicenseErrorHandler } from "@/utils/license-error-handler";
 import { LicensePerformanceMonitor } from "@/utils/license-performance";
-import { 
-  ProfileAccountValidator, 
-  createProfileAccountValidator,
-  ValidationResult 
-} from "@/services/profile/profile-account-validator";
-import { 
-  AccountRecoveryService, 
-  createAccountRecoveryService,
-  RecoveryResult 
-} from "@/services/profile/account-recovery-service";
 
 /**
  * LicenseService
@@ -56,36 +46,72 @@ import {
 export class LicenseService {
   private program: anchor.Program;
   private provider: anchor.AnchorProvider;
-  private profileValidator: ProfileAccountValidator;
-  private accountRecoveryService: AccountRecoveryService;
 
   constructor(provider: anchor.AnchorProvider) {
     this.provider = provider;
     console.log('🔧 Initializing LicenseService with provider');
     this.program = getProgram(provider);
-    
-    // Initialize profile validation and recovery services
-    this.profileValidator = createProfileAccountValidator(this.program, this.provider);
-    this.accountRecoveryService = createAccountRecoveryService(this.program, this.provider, this.profileValidator);
-    
-    console.log('✅ LicenseService initialized with validation and recovery services');
+
+    console.log('✅ LicenseService initialized successfully');
   }
 
   /**
    * Check if user has a profile and fetch profile data
+   * Supports both new ("user_profile") and legacy ("profile") PDA formats for backward compatibility
    */
   async checkUserProfile(userPubkey: PublicKey): Promise<UserProfile | null> {
     try {
-      const { profile } = derivePdas(userPubkey);
-      const userProfile = await this.program.account["userProfile"].fetch(profile);
-      
-      // Profile found successfully
-      
+      // Try new PDA format first ("user_profile")
+      const { profile: newProfile } = derivePdas(userPubkey);
+      const userProfile = await this.program.account["userProfile"].fetch(newProfile);
+
+      // Profile found successfully with new format
       return userProfile as UserProfile;
-    } catch (error) {
-      // Profile doesn't exist or other error
-      console.log("User profile not found:", getErrorMessage(error));
-      return null;
+    } catch (newFormatError) {
+      const newErrorMessage = getErrorMessage(newFormatError);
+
+      // If new format fails, try legacy format ("profile")
+      if (newErrorMessage.includes('Account does not exist') ||
+        newErrorMessage.includes('AccountNotInitialized') ||
+        newErrorMessage.includes('3012')) {
+
+        try {
+          // Try legacy PDA format ("profile")
+          const legacyProfile = PublicKey.findProgramAddressSync([
+            Buffer.from("profile"),
+            userPubkey.toBuffer(),
+          ], this.program.programId)[0];
+
+          const userProfile = await this.program.account["userProfile"].fetch(legacyProfile);
+
+          // Profile found successfully with legacy format
+          console.log(`📋 Found profile using legacy PDA format for user: ${userPubkey.toString()}`);
+          return userProfile as UserProfile;
+        } catch (legacyFormatError) {
+          const legacyErrorMessage = getErrorMessage(legacyFormatError);
+
+          if (legacyErrorMessage.includes('Account does not exist') ||
+            legacyErrorMessage.includes('AccountNotInitialized') ||
+            legacyErrorMessage.includes('3012')) {
+            // Account truly doesn't exist in either format - user needs registration
+            console.log("User profile not found (account doesn't exist):", userPubkey.toString());
+            return null;
+          } else {
+            // Legacy format exists but corrupted
+            console.error("Legacy profile exists but is corrupted:", userPubkey.toString());
+            return null;
+          }
+        }
+      } else if (newErrorMessage.includes('AccountDidNotDeserialize') ||
+        newErrorMessage.includes('3003')) {
+        // New format account exists but can't be deserialized - corrupted account
+        console.error("User profile exists but is corrupted (AccountDidNotDeserialize):", userPubkey.toString());
+        return null;
+      } else {
+        // Other error - log and return null
+        console.error("User profile check failed with unexpected error:", newErrorMessage);
+        return null;
+      }
     }
   }
 
@@ -142,7 +168,7 @@ export class LicenseService {
     } catch (error) {
       console.error("Error getting license info:", getErrorMessage(error));
       endTiming(false, false, getErrorMessage(error));
-      
+
       // CRITICAL FIX: Return 'none' instead of 'loading' on errors
       // This prevents false positive license status display
       return {
@@ -179,8 +205,9 @@ export class LicenseService {
    */
   async isUserRegistered(userPubkey: PublicKey): Promise<boolean> {
     try {
+      // Check if user profile exists and is valid
       const userProfile = await this.checkUserProfile(userPubkey);
-      
+
       if (!userProfile) {
         console.log('❌ User not registered: No profile found');
         return false;
@@ -192,10 +219,10 @@ export class LicenseService {
       const hasValidUser = userProfile.user && userProfile.user.equals(userPubkey);
 
       const isRegistered = hasValidCreatedAt && hasValidSponsor && hasValidUser;
-      
+
       console.log('🔍 Registration check result:', {
         hasValidCreatedAt,
-        hasValidSponsor, 
+        hasValidSponsor,
         hasValidUser,
         isRegistered,
         createdAt: userProfile.createdAt?.toString(),
@@ -333,7 +360,7 @@ export class LicenseService {
   }> {
     try {
       console.log('🔍 Performing pre-registration validation for:', userPubkey.toString());
-      
+
       const { profile } = derivePdas(userPubkey);
       if (!profile) {
         return {
@@ -344,38 +371,34 @@ export class LicenseService {
         };
       }
 
-      // Check if account exists
-      const accountExists = await this.profileValidator.checkAccountExists(profile);
-      
-      if (!accountExists) {
-        console.log('✅ No existing account found, can proceed with registration');
-        return {
-          canProceed: true,
-          existingAccount: false,
-          accountValid: false,
-        };
-      }
-
-      // Account exists, validate its structure
-      console.log('🔍 Existing account found, validating structure...');
-      const validationResult = await this.profileValidator.validateAccountStructure(profile);
-      
-      if (validationResult.isValid) {
-        console.log('✅ Existing account is valid');
+      // Check if account exists by trying to fetch it
+      try {
+        const userProfile = await this.program.account["userProfile"].fetch(profile);
+        console.log('✅ Existing account found and valid');
         return {
           canProceed: true,
           existingAccount: true,
           accountValid: true,
         };
-      } else {
-        console.log('⚠️ Existing account is invalid:', validationResult.errors);
-        return {
-          canProceed: true,
-          existingAccount: true,
-          accountValid: false,
-        };
+      } catch (error) {
+        const errorMessage = getErrorMessage(error);
+        if (errorMessage.includes('Account does not exist') || errorMessage.includes('3012')) {
+          console.log('✅ No existing account found, can proceed with registration');
+          return {
+            canProceed: true,
+            existingAccount: false,
+            accountValid: false,
+          };
+        } else {
+          console.log('⚠️ Existing account is invalid or corrupted:', errorMessage);
+          return {
+            canProceed: false,
+            existingAccount: true,
+            accountValid: false,
+          };
+        }
       }
-      
+
     } catch (error) {
       console.error('❌ Pre-registration validation failed:', getErrorMessage(error));
       return {
@@ -388,48 +411,25 @@ export class LicenseService {
   }
 
   /**
-   * Handle invalid existing account by attempting recovery
+   * Handle invalid existing account - simplified since recovery is no longer needed
    */
   private async handleInvalidExistingAccount(
-    userPubkey: PublicKey, 
+    userPubkey: PublicKey,
     sponsorHierarchy?: SponsorHierarchy
-  ): Promise<RecoveryResult> {
+  ): Promise<{ success: boolean; action: string; error?: string; transactionSignature?: string }> {
     try {
-      console.log('🔄 Attempting to recover invalid existing account...');
-      
-      // Get sponsor for recovery
-      let sponsor: PublicKey;
-      if (sponsorHierarchy?.sponsorL1) {
-        sponsor = sponsorHierarchy.sponsorL1;
-      } else {
-        const rawSponsor = await getSponsorL1(this.provider);
-        const defaultSponsor = new PublicKey(import.meta.env.VITE_DEFAULT_SPONSOR_ADDRESS || '4YXNGAsEgmcPAoBL6974oqAZwZqKNQkx9GSzs67jkdez');
-        
-        // Validate sponsor - if not registered, use default
-        try {
-          const { profile: sponsorProfile } = derivePdas(rawSponsor);
-          await this.program.account["userProfile"].fetch(sponsorProfile);
-          sponsor = rawSponsor;
-        } catch (error) {
-          sponsor = defaultSponsor;
-        }
-      }
+      console.log('ℹ️ Invalid existing account detected');
 
-      // Attempt account recovery
-      const recoveryResult = await this.accountRecoveryService.attemptAccountRecovery(
-        userPubkey,
-        sponsor,
-        3 // max attempts
-      );
+      // Account recovery is no longer needed - the original deserialization issues 
+      // were resolved with contract fixes (init constraint and account size)
+      console.log('ℹ️ Skipping account recovery - issue resolved with contract fix');
 
-      if (recoveryResult.success) {
-        console.log('✅ Account recovery successful:', recoveryResult.action);
-      } else {
-        console.error('❌ Account recovery failed:', recoveryResult.error);
-      }
+      return {
+        success: false,
+        action: 'skipped',
+        error: 'Account recovery no longer needed - issue resolved with contract fix'
+      };
 
-      return recoveryResult;
-      
     } catch (error) {
       console.error('❌ Error handling invalid existing account:', getErrorMessage(error));
       return {
@@ -456,43 +456,45 @@ export class LicenseService {
 
     try {
       console.log('🔍 Performing post-registration validation...');
-      
+
       // Wait for transaction confirmation
       console.log('⏳ Waiting for transaction confirmation...');
       await this.waitForTransactionConfirmation(transactionSignature);
-      
+
       const { profile } = derivePdas(userPubkey);
       if (!profile) {
         errors.push('Failed to derive profile PDA for validation');
         return { isValid: false, errors, warnings };
       }
 
-      // Step 1: Validate account exists
-      const accountExists = await this.profileValidator.checkAccountExists(profile);
-      if (!accountExists) {
-        errors.push('Profile account was not created despite successful transaction');
-        return { isValid: false, errors, warnings };
-      }
-
-      // Step 2: Validate account structure
-      const validationResult = await this.profileValidator.validateAccountStructure(profile);
-      if (!validationResult.isValid) {
-        errors.push(...validationResult.errors);
-        warnings.push(...validationResult.warnings);
+      // Step 1: Validate account exists and can be fetched
+      try {
+        const userProfile = await this.program.account["userProfile"].fetch(profile);
+        if (!userProfile) {
+          errors.push('Profile account was created but cannot be fetched');
+          return { isValid: false, errors, warnings };
+        }
+      } catch (error) {
+        const errorMessage = getErrorMessage(error);
+        if (errorMessage.includes('Account does not exist')) {
+          errors.push('Profile account was not created despite successful transaction');
+        } else {
+          errors.push(`Profile account exists but cannot be deserialized: ${errorMessage}`);
+        }
         return { isValid: false, errors, warnings };
       }
 
       // Step 3: Verify account can be deserialized
       try {
         const userProfile = await this.program.account["userProfile"].fetch(profile) as UserProfile;
-        
+
         // Step 4: Validate profile data integrity
         const dataValidation = this.validateProfileData(userProfile, userPubkey);
         if (!dataValidation.isValid) {
           errors.push(...dataValidation.errors);
           warnings.push(...dataValidation.warnings);
         }
-        
+
       } catch (deserializationError) {
         errors.push(`Account deserialization failed: ${getErrorMessage(deserializationError)}`);
         return { isValid: false, errors, warnings };
@@ -500,9 +502,9 @@ export class LicenseService {
 
       const isValid = errors.length === 0;
       console.log(isValid ? '✅ Post-registration validation passed' : '❌ Post-registration validation failed');
-      
+
       return { isValid, errors, warnings };
-      
+
     } catch (error) {
       errors.push(`Post-registration validation error: ${getErrorMessage(error)}`);
       return { isValid: false, errors, warnings };
@@ -563,7 +565,7 @@ export class LicenseService {
         const nowSeconds = Math.floor(Date.now() / 1000);
         const oneHourAgo = nowSeconds - 3600;
         const oneHourFromNow = nowSeconds + 3600;
-        
+
         if (createdAtSeconds < oneHourAgo || createdAtSeconds > oneHourFromNow) {
           warnings.push(`Profile createdAt timestamp seems unusual: ${new Date(createdAtSeconds * 1000).toISOString()}`);
         }
@@ -571,7 +573,7 @@ export class LicenseService {
 
       const isValid = errors.length === 0;
       return { isValid, errors, warnings };
-      
+
     } catch (error) {
       errors.push(`Profile data validation error: ${getErrorMessage(error)}`);
       return { isValid: false, errors, warnings };
@@ -585,31 +587,60 @@ export class LicenseService {
     transactionSignature: string,
     timeoutMs: number = 30000
   ): Promise<void> {
+    // Skip confirmation for non-transaction signatures
+    if (!transactionSignature ||
+      transactionSignature.length !== 88 ||
+      transactionSignature.includes('FALLBACK') ||
+      transactionSignature.includes('ALREADY') ||
+      transactionSignature.includes('RECOVERED')) {
+      console.log('⏭️ Skipping confirmation for non-transaction signature:', transactionSignature);
+      return;
+    }
+
     const startTime = Date.now();
-    
-    while (Date.now() - startTime < timeoutMs) {
+    let retryCount = 0;
+    const maxRetries = 3;
+
+    while (Date.now() - startTime < timeoutMs && retryCount < maxRetries) {
       try {
         const status = await this.provider.connection.getSignatureStatus(transactionSignature);
-        
-        if (status.value?.confirmationStatus === 'confirmed' || 
-            status.value?.confirmationStatus === 'finalized') {
+
+        if (status.value?.confirmationStatus === 'confirmed' ||
+          status.value?.confirmationStatus === 'finalized') {
           console.log('✅ Transaction confirmed:', transactionSignature);
           return;
         }
-        
+
         if (status.value?.err) {
           throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`);
         }
-        
+
         // Wait before checking again
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
       } catch (error) {
-        console.warn('Error checking transaction status:', getErrorMessage(error));
-        // Continue waiting unless we've timed out
+        retryCount++;
+        const errorMsg = getErrorMessage(error);
+
+        // Stop retrying on invalid signature errors
+        if (errorMsg.includes('Invalid param') || errorMsg.includes('invalid signature')) {
+          console.warn('❌ Invalid transaction signature, stopping confirmation attempts:', transactionSignature);
+          return;
+        }
+
+        console.warn(`Error checking transaction status (attempt ${retryCount}/${maxRetries}):`, errorMsg);
+
+        // Stop retrying after max attempts
+        if (retryCount >= maxRetries) {
+          console.warn('❌ Max retry attempts reached, proceeding without confirmation');
+          return;
+        }
+
+        // Wait longer between retries to avoid 429s
+        await new Promise(resolve => setTimeout(resolve, 3000 * retryCount));
       }
     }
-    
+
     console.warn('⚠️ Transaction confirmation timeout, proceeding with validation');
   }
 
@@ -617,7 +648,7 @@ export class LicenseService {
    * Activate license with retry logic for failed attempts
    */
   private async activateLicenseWithRetry(
-    userPubkey: PublicKey, 
+    userPubkey: PublicKey,
     maxRetries: number = 2
   ): Promise<string> {
     let attempt = 0;
@@ -627,18 +658,18 @@ export class LicenseService {
       try {
         attempt++;
         console.log(`🎫 License activation attempt ${attempt}/${maxRetries}`);
-        
+
         const txSignature = await this.activateLicense(userPubkey);
         console.log('✅ License activation successful on attempt', attempt);
         return txSignature;
-        
+
       } catch (error) {
         lastError = error as Error;
         console.error(`❌ License activation attempt ${attempt} failed:`, getErrorMessage(error));
-        
+
         // Check if error is retryable
         const licenseError = LicenseErrorHandler.parseError(error);
-        
+
         if (!licenseError.isRetryable || attempt >= maxRetries) {
           break;
         }
@@ -664,23 +695,43 @@ export class LicenseService {
   ): Promise<void> {
     try {
       console.log('🔍 Validating license activation success...');
-      
+
       // Wait for transaction confirmation
       await this.waitForTransactionConfirmation(activationTx);
-      
-      // Check license status
-      const licenseInfo = await this.getLicenseInfo(userPubkey);
-      
+
+      // Add small delay to allow profile creation to propagate
+      console.log('⏳ Waiting for profile creation to propagate...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Check license status with retry logic
+      let licenseInfo;
+      let attempts = 0;
+      const maxAttempts = 3;
+
+      while (attempts < maxAttempts) {
+        try {
+          licenseInfo = await this.getLicenseInfo(userPubkey);
+          break;
+        } catch (error) {
+          attempts++;
+          if (attempts >= maxAttempts) {
+            throw error;
+          }
+          console.log(`⏳ Retry ${attempts}/${maxAttempts} - waiting for profile to be available...`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
       if (licenseInfo.status !== 'active') {
         throw new Error(`License activation validation failed: status is ${licenseInfo.status}, expected 'active'`);
       }
-      
+
       if (!licenseInfo.isValid) {
         throw new Error('License activation validation failed: license is not valid');
       }
-      
+
       console.log('✅ License activation validation successful');
-      
+
     } catch (error) {
       console.error('❌ License activation validation failed:', getErrorMessage(error));
       throw new Error(`License activation validation failed: ${getErrorMessage(error)}`);
@@ -699,16 +750,16 @@ export class LicenseService {
       console.log('🔄 Attempting registration rollback due to validation failure...');
       console.log('❌ Validation errors:', validationErrors);
       console.log('📝 Transaction signature:', transactionSignature);
-      
+
       // For now, we'll just log the rollback attempt
       // In a full implementation, this might involve:
       // 1. Closing the created account (if the program supports it)
       // 2. Refunding any fees (if applicable)
       // 3. Cleaning up any related state
-      
+
       console.log('⚠️ Rollback not fully implemented - account may remain in invalid state');
       console.log('💡 User should contact support or retry registration');
-      
+
     } catch (error) {
       console.error('❌ Rollback attempt failed:', getErrorMessage(error));
     }
@@ -724,54 +775,35 @@ export class LicenseService {
   }> {
     try {
       console.log('🔍 Detecting registration state for:', userPubkey.toString());
-      
-      const { profile } = derivePdas(userPubkey);
-      
-      // Check if account exists
-      const accountExists = await this.profileValidator.checkAccountExists(profile);
-      
-      if (!accountExists) {
-        return { state: 'none', details: 'No profile account found' };
+
+      // Check if user is registered using existing method
+      const isRegistered = await this.isUserRegistered(userPubkey);
+
+      if (isRegistered) {
+        return {
+          state: 'completed',
+          details: 'Registration completed successfully'
+        };
       }
 
-      // Account exists, check its validity
-      const validationResult = await this.profileValidator.validateAccountStructure(profile);
-      
-      if (validationResult.isValid) {
-        // Check if registration is actually complete
-        const isRegistered = await this.isUserRegistered(userPubkey);
-        
-        if (isRegistered) {
-          return { 
-            state: 'completed', 
-            details: 'Registration completed successfully' 
-          };
-        } else {
-          return { 
-            state: 'partial', 
-            details: 'Account exists but registration incomplete' 
-          };
-        }
+      // Check if profile exists but is invalid
+      const userProfile = await this.checkUserProfile(userPubkey);
+
+      if (userProfile === null) {
+        return { state: 'none', details: 'No profile account found' };
       } else {
-        // Account exists but is invalid
-        if (validationResult.canRecover) {
-          return { 
-            state: 'partial', 
-            details: `Account exists but invalid: ${validationResult.errors.join(', ')}` 
-          };
-        } else {
-          return { 
-            state: 'corrupted', 
-            details: `Account corrupted: ${validationResult.errors.join(', ')}` 
-          };
-        }
+        // Profile exists but registration check failed - likely partial/corrupted
+        return {
+          state: 'partial',
+          details: 'Account exists but registration incomplete or corrupted'
+        };
       }
-      
+
     } catch (error) {
       console.error('❌ Error detecting registration state:', getErrorMessage(error));
-      return { 
-        state: 'none', 
-        details: `Detection failed: ${getErrorMessage(error)}` 
+      return {
+        state: 'none',
+        details: `Detection failed: ${getErrorMessage(error)}`
       };
     }
   }
@@ -786,17 +818,17 @@ export class LicenseService {
   ): Promise<string> {
     try {
       console.log('🔄 Handling partial registration state...');
-      
+
       // Attempt to recover the existing account
       const recoveryResult = await this.handleInvalidExistingAccount(userPubkey, sponsorHierarchy);
-      
+
       if (recoveryResult.success) {
         console.log('✅ Partial registration recovery successful');
         return recoveryResult.transactionSignature || 'PARTIAL_RECOVERED';
       } else {
         throw new Error(`Partial registration recovery failed: ${recoveryResult.error}`);
       }
-      
+
     } catch (error) {
       console.error('❌ Failed to handle partial registration state:', getErrorMessage(error));
       throw error;
@@ -812,23 +844,12 @@ export class LicenseService {
   ): Promise<void> {
     try {
       console.log('🧹 Handling corrupted registration state...');
-      
-      // Attempt to clean up corrupted account
-      const { profile } = derivePdas(userPubkey);
-      
-      // Try to recover or recreate the account
-      const recoveryResult = await this.accountRecoveryService.attemptAccountRecovery(
-        userPubkey,
-        new PublicKey(import.meta.env.VITE_DEFAULT_SPONSOR_ADDRESS || '4YXNGAsEgmcPAoBL6974oqAZwZqKNQkx9GSzs67jkdez'),
-        1 // single attempt for cleanup
-      );
-      
-      if (recoveryResult.success) {
-        console.log('✅ Corrupted account cleanup successful');
-      } else {
-        console.warn('⚠️ Corrupted account cleanup failed, proceeding with fresh attempt');
-      }
-      
+
+      // Since account recovery is no longer needed (original issues were fixed at contract level),
+      // we just log and continue with fresh registration attempt
+      console.log('ℹ️ Corrupted account cleanup skipped - issue resolved with contract fix');
+      console.log('ℹ️ Proceeding with fresh registration attempt');
+
     } catch (error) {
       console.warn('⚠️ Error handling corrupted registration state:', getErrorMessage(error));
       // Continue with fresh registration attempt
@@ -845,29 +866,38 @@ export class LicenseService {
   ): Promise<string> {
     try {
       console.log('📝 Executing idempotent registration...');
-      
+
       const { config, profile } = derivePdas(userPubkey);
 
-      // Get direct sponsor (L1) with validation
+      // Get direct sponsor (L1) with validation - try referral sponsor first, fallback to default
       let directSponsor: PublicKey;
-      
-      if (sponsorHierarchy?.sponsorL1) {
-        directSponsor = sponsorHierarchy.sponsorL1;
-      } else {
-        // Get sponsor from referral system
-        const rawSponsor = await getSponsorL1(this.provider);
-        const defaultSponsor = new PublicKey(import.meta.env.VITE_DEFAULT_SPONSOR_ADDRESS || '4YXNGAsEgmcPAoBL6974oqAZwZqKNQkx9GSzs67jkdez');
+      const defaultSponsor = new PublicKey(import.meta.env.VITE_DEFAULT_SPONSOR_ADDRESS || '4YXNGAsEgmcPAoBL6974oqAZwZqKNQkx9GSzs67jkdez');
 
-        // Validate sponsor - if not registered, use default
+      if (sponsorHierarchy?.sponsorL1) {
+        // Try to use referral sponsor - check if they are registered (have profile with valid data)
         try {
-          const { profile: sponsorProfile } = derivePdas(rawSponsor);
-          await this.program.account["userProfile"].fetch(sponsorProfile);
-          directSponsor = rawSponsor; // Sponsor is registered, use it
-          console.log('✅ Direct sponsor is registered:', directSponsor.toString());
+          const isSponsorRegistered = await this.isUserRegistered(sponsorHierarchy.sponsorL1);
+          if (isSponsorRegistered) {
+            // Sponsor is properly registered, use them (license not required)
+            directSponsor = sponsorHierarchy.sponsorL1;
+            console.log('✅ Using referral sponsor (registered):', directSponsor.toString());
+          } else {
+            // Sponsor not registered, use default
+            directSponsor = defaultSponsor;
+            console.log('⚠️ Referral sponsor not registered, using default:', defaultSponsor.toString());
+          }
         } catch (error) {
-          console.log('⚠️ Direct sponsor not registered, using default:', defaultSponsor.toString());
+          // Handle any sponsor validation errors - use default
+          const errorMsg = getErrorMessage(error);
+          console.log('⚠️ Error validating referral sponsor:', errorMsg);
+          console.log('⚠️ Using default sponsor instead:', defaultSponsor.toString());
           directSponsor = defaultSponsor;
         }
+      } else {
+        // No referral sponsor provided, use default sponsor as-is
+        // The contract should handle unregistered sponsors gracefully
+        directSponsor = defaultSponsor;
+        console.log('📝 No referral sponsor provided, using default:', defaultSponsor.toString());
       }
 
       // Store sponsor in context for potential retries
@@ -877,6 +907,44 @@ export class LicenseService {
       }
 
       console.log('📝 Executing registration transaction with sponsor:', directSponsor.toString());
+
+      // Log all account details being sent to registration
+      console.log('🔍 REGISTRATION CALL DETAILS:');
+      console.log('  📋 Method: registerUser');
+      console.log('  📊 Sponsor argument details:');
+      console.log('    Type:', typeof directSponsor);
+      console.log('    Value:', directSponsor.toString());
+      console.log('    Is PublicKey?:', directSponsor instanceof PublicKey);
+      console.log('    Constructor:', directSponsor.constructor.name);
+      console.log('  🏗️  Accounts being passed:');
+      console.log('    config:', config.toString());
+      console.log('    profile:', profile.toString());
+      console.log('    user:', userPubkey.toString());
+      console.log('    systemProgram:', anchor.web3.SystemProgram.programId.toString());
+      console.log('  🎯 Profile PDA derivation:');
+      console.log('    Using seeds: ["profile", user_address]');
+      console.log('    Calculated PDA:', profile.toString());
+      console.log('    Expected by contract:', 'AHmRGMX55sn2b1DvKdR8qFfqP5o7KpadC8rYUEDsAbEs');
+      console.log('  🔍 Contract expects:');
+      console.log('    Function signature: registerUser(sponsor: Pubkey)');
+      console.log('    Sponsor should be: A wallet address (PublicKey), not a PDA');
+
+      // Build the instruction to see what Anchor actually resolves
+      const instruction = await this.program.methods
+        .registerUser(directSponsor)
+        .accounts({
+          config,
+          profile,
+          user: userPubkey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .instruction();
+
+      console.log('🔍 ANCHOR INSTRUCTION ANALYSIS:');
+      console.log('  📋 Instruction keys:');
+      instruction.keys.forEach((key, index) => {
+        console.log(`    ${index}: ${key.pubkey.toString()} (${key.isSigner ? 'signer' : 'non-signer'}, ${key.isWritable ? 'writable' : 'readonly'})`);
+      });
 
       const txSignature = await this.program.methods
         .registerUser(directSponsor)
@@ -890,7 +958,7 @@ export class LicenseService {
 
       console.log("✅ Idempotent registration transaction:", txSignature);
       return txSignature;
-      
+
     } catch (error) {
       console.error('❌ Idempotent registration execution failed:', getErrorMessage(error));
       throw error;
@@ -902,39 +970,39 @@ export class LicenseService {
    */
   private isRegistrationErrorRetryable(error: unknown): boolean {
     const errorMessage = getErrorMessage(error).toLowerCase();
-    
+
     // Network/RPC errors are retryable
-    if (errorMessage.includes('network') || 
-        errorMessage.includes('timeout') ||
-        errorMessage.includes('connection') ||
-        errorMessage.includes('rpc')) {
+    if (errorMessage.includes('network') ||
+      errorMessage.includes('timeout') ||
+      errorMessage.includes('connection') ||
+      errorMessage.includes('rpc')) {
       return true;
     }
-    
+
     // Temporary blockchain issues are retryable
     if (errorMessage.includes('blockhash') ||
-        errorMessage.includes('slot') ||
-        errorMessage.includes('recent')) {
+      errorMessage.includes('slot') ||
+      errorMessage.includes('recent')) {
       return true;
     }
-    
+
     // Account already exists is not retryable (should be handled differently)
     if (errorMessage.includes('already exists') ||
-        errorMessage.includes('already initialized')) {
+      errorMessage.includes('already initialized')) {
       return false;
     }
-    
+
     // Insufficient funds is not retryable
     if (errorMessage.includes('insufficient') ||
-        errorMessage.includes('balance')) {
+      errorMessage.includes('balance')) {
       return false;
     }
-    
+
     // Validation errors might be retryable depending on context
     if (errorMessage.includes('validation')) {
       return true;
     }
-    
+
     // Default to retryable for unknown errors
     return true;
   }
@@ -954,10 +1022,10 @@ export class LicenseService {
   }> {
     try {
       console.log('🔄 Providing fallback options for failed registration...');
-      
+
       // Check if user actually has a valid profile despite errors
       const isRegistered = await this.isUserRegistered(userPubkey);
-      
+
       if (isRegistered) {
         console.log('✅ Fallback: User is actually registered despite errors');
         return {
@@ -967,38 +1035,32 @@ export class LicenseService {
           message: 'Registration was actually successful despite reported errors'
         };
       }
-      
-      // Check if we can use a simplified registration approach
-      const { profile } = derivePdas(userPubkey);
-      const accountExists = await this.profileValidator.checkAccountExists(profile);
-      
-      if (accountExists) {
-        // Account exists, try one more recovery attempt
-        console.log('🔄 Fallback: Attempting final recovery of existing account...');
-        
-        const recoveryResult = await this.accountRecoveryService.attemptAccountRecovery(
-          userPubkey,
-          context?.sponsor || new PublicKey(import.meta.env.VITE_DEFAULT_SPONSOR_ADDRESS || '4YXNGAsEgmcPAoBL6974oqAZwZqKNQkx9GSzs67jkdez'),
-          1 // single attempt
-        );
-        
-        if (recoveryResult.success) {
+
+      // Check if user is actually registered despite errors
+      const userProfile = await this.checkUserProfile(userPubkey);
+
+      if (userProfile !== null) {
+        // Account exists, check if it's actually valid
+        console.log('🔄 Fallback: Checking if existing account is actually valid...');
+
+        const isRegistered = await this.isUserRegistered(userPubkey);
+        if (isRegistered) {
           return {
             canProceed: true,
-            action: 'recovery_fallback',
-            result: recoveryResult.transactionSignature || 'FALLBACK_RECOVERED',
-            message: 'Account recovered using fallback recovery method'
+            action: 'already_valid',
+            result: 'FALLBACK_ALREADY_VALID',
+            message: 'Account is actually valid despite reported errors'
           };
         }
       }
-      
+
       // No viable fallback options
       console.log('❌ No viable fallback options available');
       return {
         canProceed: false,
         message: `Registration failed after all attempts and no fallback options available. Last error: ${getErrorMessage(lastError)}`
       };
-      
+
     } catch (error) {
       console.error('❌ Error providing fallback options:', getErrorMessage(error));
       return {
@@ -1013,12 +1075,12 @@ export class LicenseService {
    * Implements requirements 3.5, 2.5, 1.5 for robust registration handling
    */
   async registerUser(
-    userPubkey: PublicKey, 
+    userPubkey: PublicKey,
     sponsorHierarchy?: SponsorHierarchy,
     maxRetries: number = 3
   ): Promise<string> {
     console.log('🔍 Starting resilient registration flow with idempotent handling...');
-    
+
     let attempt = 0;
     let lastError: Error | null = null;
     const registrationContext: {
@@ -1032,7 +1094,7 @@ export class LicenseService {
       try {
         attempt++;
         console.log(`🔄 Registration attempt ${attempt}/${maxRetries}`);
-        
+
         // Step 1: Detect and handle partial registration states
         const registrationState = await this.detectRegistrationState(userPubkey);
         console.log('🔍 Registration state detected:', registrationState);
@@ -1042,17 +1104,17 @@ export class LicenseService {
           case 'completed':
             console.log('✅ Registration already completed successfully');
             return registrationState.transactionSignature || 'ALREADY_REGISTERED';
-            
+
           case 'partial':
             console.log('⚠️ Partial registration detected, attempting recovery...');
             return await this.handlePartialRegistrationState(userPubkey, sponsorHierarchy, registrationContext);
-            
+
           case 'corrupted':
             console.log('❌ Corrupted registration detected, attempting cleanup and retry...');
             await this.handleCorruptedRegistrationState(userPubkey, registrationContext);
             // Continue to fresh registration attempt
             break;
-            
+
           case 'none':
             console.log('📝 No existing registration, proceeding with fresh registration');
             break;
@@ -1060,7 +1122,7 @@ export class LicenseService {
 
         // Step 2: Pre-registration validation
         const preValidationResult = await this.performPreRegistrationValidation(userPubkey);
-        
+
         if (!preValidationResult.canProceed) {
           throw new Error(`Pre-registration validation failed: ${preValidationResult.reason}`);
         }
@@ -1071,33 +1133,35 @@ export class LicenseService {
             console.log('✅ User already has valid profile, registration complete');
             return 'ALREADY_REGISTERED';
           } else {
-            console.log('⚠️ Existing account is invalid, attempting recovery...');
+            console.log('⚠️ Existing account is invalid/corrupted, attempting recovery...');
             const recoveryResult = await this.handleInvalidExistingAccount(userPubkey, sponsorHierarchy);
             if (recoveryResult.success) {
               return recoveryResult.transactionSignature || 'RECOVERED';
             } else {
-              throw new Error(`Account recovery failed: ${recoveryResult.error}`);
+              // If recovery fails, try to recreate the account
+              console.log('⚠️ Recovery failed, attempting fresh registration (account may be corrupted)');
+              // Continue to fresh registration attempt below
             }
           }
         }
 
         // Step 4: Execute fresh registration
         const txSignature = await this.executeIdempotentRegistration(userPubkey, sponsorHierarchy, registrationContext);
-        
+
         // Step 5: Post-registration validation
         const postValidationResult = await this.performPostRegistrationValidation(userPubkey, txSignature);
-        
+
         if (!postValidationResult.isValid) {
           console.error('❌ Post-registration validation failed:', postValidationResult.errors);
-          
+
           // Store context for potential retry
           registrationContext.lastAttemptResult = 'validation_failed';
-          
+
           if (attempt >= maxRetries) {
             // Final attempt failed, try rollback
             await this.attemptRegistrationRollback(userPubkey, txSignature, postValidationResult.errors);
           }
-          
+
           throw new Error(`Post-registration validation failed: ${postValidationResult.errors.join(', ')}`);
         }
 
@@ -1107,13 +1171,13 @@ export class LicenseService {
       } catch (error) {
         lastError = error as Error;
         console.error(`❌ Registration attempt ${attempt} failed:`, getErrorMessage(error));
-        
+
         // Update context with error information
         registrationContext.lastAttemptResult = 'failed';
-        
+
         // Check if error is retryable
         const isRetryable = this.isRegistrationErrorRetryable(error);
-        
+
         if (!isRetryable || attempt >= maxRetries) {
           console.error('❌ Registration failed after all attempts or non-retryable error');
           break;
@@ -1129,7 +1193,7 @@ export class LicenseService {
     // All attempts failed - provide graceful fallback options
     console.error('❌ All registration attempts failed, providing fallback options...');
     const fallbackResult = await this.provideFallbackOptions(userPubkey, lastError, registrationContext);
-    
+
     if (fallbackResult.canProceed) {
       console.log('✅ Fallback option successful:', fallbackResult.action);
       return fallbackResult.result || 'FALLBACK_SUCCESS';
@@ -1144,105 +1208,71 @@ export class LicenseService {
   /**
    * Complete license activation flow with enhanced validation and recovery (register + activate if needed)
    * Implements requirements 1.1, 1.3, 3.2 for robust license activation
+   * FIXED: Prevent automatic retries - conditions haven't changed so retrying will fail
    */
   async completeLicenseActivation(
     userPubkey: PublicKey,
     sponsorHierarchy?: SponsorHierarchy,
-    maxRetries: number = 3
+    maxRetries: number = 1 // FIXED: Default to 1 retry to prevent automatic retries
   ): Promise<{ registrationTx?: string; activationTx: string }> {
-    console.log('🚀 Starting enhanced license activation with validation and recovery...');
-    
+    console.log('🚀 Starting license activation for:', userPubkey.toString());
+    console.log('📝 Note: Registration step removed - contract no longer requires user registration');
+
+    // Build sponsor hierarchy if not provided
+    if (!sponsorHierarchy) {
+      console.log('🔍 Building sponsor hierarchy...');
+      try {
+        const sponsorL1 = await getSponsorL1(this.provider, userPubkey);
+        sponsorHierarchy = {
+          sponsorL1,
+          sponsorL2: sponsorL1, // Will be computed later during activation
+          sponsorL3: sponsorL1  // Will be computed later during activation
+        };
+        console.log('✅ Built sponsor hierarchy with L1:', sponsorL1.toString());
+      } catch (error) {
+        console.log('❌ Error building sponsor hierarchy:', error);
+        // Continue without hierarchy - will use default sponsor
+      }
+    }
+
     let attempt = 0;
     let lastError: Error | null = null;
 
+    // FIXED: Only allow 1 attempt - if conditions haven't changed, retrying will fail
     while (attempt < maxRetries) {
       try {
         attempt++;
         console.log(`🔄 License activation attempt ${attempt}/${maxRetries}`);
-        
-        let registrationTx: string | undefined;
 
-        // Step 1: Enhanced registration check with validation
-        console.log('🔍 Performing enhanced registration validation...');
-        const preValidationResult = await this.performPreRegistrationValidation(userPubkey);
-        
-        if (!preValidationResult.canProceed) {
-          throw new Error(`Pre-activation validation failed: ${preValidationResult.reason}`);
-        }
+        // Skip registration step entirely - contract no longer has register_user method
+        console.log('⏭️ Skipping registration step (removed from contract)');
 
-        // Handle registration scenarios with recovery
-        if (!preValidationResult.existingAccount) {
-          // No existing account - proceed with normal registration
-          console.log('📝 No existing profile found, registering user...');
-          registrationTx = await this.registerUser(userPubkey, sponsorHierarchy);
-          console.log('✅ User registered with tx:', registrationTx);
-        } else if (!preValidationResult.accountValid) {
-          // Invalid existing account - attempt recovery
-          console.log('⚠️ Invalid existing account detected, attempting recovery...');
-          const recoveryResult = await this.handleInvalidExistingAccount(userPubkey, sponsorHierarchy);
-          
-          if (recoveryResult.success) {
-            registrationTx = recoveryResult.transactionSignature;
-            console.log('✅ Account recovery successful:', recoveryResult.action);
-          } else {
-            throw new Error(`Account recovery failed: ${recoveryResult.error}`);
-          }
-        } else {
-          console.log('✅ Valid existing profile found, skipping registration');
-        }
-
-        // Step 2: Wait for registration confirmation if needed
-        if (registrationTx && registrationTx !== 'ALREADY_REGISTERED' && registrationTx !== 'RECOVERED') {
-          console.log('⏳ Waiting for registration confirmation...');
-          await this.waitForTransactionConfirmation(registrationTx);
-        }
-
-        // Step 3: Final validation before license activation
-        console.log('🔍 Performing final validation before license activation...');
-        const { profile } = derivePdas(userPubkey);
-        const finalValidation = await this.profileValidator.validateAccountStructure(profile);
-        
-        if (!finalValidation.isValid) {
-          throw new Error(`Final validation failed: ${finalValidation.errors.join(', ')}`);
-        }
-
-        // Step 4: Activate license with retry logic
-        console.log('🎫 Activating license with enhanced error handling...');
-        const activationTx = await this.activateLicenseWithRetry(userPubkey, 2);
+        console.log('🎫 Activating license directly...');
+        const activationTx = await this.activateLicense(userPubkey);
         console.log('✅ License activated with tx:', activationTx);
 
-        // Step 5: Post-activation validation
+        // Post-activation validation
         console.log('🔍 Performing post-activation validation...');
         await this.validateLicenseActivationSuccess(userPubkey, activationTx);
 
-        console.log('🎉 Enhanced license activation completed successfully');
+        console.log('🎉 License activation completed successfully');
         return {
-          registrationTx,
+          registrationTx: undefined, // No registration needed
           activationTx,
         };
 
       } catch (error) {
         lastError = error as Error;
         console.error(`❌ License activation attempt ${attempt} failed:`, getErrorMessage(error));
-        
-        // Check if error is retryable
-        const licenseError = LicenseErrorHandler.parseError(error);
-        
-        if (!licenseError.isRetryable || attempt >= maxRetries) {
-          console.error('❌ License activation failed after all attempts');
-          break;
-        }
 
-        // Wait before retry with exponential backoff
-        const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-        console.log(`⏳ Waiting ${waitTime}ms before retry...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
+        // FIXED: Don't retry automatically - conditions haven't changed
+        break;
       }
     }
 
     // All attempts failed
     const licenseError = LicenseErrorHandler.parseError(lastError);
-    console.error("Enhanced license activation failed after all attempts:", licenseError);
+    console.error("Enhanced license activation failed:", licenseError);
 
     // Throw the parsed error with better messaging
     const enhancedError = new Error(licenseError.message) as Error & {
@@ -1261,6 +1291,7 @@ export class LicenseService {
   /**
    * Complete license activation process (registration + activation)
    * Users can manually retry if needed
+   * FIXED: Prevent automatic retries - conditions haven't changed so retrying will fail
    */
   async activateLicenseComplete(
     userPubkey: PublicKey,
@@ -1268,7 +1299,9 @@ export class LicenseService {
   ): Promise<{ registrationTx?: string; activationTx: string }> {
     console.log('🚀 Starting license activation process for:', userPubkey.toString());
     try {
-      const result = await this.completeLicenseActivation(userPubkey, sponsorHierarchy);
+      // FIXED: Remove automatic retry logic - if it fails once, conditions haven't changed
+      // so retrying will just keep failing. Let user manually retry if needed.
+      const result = await this.completeLicenseActivation(userPubkey, sponsorHierarchy, 1); // maxRetries = 1
       console.log('✅ License activation completed successfully:', result);
       return result;
     } catch (error) {

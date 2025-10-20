@@ -186,7 +186,7 @@ class RpcSwitcher {
         const connection = new Connection(endpoint.url, 'confirmed')
         this.activeConnections.set(cluster, connection)
         
-        this.showRpcNotification('success', `Connected to ${endpoint.name} (${cluster})`, cluster)
+        // this.showRpcNotification('success', `Connected to ${endpoint.name} (${cluster})`, cluster)
         return connection
       } catch (error) {
         console.warn(`❌ Failed to create connection to ${endpoint.name}:`, error)
@@ -230,7 +230,7 @@ class RpcSwitcher {
         const connection = new Connection(endpoint.url, 'confirmed')
         this.activeConnections.set(cluster, connection)
         
-        this.showRpcNotification('info', `Switched to ${endpoint.name}`, cluster)
+        // this.showRpcNotification('info', `Switched to ${endpoint.name}`, cluster)
         return connection
       } catch (error) {
         console.warn(`❌ Failed to switch to ${endpoint.name}:`, error)

@@ -47,7 +47,7 @@ type TerminalItem = {
 export default function AgentsOutcomesCard() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [prices, setPrices] = useState<Record<string, number>>({});
-  const ROW_CAP = Math.max(1, Number(import.meta.env.VITE_OUTCOME_ROWS ?? 7));
+  const ROW_CAP = Math.max(1, Number(import.meta.env.VITE_OUTCOME_ROWS ?? 10));
   const [agents, setAgents] = useState<Array<AgentItem | TerminalItem>>(() =>
     Array.from({ length: ROW_CAP }, (_, i) => {
       const tier = pickTier();
