@@ -28,19 +28,8 @@ vi.mock('@/lib/solairus-main', () => ({
   UserProfile: {},
 }));
 
-vi.mock('@/services/profile/profile-account-validator', () => ({
-  createProfileAccountValidator: vi.fn(() => ({
-    checkAccountExists: vi.fn(),
-    validateAccountStructure: vi.fn(),
-    validateAccountData: vi.fn(),
-  })),
-}));
-
-vi.mock('@/services/profile/account-recovery-service', () => ({
-  createAccountRecoveryService: vi.fn(() => ({
-    attemptAccountRecovery: vi.fn(),
-  })),
-}));
+// Note: Profile validation services have been removed
+// Tests now focus on core license functionality
 
 vi.mock('@/lib/sponsor-tree', () => ({
   getSponsorL1: vi.fn(() => Promise.resolve(new PublicKey('11111111111111111111111111111114'))),

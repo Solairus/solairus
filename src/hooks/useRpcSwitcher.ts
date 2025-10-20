@@ -34,16 +34,16 @@ export function useRpcSwitcher(cluster: ClusterName = 'mainnet-beta') {
       const connection = await switchRpcEndpoint(cluster)
       
       // Show success notification
-      Swal.fire({
-        icon: 'success',
-        title: '🔄 RPC Switched',
-        text: `Successfully switched to a new RPC endpoint for ${cluster}`,
-        toast: true,
-        position: 'top-end',
-        showConfirmButton: false,
-        timer: 3000,
-        timerProgressBar: true
-      })
+      // Swal.fire({
+      //   icon: 'success',
+      //   title: '🔄 RPC Switched',
+      //   text: `Successfully switched to a new RPC endpoint for ${cluster}`,
+      //   toast: true,
+      //   position: 'top-end',
+      //   showConfirmButton: false,
+      //   timer: 3000,
+      //   timerProgressBar: true
+      // })
       
       return connection
     } catch (error) {
@@ -51,16 +51,16 @@ export function useRpcSwitcher(cluster: ClusterName = 'mainnet-beta') {
       setLastError(errorMessage)
       
       // Show error notification
-      Swal.fire({
-        icon: 'error',
-        title: '❌ RPC Switch Failed',
-        text: errorMessage,
-        toast: true,
-        position: 'top-end',
-        showConfirmButton: false,
-        timer: 5000,
-        timerProgressBar: true
-      })
+      // Swal.fire({
+      //   icon: 'error',
+      //   title: '❌ RPC Switch Failed',
+      //   text: errorMessage,
+      //   toast: true,
+      //   position: 'top-end',
+      //   showConfirmButton: false,
+      //   timer: 5000,
+      //   timerProgressBar: true
+      // })
       
       console.error('Failed to switch RPC:', error)
       return null
@@ -90,16 +90,16 @@ export function useRpcSwitcher(cluster: ClusterName = 'mainnet-beta') {
     console.warn('Connection error detected, attempting RPC switch:', error)
     
     // Show notification about connection issue
-    Swal.fire({
-      icon: 'warning',
-      title: '⚠️ Connection Issue',
-      text: 'Attempting to switch to a better RPC endpoint...',
-      toast: true,
-      position: 'top-end',
-      showConfirmButton: false,
-      timer: 3000,
-      timerProgressBar: true
-    })
+    // Swal.fire({
+    //   icon: 'warning',
+    //   title: '⚠️ Connection Issue',
+    //   text: 'Attempting to switch to a better RPC endpoint...',
+    //   toast: true,
+    //   position: 'top-end',
+    //   showConfirmButton: false,
+    //   timer: 3000,
+    //   timerProgressBar: true
+    // })
     
     // Try to switch to a better RPC
     return switchRpc()

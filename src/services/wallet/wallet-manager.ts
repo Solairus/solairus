@@ -153,6 +153,9 @@ export class WalletManager {
         "--w3m-z-index": 1000,
       },
       enableWallets: true,
+      // Disable various UI elements that might show notifications
+      enableNetworkView: false,
+      enableExplorer: false,
       featuredWalletIds: [
         // Solana-centric wallets (IDs may change across catalog versions; leave empty if causing issues)
         "1ca0bdd4747578705b1939af023d120677c64fe6ca76add81fda36e350605e79", // Solflare

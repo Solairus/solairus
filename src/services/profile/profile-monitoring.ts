@@ -683,11 +683,11 @@ export class ProfileMonitoringService {
         };
 
         // Add memory usage if available
-        if (typeof performance !== 'undefined' && (performance as unknown).memory) {
-          const memory = (performance as unknown).memory as {
+        if (typeof performance !== 'undefined' && typeof (performance as unknown as { memory?: unknown }).memory !== 'undefined') {
+          const memory = (performance as unknown as { memory: {
             usedJSHeapSize: number;
             totalJSHeapSize: number;
-          };
+          } }).memory;
           healthMetric.memoryUsage = {
             used: memory.usedJSHeapSize,
             total: memory.totalJSHeapSize,

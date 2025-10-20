@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
 import { useLicense } from "@/contexts/license-context";
 import LicenseStatusCard from "@/components/license/LicenseStatusCard";
@@ -12,6 +13,7 @@ import { LicenseInfo } from "@/lib/solairus-main";
 import { LicenseErrorHandler } from "@/utils/license-error-handler";
 import * as anchor from "@coral-xyz/anchor";
 import { getHealthyRpcConnection } from "@/utils/rpc-switcher";
+import BackButton from '@/components/ui/BackButton';
 
 // Helper function to get USDT balance
 async function getUsdtBalance(userPubkey: PublicKey, usdtMint: PublicKey): Promise<string> {
@@ -71,13 +73,17 @@ export default function LicenseActivationPage() {
     licenseService,
   } = useLicense();
   const navigate = useNavigate();
+  const location = useLocation();
+  
+  // Get the return path from navigation state, default to /dapp
+  const returnPath = location.state?.returnPath || '/dapp';
   
   const [licenseFee, setLicenseFee] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activationSuccess, setActivationSuccess] = useState(false);
   const [usdtBalance, setUsdtBalance] = useState<string>('0');
-  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [showOrderSummary, setShowOrderSummary] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [transactionHash, setTransactionHash] = useState<string>('');
 
@@ -124,9 +130,9 @@ export default function LicenseActivationPage() {
           setUsdtBalance('100.00'); // Placeholder balance
         }
 
-        // If already has valid license, redirect to home
+        // If already has valid license, redirect to intended page
         if (licenseInfo.isValid) {
-          navigate('/dapp', { replace: true });
+          navigate(returnPath, { replace: true });
         }
       } catch (err) {
         console.error('Failed to load license info:', err);
@@ -146,7 +152,7 @@ export default function LicenseActivationPage() {
     };
 
     loadLicenseInfo();
-  }, [isConnected, account, licenseService, navigate, licenseInfo.isValid]);
+  }, [isConnected, account, licenseService, navigate, licenseInfo.isValid, returnPath]);
 
   const handleActivation = async () => {
     if (!account) return;
@@ -171,8 +177,8 @@ export default function LicenseActivationPage() {
       return;
     }
 
-    // Show confirmation dialog
-    setShowConfirmation(true);
+    // Show order summary in the same card
+    setShowOrderSummary(true);
   };
 
   const confirmActivation = async () => {
@@ -180,7 +186,7 @@ export default function LicenseActivationPage() {
 
     try {
       setError(null);
-      setShowConfirmation(false);
+      setShowOrderSummary(false);
 
       const txSignature = await activateLicense();
 
@@ -197,14 +203,15 @@ export default function LicenseActivationPage() {
 
       setActivationSuccess(true);
 
-      // Redirect to home after a brief success display
+      // Redirect to intended page after a brief success display
       setTimeout(() => {
-        navigate('/dapp', { replace: true });
+        navigate(returnPath, { replace: true });
       }, 3000);
 
     } catch (err) {
       console.error('License activation failed:', err);
       setRetryCount(prev => prev + 1);
+      setShowOrderSummary(false);
 
       // Use enhanced error handler for actionable error messages
       const licenseError = LicenseErrorHandler.parseError(err);
@@ -214,11 +221,16 @@ export default function LicenseActivationPage() {
 
   if (!isConnected) {
     return (
-      <div className="space-y-6">
+      <div className="max-w-sm mx-auto space-y-3 p-3">
+        {/* Back Button */}
+        <div className="flex items-center justify-start">
+          <BackButton to="/dapp" />
+        </div>
+        
         <WelcomeHeader />
         <Card className="border-yellow-200 bg-yellow-50">
-          <CardContent className="p-6 text-center">
-            <p className="text-yellow-800">Please connect your wallet to activate your license.</p>
+          <CardContent className="p-3 text-center">
+            <p className="text-yellow-800 text-sm">Please connect your wallet to activate your license.</p>
           </CardContent>
         </Card>
       </div>
@@ -227,45 +239,157 @@ export default function LicenseActivationPage() {
 
   if (activationSuccess) {
     return (
-      <div className="space-y-6">
-        <SuccessMessage licenseInfo={licenseInfo} transactionHash={transactionHash} />
-      </div>
+      <SuccessMessage licenseInfo={licenseInfo} transactionHash={transactionHash} />
     );
   }
 
   return (
-    <div className="flex flex-col min-h-full">
+    <div className="max-w-sm mx-auto space-y-3 p-3">
+      {/* Back Button */}
+      <div className="flex items-center justify-start">
+        <BackButton to="/dapp" />
+      </div>
+      
       {/* Welcome Header */}
       <WelcomeHeader />
       
-      {/* Main Activation Card - Center */}
-      <div className="flex-1 flex items-center justify-center py-8">
-        <LicenseStatusCard
-          status={licenseInfo.status}
-          expirationDate={licenseInfo.expirationDate}
-          daysRemaining={licenseInfo.daysRemaining}
-          onActivate={handleActivation}
-          isLoading={isLoading || licenseLoading || isActivating}
-          licenseFee={licenseFee}
-        />
-      </div>
-      
-      {/* Features Overview - Bottom */}
-      <FeaturesOverview />
+      {/* Cost and Balance Badges */}
+      {licenseFee && (
+        <div className="flex gap-2 justify-center mb-4">
+          <Badge variant="secondary" className="text-xs px-2 py-1">
+            Cost: {licenseFee} USDT
+          </Badge>
+          <Badge 
+            variant={parseFloat(usdtBalance) >= parseFloat(licenseFee) ? "default" : "destructive"} 
+            className="text-xs px-2 py-1"
+          >
+            Balance: {usdtBalance} USDT
+          </Badge>
+        </div>
+      )}
+
+      {/* Main License Card */}
+      <Card className="bg-gradient-to-br from-slate-50 to-gray-100 border-gray-200">
+        <CardContent className="p-4 text-center space-y-3">
+          {/* Icon */}
+          <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto">
+            <Shield className="w-6 h-6 text-blue-600" />
+          </div>
+          
+          {!showOrderSummary ? (
+            <>
+              {/* License Status */}
+              <div className="space-y-2">
+                <h2 className="text-lg font-semibold text-gray-800">
+                  {licenseInfo.isValid ? 'Extend License' : 'Activate Yearly License'}
+                </h2>
+                <p className="text-sm text-gray-600">
+                  {licenseInfo.isValid 
+                    ? `Extend your license for another 365 days (1 year)`
+                    : 'Get 365 days (1 year) of full access to Solairus features'
+                  }
+                </p>
+                <div className="bg-blue-50 rounded-lg p-2 border border-blue-100">
+                  <p className="text-xs text-blue-700 font-medium">📅 License Duration: 365 Days (1 Year)</p>
+                  <p className="text-xs text-blue-600">Full access to all AI trading features</p>
+                </div>
+              </div>
+
+              {/* License Fee Display */}
+              {licenseFee && (
+                <div className="bg-white/60 rounded-lg p-3 border border-gray-200">
+                  <p className="text-xs text-gray-500 mb-1">License Fee (365 Days)</p>
+                  <p className="text-2xl font-bold text-gray-800">{licenseFee} <span className="text-sm font-normal text-gray-500">USDT</span></p>
+                  <p className="text-xs text-gray-500 mt-1">1 Year of full access to all Solairus features</p>
+                </div>
+              )}
+
+              {/* Activate Button */}
+              <Button
+                onClick={handleActivation}
+                disabled={isLoading || licenseLoading || isActivating || parseFloat(usdtBalance) < parseFloat(licenseFee)}
+                className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white py-2.5 text-sm font-medium shadow-sm hover:shadow-md transition-all duration-200 active:scale-95"
+                size="sm"
+              >
+                {isLoading || licenseLoading ? (
+                  'Loading...'
+                ) : isActivating ? (
+                  'Processing...'
+                ) : (
+                  <>🚀 Activate License (365 Days)</>
+                )}
+              </Button>
+            </>
+          ) : (
+            <>
+              {/* Order Summary */}
+              <div className="space-y-3">
+                <h3 className="text-lg font-semibold text-gray-800">Order Summary</h3>
+                
+                <div className="bg-white/60 rounded-lg p-3 border border-gray-200 space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">License Duration:</span>
+                    <span className="font-medium text-gray-800">365 days</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Payment Amount:</span>
+                    <span className="font-medium text-gray-800">{licenseFee} USDT</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Network Fee:</span>
+                    <span className="font-medium text-gray-800">~0.01 SOL</span>
+                  </div>
+                  <div className="border-t pt-2 mt-2">
+                    <div className="flex justify-between text-sm font-semibold">
+                      <span className="text-gray-800">Total:</span>
+                      <span className="text-gray-800">{licenseFee} USDT</span>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-xs text-gray-500">
+                  You are about to activate your yearly Solairus license.
+                </p>
+
+                {/* Confirmation Buttons */}
+                <div className="flex gap-2">
+                  <Button
+                    onClick={confirmActivation}
+                    disabled={isActivating}
+                    className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white py-2 text-sm font-medium shadow-sm hover:shadow-md transition-all duration-200 active:scale-95"
+                    size="sm"
+                  >
+                    {isActivating ? 'Processing...' : 'Confirm Payment'}
+                  </Button>
+                  <Button
+                    onClick={() => setShowOrderSummary(false)}
+                    variant="outline"
+                    disabled={isActivating}
+                    className="flex-1 py-2 text-sm border-gray-300 hover:bg-gray-50 transition-all duration-200 active:scale-95"
+                    size="sm"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Error Display */}
       {(error || licenseError) && (
         <Card className="border-red-200 bg-red-50">
-          <CardContent className="p-4 space-y-3">
-            <div className="flex items-start gap-3">
-              <div className="w-5 h-5 text-red-600 mt-0.5">
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-start gap-2">
+              <div className="w-4 h-4 text-red-600 mt-0.5">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
               <div className="flex-1">
-                <h4 className="font-semibold text-red-800 text-sm">Activation Failed</h4>
-                <p className="text-red-700 text-sm mt-1">{error || licenseError}</p>
+                <h4 className="font-medium text-red-800 text-sm">Activation Failed</h4>
+                <p className="text-red-700 text-xs mt-1">{error || licenseError}</p>
                 {retryCount > 0 && (
                   <p className="text-red-600 text-xs mt-1">
                     Attempt {retryCount} failed. You can try again.
@@ -278,11 +402,12 @@ export default function LicenseActivationPage() {
                 onClick={() => {
                   setError(null);
                   setRetryCount(0);
+                  setShowOrderSummary(false);
                   handleActivation();
                 }}
                 size="sm"
                 variant="outline"
-                className="border-red-300 text-red-700 hover:bg-red-100"
+                className="border-red-300 text-red-700 hover:bg-red-100 text-xs px-2 py-1"
               >
                 Try Again
               </Button>
@@ -290,9 +415,11 @@ export default function LicenseActivationPage() {
                 onClick={() => {
                   setError(null);
                   setRetryCount(0);
+                  setShowOrderSummary(false);
                 }}
                 variant="outline"
                 size="sm"
+                className="text-xs px-2 py-1"
               >
                 Dismiss
               </Button>
@@ -301,89 +428,25 @@ export default function LicenseActivationPage() {
         </Card>
       )}
 
-      {/* USDT Balance Display */}
-      {licenseFee && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Payment Information</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex justify-between items-center p-3 bg-muted rounded-lg">
-              <span className="text-sm font-medium">Your USDT Balance:</span>
-              <span className="text-lg font-bold">{usdtBalance} USDT</span>
-            </div>
-            <div className="flex justify-between items-center p-3 bg-primary/10 rounded-lg">
-              <span className="text-sm font-medium">License Fee:</span>
-              <span className="text-lg font-bold text-primary">{licenseFee} USDT</span>
-            </div>
-            {parseFloat(usdtBalance) < parseFloat(licenseFee) && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm text-red-800">
-                  Insufficient USDT balance. Please add more USDT to your wallet.
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      {/* Features Overview */}
+      <FeaturesOverview />
 
-      {/* Payment Confirmation Dialog */}
-      {showConfirmation && (
-        <Card className="border-primary bg-primary/5">
-          <CardHeader>
-            <CardTitle className="text-lg">Confirm License Activation</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              You are about to activate your yearly Solairus license for {licenseFee} USDT.
-            </p>
-            <div className="p-3 bg-background rounded-lg border">
-              <div className="flex justify-between text-sm">
-                <span>License Duration:</span>
-                <span className="font-medium">365 days</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span>Payment Amount:</span>
-                <span className="font-medium">{licenseFee} USDT</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span>Transaction Fee:</span>
-                <span className="font-medium">~0.01 SOL</span>
-              </div>
+      {/* License Activation Modal */}
+      <Dialog open={isActivating} onOpenChange={() => {}}>
+        <DialogContent className="max-w-sm mx-auto [&>button]:hidden">
+          <DialogHeader>
+            <div className="flex flex-col items-center space-y-4 pt-2">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+              <DialogTitle className="text-lg font-semibold text-blue-800">
+                Activating License
+              </DialogTitle>
+              <DialogDescription className="text-center text-blue-600">
+                Processing your USDT payment and activating your yearly license...
+              </DialogDescription>
             </div>
-            <div className="flex gap-2">
-              <Button
-                onClick={confirmActivation}
-                className="flex-1"
-                disabled={isActivating}
-              >
-                {isActivating ? 'Processing...' : 'Confirm Payment'}
-              </Button>
-              <Button
-                onClick={() => setShowConfirmation(false)}
-                variant="outline"
-                className="flex-1"
-                disabled={isActivating}
-              >
-                Cancel
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Loading State */}
-      {isActivating && (
-        <Card className="border-blue-200 bg-blue-50">
-          <CardContent className="p-6 text-center space-y-4">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-            <h3 className="text-lg font-semibold text-blue-800">Activating License</h3>
-            <p className="text-sm text-blue-600">
-              Processing your USDT payment and activating your yearly license...
-            </p>
-          </CardContent>
-        </Card>
-      )}
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -391,32 +454,30 @@ export default function LicenseActivationPage() {
 // Welcome Header Component
 function WelcomeHeader() {
   return (
-    <Card className="bg-gradient-to-r from-primary/10 to-secondary/10 border-primary/20 mx-4 mt-4">
-      <CardHeader className="text-center pb-4">
+    <Card className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-blue-200">
+      <CardContent className="p-3 text-center">
         <div className="flex items-center justify-center gap-2 mb-2">
-          <Sparkles className="w-6 h-6 text-primary" />
-          <CardTitle className="text-2xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+          <Sparkles className="w-4 h-4 text-blue-600" />
+          <h1 className="text-lg font-bold bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent">
             Welcome to Solairus
-          </CardTitle>
-          <Sparkles className="w-6 h-6 text-primary" />
+          </h1>
+          <Sparkles className="w-4 h-4 text-blue-600" />
         </div>
-        <p className="text-lg text-foreground font-medium">
+        <p className="text-sm text-gray-600 font-medium mb-2">
           Your Smartest AI Trading Agents Portal
         </p>
-      </CardHeader>
-      <CardContent className="text-center">
-        <p className="text-sm text-muted-foreground mb-4">
-          To proceed and unlock the full potential of AI-powered trading, please activate your yearly license.
-        </p>
-        <Badge variant="outline" className="text-xs">
+        <Badge variant="outline" className="text-xs border-blue-300 text-blue-700">
           Premium AI Trading Platform
         </Badge>
+        <p className="text-xs text-gray-500 mt-2">
+          To proceed and unlock the full potential of AI-powered trading, please activate your yearly license.
+        </p>
       </CardContent>
     </Card>
   );
 }
 
-// Features Overview Component - Mobile-friendly bottom section
+// Features Overview Component - Mobile app-like 3 inline cards
 function FeaturesOverview() {
   const features = [
     {
@@ -437,16 +498,20 @@ function FeaturesOverview() {
   ];
 
   return (
-    <div className="mt-auto pb-4">
-      <div className="grid grid-cols-3 gap-3 px-2">
-        {features.map(({ icon: Icon, title, description }) => (
-          <div key={title} className="text-center p-3 rounded-lg bg-muted/30">
-            <Icon className="w-6 h-6 text-primary mx-auto mb-2" />
-            <h3 className="font-medium text-xs mb-1 text-foreground">{title}</h3>
-            <p className="text-xs text-muted-foreground leading-tight">{description}</p>
-          </div>
-        ))}
-      </div>
+    <div className="grid grid-cols-3 gap-2">
+      {features.map(({ icon: Icon, title, description }) => (
+        <Card key={title} className="bg-gradient-to-br from-white to-gray-50/80 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200 active:scale-95">
+          <CardContent className="p-3 text-center space-y-2">
+            <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center mx-auto">
+              <Icon className="w-4 h-4 text-blue-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-xs text-gray-800 leading-tight">{title}</h3>
+              <p className="text-xs text-gray-500 mt-1 leading-tight">{description}</p>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
     </div>
   );
 }
@@ -454,33 +519,33 @@ function FeaturesOverview() {
 // Success Message Component
 function SuccessMessage({ licenseInfo, transactionHash }: { licenseInfo: LicenseInfo; transactionHash?: string }) {
   return (
-    <div className="space-y-6">
-      <Card className="bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
-        <CardHeader className="text-center">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-              <Shield className="w-6 h-6 text-green-600" />
-            </div>
+    <div className="max-w-sm mx-auto p-3">
+      <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-green-200">
+        <CardContent className="p-4 text-center space-y-3">
+          <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto">
+            <Shield className="w-6 h-6 text-green-600" />
           </div>
-          <CardTitle className="text-2xl font-bold text-green-800">
-            Congratulations!
-          </CardTitle>
-          <p className="text-green-700">
-            Your yearly license has been successfully activated
-          </p>
-        </CardHeader>
-        <CardContent className="text-center space-y-4">
-          <p className="text-sm text-green-600">
+          
+          <div className="space-y-2">
+            <h2 className="text-lg font-bold text-green-800">
+              Congratulations!
+            </h2>
+            <p className="text-sm text-green-700">
+              Your yearly license has been successfully activated
+            </p>
+          </div>
+
+          <p className="text-xs text-green-600">
             You now have full access to all Solairus AI trading features.
           </p>
           
           {licenseInfo.expirationDate && (
-            <div className="p-4 bg-green-100 rounded-lg space-y-2">
+            <div className="bg-green-100/60 rounded-lg p-3 space-y-2">
               <div>
-                <p className="text-sm font-medium text-green-800">
+                <p className="text-xs font-medium text-green-800">
                   License Valid Until:
                 </p>
-                <p className="text-lg font-bold text-green-900">
+                <p className="text-sm font-bold text-green-900">
                   {licenseInfo.expirationDate.toLocaleDateString()}
                 </p>
               </div>

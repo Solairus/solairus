@@ -10,13 +10,28 @@
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey, Connection } from "@solana/web3.js";
 import { derivePdas, getErrorMessage, UserProfile } from "@/lib/solairus-main";
-import { 
-  ProfileDiagnosticsService,
-  AccountStateInspection,
-  PdaDerivationDiagnostic 
-} from "./profile-diagnostics";
-import { ProfileAccountValidator, ValidationResult } from "./profile-account-validator";
-import { AccountRecoveryService, RecoveryResult } from "./account-recovery-service";
+// Placeholder types for missing services
+interface AccountStateInspection {
+  [key: string]: unknown;
+}
+
+interface PdaDerivationDiagnostic {
+  [key: string]: unknown;
+}
+
+interface ValidationResult {
+  isValid: boolean;
+  errors: string[];
+  canRecover: boolean;
+  suggestedAction: string;
+}
+
+interface RecoveryResult {
+  success: boolean;
+  error?: string;
+  action?: string;
+  transactionSignature?: string;
+}
 
 /**
  * Account structure analysis result
@@ -128,17 +143,11 @@ export class ProfileDevTools {
   private program: anchor.Program;
   private provider: anchor.AnchorProvider;
   private connection: Connection;
-  private diagnostics: ProfileDiagnosticsService;
-  private validator: ProfileAccountValidator;
-  private recovery: AccountRecoveryService;
 
   constructor(program: anchor.Program, provider: anchor.AnchorProvider) {
     this.program = program;
     this.provider = provider;
     this.connection = provider.connection;
-    this.diagnostics = new ProfileDiagnosticsService(program, provider);
-    this.validator = new ProfileAccountValidator(program, provider);
-    this.recovery = new AccountRecoveryService(program, provider);
   }
 
   /**
@@ -383,26 +392,35 @@ export class ProfileDevTools {
     }
 
     // Gather all diagnostic information
-    const [
-      structureAnalysis,
-      validationResult,
-      pdaDiagnostic,
-      accountInspection,
-    ] = await Promise.all([
-      this.analyzeAccountStructure(userPubkey),
-      this.validator.validateAccountStructure(profile),
-      this.diagnostics.diagnosePdaDerivation(userPubkey),
-      this.diagnostics.inspectAccountState(profile),
-    ]);
+    const structureAnalysis = await this.analyzeAccountStructure(userPubkey);
+    
+    // Placeholder implementations for missing services
+    const validationResult: ValidationResult = {
+      isValid: structureAnalysis.analysis.exists && structureAnalysis.analysis.data.canDeserialize,
+      errors: structureAnalysis.recommendations,
+      canRecover: structureAnalysis.severity !== 'critical',
+      suggestedAction: structureAnalysis.recommendations[0] || 'No action needed',
+    };
 
-    // Attempt recovery if needed
+    const pdaDiagnostic: PdaDerivationDiagnostic = {
+      derivationCorrect: structureAnalysis.analysis.pda.derivationCorrect,
+      expectedAddress: structureAnalysis.analysis.pda.expectedAddress,
+    };
+
+    const accountInspection: AccountStateInspection = {
+      exists: structureAnalysis.analysis.exists,
+      size: structureAnalysis.analysis.size.actual,
+      canDeserialize: structureAnalysis.analysis.data.canDeserialize,
+    };
+
+    // Placeholder recovery options
     let recoveryOptions: RecoveryResult | null = null;
     if (!validationResult.isValid && validationResult.canRecover) {
-      try {
-        recoveryOptions = await this.recovery.attemptAccountRecovery(profile);
-      } catch (error) {
-        console.warn('[ProfileDevTools] Recovery attempt failed:', getErrorMessage(error));
-      }
+      recoveryOptions = {
+        success: false,
+        error: 'Recovery services not implemented',
+        action: 'manual_recovery_required',
+      };
     }
 
     // Generate debug commands
@@ -499,12 +517,12 @@ export class ProfileDevTools {
 
       // Performance information
       if (typeof performance !== 'undefined') {
-        if ((performance as unknown).memory) {
-          const memory = (performance as unknown).memory as {
+        if (typeof (performance as unknown as { memory?: unknown }).memory !== 'undefined') {
+          const memory = (performance as unknown as { memory: {
             usedJSHeapSize: number;
             totalJSHeapSize: number;
             jsHeapSizeLimit: number;
-          };
+          } }).memory;
           envInfo.performance.memoryUsage = {
             used: memory.usedJSHeapSize,
             total: memory.totalJSHeapSize,
@@ -544,7 +562,7 @@ export class ProfileDevTools {
       programAccessible: boolean;
       walletConnected: boolean;
     };
-    diagnosticData: ReturnType<ProfileDiagnosticsService['exportDiagnosticData']>;
+    diagnosticData: Record<string, unknown>;
     recommendations: string[];
   }> {
     const environment = await this.getDevEnvironmentInfo();
@@ -553,10 +571,13 @@ export class ProfileDevTools {
     if (userPubkey) {
       const { profile } = derivePdas(userPubkey);
       if (profile) {
-        const [structureAnalysis, validationResult] = await Promise.all([
-          this.analyzeAccountStructure(userPubkey),
-          this.validator.validateAccountStructure(profile),
-        ]);
+        const structureAnalysis = await this.analyzeAccountStructure(userPubkey);
+        const validationResult: ValidationResult = {
+          isValid: structureAnalysis.analysis.exists && structureAnalysis.analysis.data.canDeserialize,
+          errors: structureAnalysis.recommendations,
+          canRecover: structureAnalysis.severity !== 'critical',
+          suggestedAction: structureAnalysis.recommendations[0] || 'No action needed',
+        };
         
         userAnalysis = {
           userPubkey: userPubkey.toString(),
@@ -579,7 +600,11 @@ export class ProfileDevTools {
       walletConnected: environment.wallet.connected,
     };
 
-    const diagnosticData = this.diagnostics.exportDiagnosticData(userPubkey);
+    const diagnosticData = {
+      userPubkey: userPubkey?.toString(),
+      timestamp: Date.now(),
+      message: 'Diagnostic services not implemented',
+    };
 
     // Generate recommendations
     const recommendations: string[] = [];
@@ -710,14 +735,15 @@ export class ProfileDevTools {
     if (typeof window === 'undefined') return [];
 
     const extensions: string[] = [];
-    const solana = (window as unknown).solana;
+    const solana = (window as unknown as { solana?: unknown }).solana;
     
-    if (solana) {
-      if (solana.isPhantom) extensions.push('Phantom');
-      if (solana.isSolflare) extensions.push('Solflare');
-      if (solana.isBackpack) extensions.push('Backpack');
-      if (solana.isCoinbaseWallet) extensions.push('Coinbase');
-      if (solana.isBraveWallet) extensions.push('Brave');
+    if (solana && typeof solana === 'object') {
+      const wallet = solana as Record<string, unknown>;
+      if (wallet.isPhantom) extensions.push('Phantom');
+      if (wallet.isSolflare) extensions.push('Solflare');
+      if (wallet.isBackpack) extensions.push('Backpack');
+      if (wallet.isCoinbaseWallet) extensions.push('Coinbase');
+      if (wallet.isBraveWallet) extensions.push('Brave');
     }
 
     return extensions;
@@ -788,7 +814,7 @@ export function initializeGlobalDevTools(
   
   // Expose to window for console access in development
   if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-    (window as unknown).profileDevTools = globalDevTools;
+    (window as unknown as { profileDevTools: ProfileDevTools }).profileDevTools = globalDevTools;
     console.log('[ProfileDevTools] Development tools available at window.profileDevTools');
   }
 }

@@ -26,6 +26,7 @@ export const ERROR_CODES = {
   InvalidMint: 6005,
   InsufficientFunds: 6006,
   SponsorNotRegistered: 6007,
+  InvalidRemainingAccounts: 6008,
 } as const;
 
 export type ErrorCodeName = keyof typeof ERROR_CODES;
@@ -33,7 +34,8 @@ export type ErrorCodeName = keyof typeof ERROR_CODES;
 // Anchor Program factory with v0.32.1 compatibility fixes
 export function getProgram(provider: anchor.AnchorProvider) {
   console.log('🔧 Creating program with provider for:', PROGRAM_ID.toString());
-  console.log('🔧 IDL reload timestamp:', Date.now());
+  console.log('🔧 Creating program instance');
+  console.log('🔄 Using updated contract with profile seeds');
 
   // Apply Anchor v0.32.1 compatibility fixes as per project rules
   const fixIdlTypes = (obj: unknown): unknown => {
@@ -112,7 +114,14 @@ export function derivePdas(user?: PublicKey | null) {
     ], PROGRAM_ID)[0]
     : null;
 
-  return { config, vault, profile, counter };
+  const referrals = user
+    ? PublicKey.findProgramAddressSync([
+      Buffer.from("referrals"),
+      user.toBuffer(),
+    ], PROGRAM_ID)[0]
+    : null;
+
+  return { config, vault, profile, counter, referrals };
 }
 
 // Derive activation PDA with explicit nextId (u64, little-endian)
@@ -124,6 +133,64 @@ export function deriveAgentActivationPda(user: PublicKey, nextId: anchor.BN) {
     seedNextIdLe,
   ], PROGRAM_ID)[0];
 }
+
+// Agent tier enum and types
+export enum AgentTier {
+  NOVA = 0,
+  VEGA = 1,
+  ORION = 2,
+  PRIME = 3
+}
+
+export interface AgentTierConfig {
+  minYieldBps: number;
+  maxYieldBps: number;
+  yieldCapPct: number;
+  name: string;
+  emoji: string;
+  description: string;
+  dailyRange: string;
+}
+
+// Agent tier configurations matching smart contract
+export const AGENT_TIER_CONFIGS: Record<AgentTier, AgentTierConfig> = {
+  [AgentTier.NOVA]: {
+    minYieldBps: 100,
+    maxYieldBps: 175,
+    yieldCapPct: 175,
+    name: 'NOVA',
+    emoji: '🪶',
+    description: 'Entry-level agent, safe and steady',
+    dailyRange: '1.00% - 1.75%'
+  },
+  [AgentTier.VEGA]: {
+    minYieldBps: 175,
+    maxYieldBps: 215,
+    yieldCapPct: 200,
+    name: 'VEGA',
+    emoji: '🔮',
+    description: 'Balanced risk and return',
+    dailyRange: '1.75% - 2.15%'
+  },
+  [AgentTier.ORION]: {
+    minYieldBps: 215,
+    maxYieldBps: 300,
+    yieldCapPct: 220,
+    name: 'ORION',
+    emoji: '⚡',
+    description: 'Aggressive but controlled',
+    dailyRange: '2.15% - 3.00%'
+  },
+  [AgentTier.PRIME]: {
+    minYieldBps: 300,
+    maxYieldBps: 500,
+    yieldCapPct: 250,
+    name: 'PRIME',
+    emoji: '🧠',
+    description: 'Elite trading AI',
+    dailyRange: '3.00% - 5.00%'
+  }
+};
 
 // TypeScript interfaces for smart contract data
 export interface UserProfile {
@@ -139,6 +206,30 @@ export interface UserProfile {
   level1Earnings: anchor.BN;            // Earnings from L1 referrals (accounting)
   level2Earnings: anchor.BN;            // Earnings from L2 referrals (accounting)
   level3Earnings: anchor.BN;            // Earnings from L3 referrals (accounting)
+  // Credit system
+  creditBalance: anchor.BN;             // Off-chain credit balance for agent activations
+  // Global withdrawal limit tracking
+  totalAgentDeposits: anchor.BN;        // Total USDT spent on agent activations
+  totalRoiWithdrawn: anchor.BN;         // Total ROI withdrawn across all agents
+}
+
+export interface UserAgentActivation {
+  user: PublicKey;                      // User who activated the agent
+  activationId: anchor.BN;              // Unique ID per user
+  tier: number;                         // 0=NOVA, 1=VEGA, 2=ORION, 3=PRIME
+  usingUsdt: boolean;                   // Payment method (USDT vs Credit)
+  amountUsdt: anchor.BN;                // Activation amount in USDT
+  startedAt: anchor.BN;                 // Activation timestamp
+  lastRoiWithdrawAt: anchor.BN;         // Last ROI withdrawal timestamp
+  totalRoiWithdrawn: anchor.BN;         // Total ROI withdrawn from this agent
+  yieldCapReached: boolean;             // Whether agent has reached yield cap
+  bump: number;                         // PDA bump seed
+}
+
+export interface MyReferrals {
+  sponsor: PublicKey;           // The sponsor who owns this referral list
+  referrals: PublicKey[];       // List of user addresses who used this sponsor
+  totalCount: number;           // Total referral count (for quick access)
 }
 
 export interface Config {
@@ -161,6 +252,23 @@ export interface Config {
   licenseAffL1Pct: number;
   licenseAffL2Pct: number;
   licenseAffL3Pct: number;
+  // Agent hire (USDT) splits
+  agentAdminPct: number;
+  agentDevPct: number;
+  agentMarketer1Pct: number;
+  agentMarketer2Pct: number;
+  agentTraderPct: number;
+  agentReservePct: number;
+  agentAffL1Pct: number;
+  agentAffL2Pct: number;
+  agentAffL3Pct: number;
+  // Tracked system buckets (USDT ledger)
+  bucketAdminUsdt: anchor.BN;
+  bucketDevUsdt: anchor.BN;
+  bucketMarketer1Usdt: anchor.BN;
+  bucketMarketer2Usdt: anchor.BN;
+  bucketTraderUsdt: anchor.BN;
+  bucketSystemreserveUsdt: anchor.BN;
 }
 
 // License status types
@@ -330,15 +438,8 @@ export async function activateLicenseUsdt(
     throw new Error("Could not derive user profile PDA");
   }
 
-  // STEP 1: Verify user profile exists
-  console.log('🔍 Looking for user profile at PDA:', profile.toString());
-  try {
-    await program.account["userProfile"].fetch(profile);
-    console.log('✅ User profile found');
-  } catch (error) {
-    console.error('❌ Failed to fetch user profile:', error);
-    throw new Error("User profile not found. Please register first.");
-  }
+  // STEP 1: Profile verification removed - contract handles profile creation automatically
+  console.log('📝 Profile will be created automatically by contract if needed:', profile.toString());
 
   // STEP 2: Derive token accounts for USDT transfer
   const userUsdt = anchor.utils.token.associatedAddress({
@@ -354,14 +455,68 @@ export async function activateLicenseUsdt(
   // STEP 3: Build sponsor hierarchy for affiliate earnings
   console.log('🌳 Building sponsor hierarchy for affiliate earnings...');
   const sponsorHierarchy = await buildSponsorHierarchy(program.provider as anchor.AnchorProvider, user);
-  const sponsorProfiles = [
+  
+  // NEW APPROACH: Pass USER ADDRESSES directly (not PDAs) to contract
+  // Contract will derive PDAs internally and handle duplicates intelligently
+  const sponsorAddresses = [
+    sponsorHierarchy.sponsorL1,  // User address (not PDA)
+    sponsorHierarchy.sponsorL2,  // User address (not PDA)
+    sponsorHierarchy.sponsorL3,  // User address (not PDA)
+  ];
+  console.log('✅ Sponsor user addresses:', sponsorAddresses.map(addr => addr.toString()));
+  
+  // Also need to pass the corresponding PDAs for the contract to write to
+  const sponsorPDAs = [
     derivePdas(sponsorHierarchy.sponsorL1).profile!,
     derivePdas(sponsorHierarchy.sponsorL2).profile!,
     derivePdas(sponsorHierarchy.sponsorL3).profile!,
   ];
-  console.log('✅ Sponsor profiles derived:', sponsorProfiles.map(p => p.toString()));
+  console.log('✅ Sponsor PDAs for writing:', sponsorPDAs.map(pda => pda.toString()));
+  
+  // Check for duplicates in user addresses (contract expects this)
+  const uniqueAddresses = new Set(sponsorAddresses.map(addr => addr.toString()));
+  console.log(`🔍 Unique sponsor addresses: ${uniqueAddresses.size}, Total levels: ${sponsorAddresses.length}`);
+  
+  if (uniqueAddresses.size < sponsorAddresses.length) {
+    console.log('🎯 DUPLICATE SPONSORS DETECTED: Contract will accumulate earnings per unique user');
+    console.log('💡 Same sponsor at multiple levels will receive combined earnings');
+  } else {
+    console.log('✅ All sponsors are unique, each will receive their level-specific earnings');
+  }
+  
+  // Pass both user addresses AND their PDAs to contract
+  // Contract expects: [userAddr1, userAddr2, userAddr3, pda1, pda2, pda3]
+  const finalRemainingAccounts: Array<{
+    pubkey: PublicKey;
+    isSigner: boolean;
+    isWritable: boolean;
+  }> = [
+    // First pass user addresses (for deduplication logic)
+    ...sponsorAddresses.map(pubkey => ({
+      pubkey,
+      isSigner: false,
+      isWritable: false, // User addresses are read-only
+    })),
+    // Then pass corresponding PDAs (for writing earnings)
+    ...sponsorPDAs.map(pubkey => ({
+      pubkey,
+      isSigner: false,
+      isWritable: true, // PDAs need to be writable
+    }))
+  ];
 
-  // STEP 4: Build accounts object with sponsor profiles in remaining_accounts
+  // SECURITY: Validate exactly 6 remaining accounts before sending to contract
+  if (finalRemainingAccounts.length !== 6) {
+    throw new Error(`Invalid remaining accounts count: expected 6, got ${finalRemainingAccounts.length}`);
+  }
+
+  // STEP 4: Get the actual dev profile from config (not from sponsor hierarchy)
+  console.log('🔧 Fetching config to get actual dev profile...');
+  const configData = await program.account["config"].fetch(config) as Config;
+  const { profile: actualDevProfile } = derivePdas(configData.dev);
+  console.log('✅ Actual dev profile PDA:', actualDevProfile?.toString());
+
+  // Build accounts object with correct dev profile
   const accounts = {
     config,                    // Program configuration PDA
     vault,                     // Program vault PDA
@@ -370,23 +525,20 @@ export async function activateLicenseUsdt(
     usdtMint,                  // USDT token mint
     userUsdt,                  // User's USDT token account
     vaultUsdt,                 // Vault's USDT token account
-    devProfile: sponsorProfiles[0], // Dev profile (fallback for all affiliate earnings)
+    devProfile: actualDevProfile!, // FIXED: Use actual dev profile from config.dev
     tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
     associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
     systemProgram: anchor.web3.SystemProgram.programId,
   };
 
   // STEP 5: Submit license activation transaction with sponsor profiles
-  console.log('🚀 Submitting transaction with sponsor profiles in remaining_accounts');
+  console.log('🚀 Submitting transaction with remaining_accounts:', finalRemainingAccounts.length, 'sponsor profiles');
+  console.log('📋 Remaining accounts:', finalRemainingAccounts.map(acc => acc.pubkey.toString()));
   try {
     const txSignature = await program.methods
-      .activateLicenseUsdt(bn)
+      .activateLicenseUsdt(bn, sponsorHierarchy.sponsorL1) // Pass amount and sponsor
       .accounts(accounts)
-      .remainingAccounts(sponsorProfiles.map(pubkey => ({
-        pubkey,
-        isSigner: false,
-        isWritable: true,
-      }))) // ← ADD SPONSOR PROFILES AS AccountMeta
+      .remainingAccounts(finalRemainingAccounts) // ← NEW: Contract handles duplicate PDAs intelligently
       .rpc();
     console.log('✅ Transaction successful:', txSignature);
     return txSignature;
@@ -397,30 +549,28 @@ export async function activateLicenseUsdt(
   }
 }
 
-// Register user instruction helper
-export async function registerUser(
-  program: anchor.Program,
-  user: PublicKey,
-  sponsorL1: PublicKey,
-  sponsorL2: PublicKey,
-  sponsorL3: PublicKey,
-) {
-  const { config, profile } = derivePdas(user);
+// Register user instruction helper - DISABLED: register_user method removed from contract
+// export async function registerUser(
+//   program: anchor.Program,
+//   user: PublicKey,
+//   sponsor: PublicKey, // Contract only accepts one sponsor parameter
+// ) {
+//   const { config, profile } = derivePdas(user);
 
-  if (!profile) {
-    throw new Error("Could not derive user profile PDA");
-  }
+//   if (!profile) {
+//     throw new Error("Could not derive user profile PDA");
+//   }
 
-  return program.methods
-    .registerUser(sponsorL1, sponsorL2, sponsorL3)
-    .accounts({
-      config,
-      profile,
-      user,
-      systemProgram: anchor.web3.SystemProgram.programId,
-    })
-    .rpc();
-}
+//   return program.methods
+//     .registerUser(sponsor) // Contract expects only one sponsor parameter
+//     .accounts({
+//       config,
+//       profile,
+//       user,
+//       systemProgram: anchor.web3.SystemProgram.programId,
+//     })
+//     .rpc();
+// }
 
 // Get license fee from config
 export async function getLicenseFee(program: anchor.Program): Promise<{
@@ -549,4 +699,134 @@ export async function withdrawAffiliateEarnings(
       tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
     })
     .rpc();
+}
+
+// Agent tier helper functions
+export function getAgentTierConfig(tier: AgentTier): AgentTierConfig {
+  return AGENT_TIER_CONFIGS[tier];
+}
+
+export function getAgentTierName(tier: number): string {
+  const tierConfig = AGENT_TIER_CONFIGS[tier as AgentTier];
+  return tierConfig ? tierConfig.name : 'UNKNOWN';
+}
+
+export function getAgentTierEmoji(tier: number): string {
+  const tierConfig = AGENT_TIER_CONFIGS[tier as AgentTier];
+  return tierConfig ? tierConfig.emoji : '❓';
+}
+
+export function calculateYieldCap(tier: number, activationAmount: anchor.BN): anchor.BN {
+  const tierConfig = AGENT_TIER_CONFIGS[tier as AgentTier];
+  if (!tierConfig) {
+    throw new Error(`Invalid tier: ${tier}`);
+  }
+  
+  return activationAmount
+    .mul(new anchor.BN(tierConfig.yieldCapPct))
+    .div(new anchor.BN(100));
+}
+
+export function calculateYieldCapProgress(
+  tier: number,
+  activationAmount: anchor.BN,
+  totalWithdrawn: anchor.BN
+): number {
+  const yieldCap = calculateYieldCap(tier, activationAmount);
+  if (yieldCap.eq(new anchor.BN(0))) return 0;
+  
+  return totalWithdrawn.mul(new anchor.BN(100)).div(yieldCap).toNumber();
+}
+
+// Withdrawal limit helper functions
+export interface WithdrawalLimitStatus {
+  totalDeposits: anchor.BN;
+  totalWithdrawn: anchor.BN;
+  maxWithdrawable: anchor.BN;
+  remainingWithdrawable: anchor.BN;
+  limitReached: boolean;
+  isPrivileged: boolean;
+  usagePercentage: number;
+}
+
+export function calculateWithdrawalLimitStatus(
+  userProfile: UserProfile,
+  isPrivileged: boolean = false
+): WithdrawalLimitStatus {
+  const totalDeposits = userProfile.totalAgentDeposits;
+  const totalWithdrawn = userProfile.totalRoiWithdrawn;
+  // 200% = 2x multiplier (user can withdraw 2x their total deposits)
+  const maxWithdrawable = totalDeposits.mul(new anchor.BN(2));
+  
+  const remainingWithdrawable = isPrivileged 
+    ? new anchor.BN(Number.MAX_SAFE_INTEGER) // Unlimited for privileged users
+    : maxWithdrawable.sub(totalWithdrawn);
+  
+  const limitReached = !isPrivileged && totalWithdrawn.gte(maxWithdrawable);
+  
+  const usagePercentage = isPrivileged 
+    ? 0 
+    : maxWithdrawable.eq(new anchor.BN(0)) 
+      ? 0 
+      : totalWithdrawn.mul(new anchor.BN(100)).div(maxWithdrawable).toNumber();
+
+  return {
+    totalDeposits,
+    totalWithdrawn,
+    maxWithdrawable,
+    remainingWithdrawable,
+    limitReached,
+    isPrivileged,
+    usagePercentage
+  };
+}
+
+// Agent timing helper functions
+export function canWithdrawRoi(
+  activation: UserAgentActivation,
+  currentTimestamp: number = Math.floor(Date.now() / 1000),
+  secondsPerDay: number = 86400 // Default to 24 hours, but can be overridden for debug mode
+): {
+  canWithdraw: boolean;
+  reason?: string;
+  nextWithdrawalAt?: Date;
+} {
+  // Check if agent has reached yield cap
+  if (activation.yieldCapReached) {
+    return {
+      canWithdraw: false,
+      reason: 'Agent has reached yield cap and is retired'
+    };
+  }
+
+  const activationTime = activation.startedAt.toNumber();
+  const lastWithdrawalTime = activation.lastRoiWithdrawAt.toNumber();
+  
+  // Use dynamic timing instead of hardcoded 24 hours
+  const timeSinceActivation = currentTimestamp - activationTime;
+  if (timeSinceActivation < secondsPerDay) {
+    const nextWithdrawalAt = new Date((activationTime + secondsPerDay) * 1000);
+    const waitTime = secondsPerDay === 300 ? '5 minutes' : '24 hours';
+    return {
+      canWithdraw: false,
+      reason: `Must wait ${waitTime} after activation`,
+      nextWithdrawalAt
+    };
+  }
+
+  // Check timing since last withdrawal (if any)
+  if (lastWithdrawalTime > 0) {
+    const timeSinceLastWithdrawal = currentTimestamp - lastWithdrawalTime;
+    if (timeSinceLastWithdrawal < secondsPerDay) {
+      const nextWithdrawalAt = new Date((lastWithdrawalTime + secondsPerDay) * 1000);
+      const waitTime = secondsPerDay === 300 ? '5 minutes' : '24 hours';
+      return {
+        canWithdraw: false,
+        reason: `Must wait ${waitTime} between withdrawals`,
+        nextWithdrawalAt
+      };
+    }
+  }
+
+  return { canWithdraw: true };
 }

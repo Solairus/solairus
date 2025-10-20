@@ -5,26 +5,6 @@
  */
 
 export {
-  ProfileAccountValidator,
-  createProfileAccountValidator,
-  validateProfileAccount,
-  type ValidationResult,
-  type AccountInfo,
-  type AccountValidation,
-  type ProfileValidationError,
-} from './profile-account-validator';
-
-export {
-  AccountRecoveryService,
-  createAccountRecoveryService,
-  recoverProfileAccount,
-  type RecoveryResult,
-  type AccountFailureClassification,
-  type RecoveryStrategy,
-  type RecoveryContext,
-} from './account-recovery-service';
-
-export {
   ProfileErrorFactory,
   ProfileErrorFormatter,
   ProfileErrorUtils,
@@ -37,21 +17,6 @@ export {
   type ProfileErrorAction,
   type EnhancedProfileError,
 } from './profile-error-types';
-
-export {
-  ProfileDiagnosticsService,
-  createProfileDiagnosticsService,
-  initializeGlobalDiagnostics,
-  getGlobalDiagnostics,
-  ProfileDiagnosticUtils,
-  type ProfileDiagnosticInfo,
-  type AccountStateInspection,
-  type PdaDerivationDiagnostic,
-  type OperationTrace,
-  type OperationStep,
-  type LogLevel,
-  type ProfileLogEntry,
-} from './profile-diagnostics';
 
 export {
   EnhancedProfileServiceManager,

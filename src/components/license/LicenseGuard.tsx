@@ -2,8 +2,10 @@ import React, { ReactNode } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
 import { useLicense } from "@/contexts/license-context";
+import { useWallet } from "@/contexts/wallet-context";
 import { Card, CardContent } from "@/components/ui/card";
 import LicenseExpiryNotification from "./LicenseExpiryNotification";
+import { isSpecialAccount } from "@/utils/admin-roles";
 
 interface LicenseGuardProps {
   children: ReactNode;
@@ -16,6 +18,7 @@ interface LicenseGuardProps {
  * 
  * Key Features:
  * - Environment-controlled license enforcement (VITE_ENABLE_LICENSE_GUARD)
+ * - Special account bypass (admin/dev/marketers skip license validation)
  * - Automatic redirection to license activation for unlicensed users
  * - Proper React Hook usage (no conditional calling)
  * - Loading states during license validation
@@ -26,6 +29,7 @@ interface LicenseGuardProps {
  * - If license guard disabled: Always allows access
  * - If user not connected: Lets WalletGate handle wallet connection
  * - If on license activation page: Always allows access (prevents redirect loops)
+ * - If user is special account (admin/dev/marketer): Bypasses license check
  * - If user has valid license: Renders children with optional expiry warning
  * - If user has invalid/no license: Redirects to /dapp/license-activation
  * 
@@ -36,6 +40,7 @@ interface LicenseGuardProps {
  */
 export default function LicenseGuard({ children }: LicenseGuardProps) {
   const { isConnected } = useWalletConnection();
+  const { publicKey } = useWallet();
   const {
     licenseInfo,
     isLoading,
@@ -44,6 +49,9 @@ export default function LicenseGuard({ children }: LicenseGuardProps) {
   } = useLicense();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Check if the connected wallet is a special account (admin/dev/marketer)
+  const isSpecialWallet = isSpecialAccount(publicKey);
 
   // Check if license guard is enabled
   const licenseGuardEnabled = (
@@ -57,12 +65,16 @@ export default function LicenseGuard({ children }: LicenseGuardProps) {
   const isLicenseActivationPage = location.pathname === '/dapp/license-activation';
 
   // Redirect to license activation if no valid license and not already on that page
-  // Only check once per session, not continuously
+  // Skip license check for special accounts (admin/dev/marketers)
+  // Preserve current path to redirect back after license activation
   React.useEffect(() => {
-    if (licenseGuardEnabled && isConnected && !licenseInfo.isValid && !isLoading && !isLicenseActivationPage) {
-      navigate('/dapp/license-activation', { replace: true });
+    if (licenseGuardEnabled && isConnected && !isSpecialWallet && !licenseInfo.isValid && !isLoading && !isLicenseActivationPage) {
+      navigate('/dapp/license-activation', { 
+        replace: true,
+        state: { returnPath: location.pathname }
+      });
     }
-  }, [licenseGuardEnabled, isConnected, licenseInfo.isValid, isLoading, isLicenseActivationPage, navigate]);
+  }, [licenseGuardEnabled, isConnected, isSpecialWallet, licenseInfo.isValid, isLoading, isLicenseActivationPage, navigate, location.pathname]);
 
   // If license guard is disabled, always allow access
   if (!licenseGuardEnabled) {
@@ -76,6 +88,11 @@ export default function LicenseGuard({ children }: LicenseGuardProps) {
 
   // If on license activation page, always allow access
   if (isLicenseActivationPage) {
+    return <>{children}</>;
+  }
+
+  // If user is a special account (admin/dev/marketer), bypass license check
+  if (isSpecialWallet) {
     return <>{children}</>;
   }
 

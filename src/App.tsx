@@ -13,9 +13,12 @@ import DappHire from "./pages/Dapp/Hire";
 import DappReferral from "./pages/Dapp/Referral";
 import DappAffiliate from "./pages/Dapp/Affiliate";
 import DappLicenseActivation from "./pages/Dapp/LicenseActivation";
+import DappSummary from "./pages/Dapp/Summary";
+import ComingSoon from "./pages/Dapp/ComingSoon";
 import CoreUITest from "./pages/uitests/core";
 import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
+import Admin from "./pages/Admin";
 import InstallPrompt from "@/components/InstallPrompt";
 import WalletGate from "@/components/WalletGate";
 import LicenseGuard from "@/components/license/LicenseGuard";
@@ -25,6 +28,9 @@ import { LicenseContextProvider } from "@/contexts/license-context";
 import { createLicenseService } from "@/services/license/license-service";
 import { useWallet } from "@/contexts/wallet-context";
 import { ReactNode, useMemo } from "react";
+
+// Initialize configuration validation for agent system
+import "@/utils/config-validator";
 
 // Wrapper component to provide LicenseGuard
 function LicenseGuardWrapper({ children }: { children: ReactNode }) {
@@ -89,8 +95,18 @@ const App = () => (
               <Route path="hire" element={<DappHire />} />
               <Route path="affiliate" element={<DappAffiliate />} />
               <Route path="license-activation" element={<LicenseActivationWrapper />} />
+              <Route path="summary" element={<DappSummary />} />
+              <Route path="coming-soon" element={<ComingSoon />} />
             </Route>
             <Route path="/privacy" element={<Privacy />} />
+            <Route
+              path="/dapp/special"
+              element={
+                <WalletGate>
+                  <Admin />
+                </WalletGate>
+              }
+            />
             <Route
               path="/uitests/license_activation"
               element={

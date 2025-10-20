@@ -10,26 +10,41 @@
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 import { 
-  ProfileAccountValidator,
-  AccountRecoveryService,
-  ProfileDiagnosticsService,
   ProfileErrorFactory,
   ProfileErrorFormatter,
   EnhancedProfileError,
   ProfileErrorContext,
   ProfileErrorType,
-  ValidationResult,
-  ProfileDiagnosticInfo,
-  AccountStateInspection,
-  PdaDerivationDiagnostic,
-  OperationTrace,
-  ProfileLogEntry,
-  createProfileAccountValidator,
-  createAccountRecoveryService,
-  createProfileDiagnosticsService,
-  initializeGlobalDiagnostics,
-  getGlobalDiagnostics,
-} from "./index";
+} from "./profile-error-types";
+
+// Placeholder types for missing services
+interface ValidationResult {
+  isValid: boolean;
+  errors: string[];
+  canRecover: boolean;
+  suggestedAction: string;
+}
+
+interface ProfileDiagnosticInfo {
+  derivedPda?: string;
+  [key: string]: unknown;
+}
+
+interface AccountStateInspection {
+  [key: string]: unknown;
+}
+
+interface PdaDerivationDiagnostic {
+  [key: string]: unknown;
+}
+
+interface OperationTrace {
+  [key: string]: unknown;
+}
+
+interface ProfileLogEntry {
+  [key: string]: unknown;
+}
 
 /**
  * Enhanced profile service manager with integrated error handling and diagnostics
@@ -37,21 +52,10 @@ import {
 export class EnhancedProfileServiceManager {
   private program: anchor.Program;
   private provider: anchor.AnchorProvider;
-  private validator: ProfileAccountValidator;
-  private recovery: AccountRecoveryService;
-  private diagnostics: ProfileDiagnosticsService;
 
   constructor(program: anchor.Program, provider: anchor.AnchorProvider) {
     this.program = program;
     this.provider = provider;
-    
-    // Initialize services
-    this.validator = createProfileAccountValidator(program, provider);
-    this.recovery = createAccountRecoveryService(program, provider, this.validator);
-    this.diagnostics = createProfileDiagnosticsService(program, provider);
-    
-    // Initialize global diagnostics
-    initializeGlobalDiagnostics(program, provider);
   }
 
   /**
@@ -71,108 +75,22 @@ export class EnhancedProfileServiceManager {
       environment: this.getEnvironment(),
     };
 
-    const operationId = `validate_${userPubkey.toString()}_${Date.now()}`;
-    const trace = this.diagnostics.startTrace(operationId, 'validateProfile', context);
-
     try {
-      this.diagnostics.addTraceStep(operationId, 'pda_derivation', 'Derive profile PDA');
-      
-      // Step 1: Derive PDA
-      const pdaResult = this.validator.validatePdaDerivation(userPubkey);
-      if (!(await pdaResult).isValid) {
-        const error = ProfileErrorFactory.createError('pda_derivation_failed', {
-          accountAddress: userPubkey.toString(),
-          suggestedFix: 'Check PDA derivation parameters and program ID',
-        }, context);
-
-        this.diagnostics.completeTraceStep(operationId, 'pda_derivation', 'failure', undefined, error.message);
-        this.diagnostics.completeTrace(operationId, 'failure', error);
-
-        return {
-          isValid: false,
-          error,
-          canRecover: false,
-          suggestedAction: 'Contact support for PDA derivation issues',
-        };
-      }
-
-      const { derivedPda } = await pdaResult;
-      this.diagnostics.completeTraceStep(operationId, 'pda_derivation', 'success', {
-        derivedPda: derivedPda.toString(),
-      });
-
-      // Step 2: Validate account structure
-      this.diagnostics.addTraceStep(operationId, 'account_validation', 'Validate account structure');
-      
-      const validationResult = await this.validator.validateAccountStructure(derivedPda);
-      
-      if (validationResult.isValid) {
-        this.diagnostics.completeTraceStep(operationId, 'account_validation', 'success');
-        this.diagnostics.completeTrace(operationId, 'success');
-
-        this.diagnostics.log('info', 'validation', 'Profile validation successful', {
-          userPubkey: userPubkey.toString(),
-          accountAddress: derivedPda.toString(),
-        }, context);
-
-        return {
-          isValid: true,
-          canRecover: false,
-          suggestedAction: 'none',
-        };
-      }
-
-      // Step 3: Create enhanced error from validation result
-      const errorType = this.classifyValidationError(validationResult);
-      const error = ProfileErrorFactory.createAccountError(
-        errorType,
-        derivedPda.toString(),
-        userPubkey,
-        {
-          suggestedFix: validationResult.suggestedAction,
-        }
-      );
-
-      this.diagnostics.completeTraceStep(operationId, 'account_validation', 'failure', undefined, error.message);
-
-      // Step 4: Get diagnostic information
-      this.diagnostics.addTraceStep(operationId, 'diagnostic_collection', 'Collect diagnostic information');
-      
-      let diagnosticInfo;
-      try {
-        diagnosticInfo = await this.diagnostics.getDiagnosticInfo(userPubkey);
-        this.diagnostics.completeTraceStep(operationId, 'diagnostic_collection', 'success');
-      } catch (diagnosticError) {
-        this.diagnostics.completeTraceStep(operationId, 'diagnostic_collection', 'failure', undefined, 
-          `Failed to collect diagnostics: ${diagnosticError}`);
-      }
-
-      this.diagnostics.completeTrace(operationId, 'failure', error);
-
-      this.diagnostics.log('warn', 'validation', 'Profile validation failed', {
-        userPubkey: userPubkey.toString(),
-        accountAddress: derivedPda.toString(),
-        errorType: error.type,
-        canRecover: validationResult.canRecover,
-        suggestedAction: validationResult.suggestedAction,
+      // Placeholder implementation - services not available
+      const error = ProfileErrorFactory.createError('validation_failed', {
+        accountAddress: userPubkey.toString(),
+        suggestedFix: 'Profile validation services not implemented',
       }, context);
 
       return {
         isValid: false,
         error,
-        diagnosticInfo,
-        canRecover: validationResult.canRecover,
-        suggestedAction: validationResult.suggestedAction,
+        canRecover: false,
+        suggestedAction: 'Profile validation services need to be implemented',
       };
 
     } catch (exception) {
       const error = ProfileErrorFactory.fromException(exception, context);
-      this.diagnostics.completeTrace(operationId, 'failure', error);
-
-      this.diagnostics.log('error', 'validation', 'Profile validation failed with exception', {
-        userPubkey: userPubkey.toString(),
-        error: error.message,
-      }, context);
 
       return {
         isValid: false,
@@ -203,50 +121,20 @@ export class EnhancedProfileServiceManager {
       environment: this.getEnvironment(),
     };
 
-    this.diagnostics.log('info', 'recovery', 'Starting profile recovery', {
-      userPubkey: userPubkey.toString(),
-      sponsor: sponsor.toString(),
-    }, context);
-
     try {
-      const recoveryResult = await this.recovery.attemptAccountRecovery(userPubkey, sponsor);
+      // Placeholder implementation - recovery service not available
+      const error = ProfileErrorFactory.createError('recovery_failed', {
+        accountAddress: userPubkey.toString(),
+        suggestedFix: 'Profile recovery services not implemented',
+      }, context);
 
-      if (recoveryResult.success) {
-        this.diagnostics.log('info', 'recovery', 'Profile recovery successful', {
-          userPubkey: userPubkey.toString(),
-          action: recoveryResult.action,
-          transactionSignature: recoveryResult.transactionSignature,
-        }, context);
-
-        return {
-          success: true,
-          transactionSignature: recoveryResult.transactionSignature,
-        };
-      } else {
-        const error = ProfileErrorFactory.createError('recovery_failed', {
-          accountAddress: userPubkey.toString(),
-          suggestedFix: recoveryResult.error || 'Unknown recovery error',
-        }, context);
-
-        this.diagnostics.log('error', 'recovery', 'Profile recovery failed', {
-          userPubkey: userPubkey.toString(),
-          error: recoveryResult.error,
-          action: recoveryResult.action,
-        }, context);
-
-        return {
-          success: false,
-          error,
-        };
-      }
+      return {
+        success: false,
+        error,
+      };
 
     } catch (exception) {
       const error = ProfileErrorFactory.fromException(exception, context);
-      
-      this.diagnostics.log('error', 'recovery', 'Profile recovery failed with exception', {
-        userPubkey: userPubkey.toString(),
-        error: error.message,
-      }, context);
 
       return {
         success: false,
@@ -272,40 +160,17 @@ export class EnhancedProfileServiceManager {
       environment: this.getEnvironment(),
     };
 
-    this.diagnostics.log('info', 'diagnostic', 'Generating diagnostic report', {
-      userPubkey: userPubkey.toString(),
-    }, context);
-
     try {
-      const [profileDiagnostics, pdaDiagnostics] = await Promise.all([
-        this.diagnostics.getDiagnosticInfo(userPubkey),
-        this.diagnostics.diagnosePdaDerivation(userPubkey),
-      ]);
-
-      let accountInspection;
-      if (profileDiagnostics.derivedPda) {
-        accountInspection = await this.diagnostics.inspectAccountState(
-          new PublicKey(profileDiagnostics.derivedPda)
-        );
-      }
-
-      const recentLogs = this.diagnostics.getRecentLogs(50);
-      const operationTraces = this.diagnostics.getOperationTraces();
-
+      // Placeholder implementation - diagnostic services not available
       return {
-        profileDiagnostics,
-        accountInspection,
-        pdaDiagnostics,
-        recentLogs,
-        operationTraces,
+        profileDiagnostics: { derivedPda: userPubkey.toString() },
+        accountInspection: undefined,
+        pdaDiagnostics: {},
+        recentLogs: [],
+        operationTraces: [],
       };
 
     } catch (error) {
-      this.diagnostics.log('error', 'diagnostic', 'Failed to generate diagnostic report', {
-        userPubkey: userPubkey.toString(),
-        error: error instanceof Error ? error.message : String(error),
-      }, context);
-
       throw ProfileErrorFactory.fromException(error, context);
     }
   }
@@ -334,14 +199,18 @@ export class EnhancedProfileServiceManager {
    * Export diagnostic data for support
    */
   exportDiagnosticData(userPubkey?: PublicKey): Record<string, unknown> {
-    return this.diagnostics.exportDiagnosticData(userPubkey);
+    return {
+      userPubkey: userPubkey?.toString(),
+      timestamp: Date.now(),
+      message: 'Diagnostic services not implemented',
+    };
   }
 
   /**
    * Clear diagnostic data
    */
   clearDiagnosticData(): void {
-    this.diagnostics.clearDiagnosticData();
+    // Placeholder - no diagnostic data to clear
   }
 
   // Private helper methods
@@ -418,17 +287,6 @@ export const ProfileIntegrationUtils = {
           ...context,
           attemptCount: attempt,
         });
-
-        // Log the attempt
-        const diagnostics = getGlobalDiagnostics();
-        if (diagnostics) {
-          diagnostics.log('warn', 'operation', `Operation attempt ${attempt} failed`, {
-            operation: context.operation,
-            attempt,
-            error: lastError.message,
-            retryable: lastError.retryable,
-          }, context);
-        }
 
         // Check if we should retry
         if (!lastError.retryable || attempt === maxRetries) {

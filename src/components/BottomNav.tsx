@@ -1,6 +1,7 @@
-import React from "react";
 import { Home, BarChart3, DollarSign, HelpCircle, Bot } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
+import { useAdminRole } from "@/hooks/useAdminRole";
+
 
 /**
  * BottomNav
@@ -12,14 +13,19 @@ import { Link, useLocation } from "react-router-dom";
 export default function BottomNav() {
   const location = useLocation();
   const path = location.pathname;
+  const { hasAccess } = useAdminRole();
+
   const isActive = (key: string) => {
     if (key === "home") return path === "/dapp";
+    if (key === "admin") return path === "/dapp/special";
     return path === `/dapp/${key}`;
   };
+
   const leftItems = [
     { key: "home", label: "Home", icon: Home },
     { key: "market", label: "Market", icon: BarChart3 },
   ];
+
   const rightItems = [
     { key: "affiliate", label: "Affiliate", icon: DollarSign },
     { key: "help", label: "Help", icon: HelpCircle },
@@ -50,8 +56,9 @@ export default function BottomNav() {
               <Link
                 key={key}
                 aria-label={label}
-                to={`/dapp/${key}`}
-                className={`group relative flex flex-col items-center justify-center gap-1 px-3 py-1 rounded-lg text-muted-foreground`}
+                to={key === "admin" ? "/dapp/special" : `/dapp/${key}`}
+                className={`group relative flex flex-col items-center justify-center gap-1 px-3 py-1 rounded-lg ${key === "admin" ? "text-orange-400" : "text-muted-foreground"
+                  }`}
               >
                 {isActive(key) && (
                   <span className="absolute -top-3 left-1/2 -translate-x-1/2 w-10 h-1 bg-primary rounded-full" />
@@ -67,11 +74,10 @@ export default function BottomNav() {
         <Link
           aria-label="Hire"
           to="/dapp/hire"
-          className={`absolute left-1/2 -translate-x-1/2 -top-6 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center border ${
-            isActive("hire")
+          className={`absolute left-1/2 -translate-x-1/2 -top-6 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center border ${isActive("hire")
               ? "bg-background border-primary text-primary"
               : "bg-primary border-border/50 text-primary-foreground"
-          }`}
+            }`}
         >
           <Bot className="w-6 h-6" />
         </Link>
