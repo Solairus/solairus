@@ -26,13 +26,39 @@ export class WalletManager {
     return WalletManager.instance
   }
 
-  // Parse env and choose a single projectId (supports comma-separated values)
+  // Parse env and choose a single projectId (supports comma-separated values and multiple env vars)
   private getProjectIds(): string[] {
+    // First try comma-separated format (for local development)
     const raw = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID ?? ""
-    return raw
+    const commaSeparated = raw
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean)
+    
+    // If we have comma-separated values, use them
+    if (commaSeparated.length > 1) {
+      return commaSeparated
+    }
+    
+    // Otherwise, collect from multiple environment variables (for Vercel)
+    const projectIds: string[] = []
+    
+    // Add primary project ID if it exists
+    if (raw) {
+      projectIds.push(raw)
+    }
+    
+    // Add fallback project IDs
+    const fallbacks = [
+      import.meta.env.VITE_WALLETCONNECT_PROJECT_ID_2,
+      import.meta.env.VITE_WALLETCONNECT_PROJECT_ID_3,
+      import.meta.env.VITE_WALLETCONNECT_PROJECT_ID_4,
+      import.meta.env.VITE_WALLETCONNECT_PROJECT_ID_5,
+    ].filter(Boolean)
+    
+    projectIds.push(...fallbacks)
+    
+    return projectIds.filter(Boolean)
   }
 
   private pickProjectId(): string | null {
