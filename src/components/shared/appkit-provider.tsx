@@ -1,13 +1,29 @@
 import { useEffect, useState } from "react"
 import type { ReactNode } from "react"
 import { WalletManager } from "@/services/wallet/wallet-manager"
+import { logEnvironmentStatus, validateEnvironmentVariables } from "@/utils/env-validation"
 
 export function AppKitProvider({ children }: { children: ReactNode }) {
   const [isInitialized, setIsInitialized] = useState(false)
+  const [initError, setInitError] = useState<string | null>(null)
 
   useEffect(() => {
     const initializeAppKit = async () => {
       try {
+        // Validate environment variables first
+        const validation = validateEnvironmentVariables()
+        if (!validation.isValid) {
+          console.error("Environment validation failed:", validation.errors)
+          setInitError(`Environment configuration error: ${validation.errors.join(', ')}`)
+          setIsInitialized(true)
+          return
+        }
+        
+        // Log environment status for debugging
+        if (import.meta.env.DEV || import.meta.env.VITE_SHOW_DETAILED_ERRORS === 'true') {
+          logEnvironmentStatus()
+        }
+        
         // Add a small delay to ensure React is fully initialized
         await new Promise(resolve => setTimeout(resolve, 100))
         
@@ -17,14 +33,18 @@ export function AppKitProvider({ children }: { children: ReactNode }) {
         
         // Initialize AppKit without preflight gating
         if (walletManager.hasProjectId()) {
+          console.log("🔗 Initializing AppKit with project IDs...")
           await walletManager.getAppKit()
+          console.log("✅ AppKit initialized successfully")
           setIsInitialized(true)
         } else {
-          console.warn("AppKitProvider: VITE_WALLETCONNECT_PROJECT_ID not set; skipping AppKit init")
+          console.warn("AppKitProvider: No WalletConnect project IDs found; skipping AppKit init")
+          setInitError("No WalletConnect project IDs configured")
           setIsInitialized(true)
         }
       } catch (error) {
         console.error("AppKitProvider: Failed to initialize AppKit:", error)
+        setInitError(error instanceof Error ? error.message : String(error))
         setIsInitialized(true) // Still render children even if AppKit fails
       }
     }
@@ -62,7 +82,19 @@ export function AppKitProvider({ children }: { children: ReactNode }) {
 
   // Only render children after AppKit is initialized to prevent hook conflicts
   if (!isInitialized) {
-    return <div>Initializing wallet...</div>
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+          <p>Initializing wallet...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Show error message if initialization failed but still render children
+  if (initError && (import.meta.env.DEV || import.meta.env.VITE_SHOW_DETAILED_ERRORS === 'true')) {
+    console.warn("AppKit initialization error:", initError)
   }
 
   return <>{children}</>

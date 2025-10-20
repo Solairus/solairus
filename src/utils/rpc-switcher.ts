@@ -32,10 +32,10 @@ class RpcSwitcher {
   }
 
   private initializeEndpoints(): void {
-    // Parse RPC URLs from environment variables
-    const mainnetUrls = this.parseRpcUrls(import.meta.env.VITE_SOLANA_RPC_URL_MAINNET)
-    const devnetUrls = this.parseRpcUrls(import.meta.env.VITE_SOLANA_RPC_URL_DEVNET)
-    const testnetUrls = this.parseRpcUrls(import.meta.env.VITE_SOLANA_RPC_URL_TESTNET)
+    // Parse RPC URLs from environment variables (supports both comma-separated and multiple vars)
+    const mainnetUrls = this.parseRpcUrlsFromMultipleVars('mainnet-beta')
+    const devnetUrls = this.parseRpcUrlsFromMultipleVars('devnet')
+    const testnetUrls = this.parseRpcUrlsFromMultipleVars('testnet')
 
     // Fallback to CORS-friendly endpoints if environment variables are empty
     const corsMainnetFallback = [
@@ -96,6 +96,51 @@ class RpcSwitcher {
         url,
         name: this.extractProviderName(url)
       }))
+  }
+
+  private parseRpcUrlsFromMultipleVars(cluster: ClusterName): RpcEndpoint[] {
+    const urls: string[] = []
+    
+    if (cluster === 'mainnet-beta') {
+      // Collect from multiple environment variables for Vercel compatibility
+      const mainnetVars = [
+        import.meta.env.VITE_SOLANA_RPC_URL_MAINNET,
+        import.meta.env.VITE_SOLANA_RPC_URL_MAINNET_2,
+        import.meta.env.VITE_SOLANA_RPC_URL_MAINNET_3,
+        import.meta.env.VITE_SOLANA_RPC_URL_MAINNET_4,
+        import.meta.env.VITE_SOLANA_RPC_URL_MAINNET_5,
+      ].filter(Boolean)
+      
+      // First try comma-separated parsing on the primary variable
+      if (mainnetVars[0]) {
+        const commaSeparated = this.parseRpcUrls(mainnetVars[0])
+        if (commaSeparated.length > 1) {
+          return commaSeparated
+        }
+      }
+      
+      // Otherwise use individual variables
+      urls.push(...mainnetVars)
+    } else if (cluster === 'devnet') {
+      const devnetVars = [
+        import.meta.env.VITE_SOLANA_RPC_URL_DEVNET,
+        import.meta.env.VITE_SOLANA_RPC_URL_DEVNET_2,
+        import.meta.env.VITE_SOLANA_RPC_URL_DEVNET_3,
+      ].filter(Boolean)
+      urls.push(...devnetVars)
+    } else if (cluster === 'testnet') {
+      const testnetVars = [
+        import.meta.env.VITE_SOLANA_RPC_URL_TESTNET,
+        import.meta.env.VITE_SOLANA_RPC_URL_TESTNET_2,
+        import.meta.env.VITE_SOLANA_RPC_URL_TESTNET_3,
+      ].filter(Boolean)
+      urls.push(...testnetVars)
+    }
+    
+    return urls.map(url => ({
+      url: url.trim(),
+      name: this.extractProviderName(url)
+    }))
   }
 
   private extractProviderName(url: string): string {
