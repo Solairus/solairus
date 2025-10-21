@@ -1,25 +1,27 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>Debug Program ID</title>
 </head>
+
 <body>
     <h1>Program ID Debug</h1>
     <div id="results"></div>
-    
+
     <script>
         function debugProgramId() {
             const results = document.getElementById('results');
             let output = '<h2>Environment Debug:</h2>';
-            
+
             // Check localStorage
             const clusterOverride = localStorage.getItem('solana_cluster_override');
             output += `<p><strong>localStorage cluster override:</strong> ${clusterOverride || 'None'}</p>`;
-            
+
             // Check if we can access import.meta.env (this won't work in plain HTML)
             output += `<p><strong>Note:</strong> This is a plain HTML file, so we can't check Vite environment variables.</p>`;
             output += `<p>To check your actual app environment, open your localhost app and check the browser console.</p>`;
-            
+
             // Instructions
             output += `<h2>To debug your actual app:</h2>`;
             output += `<ol>`;
@@ -29,11 +31,12 @@
             output += `<li>In console, run: <code>console.log('Program ID:', import.meta.env.VITE_SOLAIRUS_MAIN_PROGRAM_ID)</code></li>`;
             output += `<li>In console, run: <code>console.log('Override:', localStorage.getItem('solana_cluster_override'))</code></li>`;
             output += `</ol>`;
-            
+
             results.innerHTML = output;
         }
-        
+
         debugProgramId();
     </script>
 </body>
+
 </html>

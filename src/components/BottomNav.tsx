@@ -75,8 +75,8 @@ export default function BottomNav() {
           aria-label="Hire"
           to="/dapp/hire"
           className={`absolute left-1/2 -translate-x-1/2 -top-6 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center border ${isActive("hire")
-              ? "bg-background border-primary text-primary"
-              : "bg-primary border-border/50 text-primary-foreground"
+            ? "bg-background border-primary text-primary"
+            : "bg-primary border-border/50 text-primary-foreground"
             }`}
         >
           <Bot className="w-6 h-6" />

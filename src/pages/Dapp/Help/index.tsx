@@ -36,12 +36,12 @@ const faqData: FAQItem[] = [
   },
   {
     question: "How do I get started?",
-    answer: "1. Connect your Solana wallet (Phantom, Solflare, etc.)\n2. Activate your license for $25 USDT\n3. Hire AI trading agents to start earning\n4. Share your referral link to build your network",
+    answer: "1. Connect your Solana wallet (Phantom, Solflare, etc.)\n2. Activate your license for $50 USDT\n3. Hire AI trading agents to start earning\n4. Share your referral link to build your network",
     category: "getting-started"
   },
   {
     question: "What do I need to use Solairus?",
-    answer: "You need a Solana wallet with USDT for license activation and agent hiring. We recommend starting with at least $50 USDT - $25 for license and $25+ for your first agent.",
+    answer: "You need a Solana wallet with USDT for license activation and agent hiring. We recommend starting with at least $75 USDT - $50 for license and $25+ for your first agent.",
     category: "getting-started"
   },
   
@@ -92,7 +92,7 @@ const faqData: FAQItem[] = [
   },
   {
     question: "Why do I need USDT?",
-    answer: "USDT is used for all transactions on Solairus - license activation ($25), agent hiring (varies by tier), and ROI payouts. It provides price stability for the platform economy.",
+    answer: "USDT is used for all transactions on Solairus - license activation ($50), agent hiring (varies by tier), and ROI payouts. It provides price stability for the platform economy.",
     category: "wallet"
   },
   {
@@ -205,7 +205,7 @@ export default function HelpPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="w-6 h-6 rounded-full p-0 flex items-center justify-center text-xs">2</Badge>
-                    <span>Activate license ($25 USDT)</span>
+                    <span>Activate license ($50 USDT)</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="w-6 h-6 rounded-full p-0 flex items-center justify-center text-xs">3</Badge>
@@ -421,7 +421,7 @@ export default function HelpPage() {
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span>License Fee</span>
-                      <span className="font-medium">$25 USDT</span>
+                      <span className="font-medium">$50 USDT</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Agent Minimum</span>
