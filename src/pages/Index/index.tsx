@@ -44,7 +44,7 @@ const Index = () => {
         <ComingSoonOverlay
           targetDate={countdownTarget}
           title="Solairus Public Access In"
-          message="We will be open to the public soon. Early bird access currently enabled by special invites."
+          message="We will be open to the public soon."
         />
       )}
     </div>;

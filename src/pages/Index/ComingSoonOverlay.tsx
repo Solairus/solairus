@@ -14,6 +14,17 @@ export default function ComingSoonOverlay({ targetDate, title, message }: { targ
           <div className="mt-8">
             <CountdownFlip targetDate={targetDate} />
           </div>
+          <div className="mt-8">
+            <a
+              href="https://form.jotform.com/252786649053165"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center px-8 py-3 text-base font-medium text-white bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg hover:shadow-xl cursor-pointer select-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Whitelist Your Wallet Address
+            </a>
+          </div>
         </div>
       </div>
     </div>
