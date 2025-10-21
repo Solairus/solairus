@@ -100,8 +100,10 @@ export async function activateAgent(
     let profileAccount;
     try {
       profileAccount = await (program.account as ProgramAccountAccess).userProfile.fetch(profilePda);
+      console.log('✅ User profile found, user is registered');
     } catch (error) {
-      throw new Error('User profile not found. Please register first.');
+      console.error('❌ User profile not found:', error);
+      throw new Error('User profile not found. Please register first before activating an agent.');
     }
 
     // Get the user's agent counter to determine next activation ID
@@ -133,43 +135,56 @@ export async function activateAgent(
       console.log('🔧 Provider:', provider.publicKey?.toString());
       console.log('🔧 User:', params.userPublicKey.toString());
 
-      const sponsorHierarchy = await buildSponsorHierarchy(provider, params.userPublicKey);
-      console.log('✅ Sponsor hierarchy built:', sponsorHierarchy);
-
-      // Construct remaining accounts exactly like license activation
-      const sponsorAddresses = [
-        sponsorHierarchy.sponsorL1,  // User address (not PDA)
-        sponsorHierarchy.sponsorL2,  // User address (not PDA)
-        sponsorHierarchy.sponsorL3,  // User address (not PDA)
-      ];
-      console.log('✅ Sponsor user addresses:', sponsorAddresses.map(addr => addr.toString()));
-
-      // Also need to pass the corresponding PDAs for the contract to write to
-      const sponsorPDAs = [
-        derivePdas(sponsorHierarchy.sponsorL1).profile!,
-        derivePdas(sponsorHierarchy.sponsorL2).profile!,
-        derivePdas(sponsorHierarchy.sponsorL3).profile!,
-      ];
-      console.log('✅ Sponsor PDAs for writing:', sponsorPDAs.map(pda => pda.toString()));
-
-      // Check for duplicates in user addresses (contract expects this)
-      const uniqueAddresses = new Set(sponsorAddresses.map(addr => addr.toString()));
-      console.log(`🔍 Unique sponsor addresses: ${uniqueAddresses.size}, Total levels: ${sponsorAddresses.length}`);
-
-      if (uniqueAddresses.size < sponsorAddresses.length) {
-        console.log('🎯 DUPLICATE SPONSORS DETECTED: Contract will accumulate earnings per unique user');
-        console.log('💡 Same sponsor at multiple levels will receive combined earnings');
-      } else {
-        console.log('✅ All sponsors are unique, each will receive their level-specific earnings');
+      let sponsorHierarchy;
+      try {
+        sponsorHierarchy = await buildSponsorHierarchy(provider, params.userPublicKey);
+        console.log('✅ Sponsor hierarchy built successfully:', sponsorHierarchy);
+      } catch (hierarchyError) {
+        console.error('❌ Failed to build sponsor hierarchy:', hierarchyError);
+        console.log('🔧 Using fallback default sponsor hierarchy...');
+        
+        // Fallback to default sponsor for all levels
+        const defaultSponsor = new PublicKey(import.meta.env.VITE_DEFAULT_SPONSOR_ADDRESS);
+        sponsorHierarchy = {
+          sponsorL1: defaultSponsor,
+          sponsorL2: defaultSponsor,
+          sponsorL3: defaultSponsor
+        };
+        console.log('✅ Fallback sponsor hierarchy:', sponsorHierarchy);
       }
 
-      // Pass both user addresses AND their PDAs to contract
-      // Contract expects: [userAddr1, userAddr2, userAddr3, pda1, pda2, pda3]
-      const finalRemainingAccounts: Array<{
-        pubkey: PublicKey;
-        isSigner: boolean;
-        isWritable: boolean;
-      }> = [
+      // Construct remaining accounts exactly like license activation
+      let finalRemainingAccounts;
+      try {
+        const sponsorAddresses = [
+          sponsorHierarchy.sponsorL1,  // User address (not PDA)
+          sponsorHierarchy.sponsorL2,  // User address (not PDA)
+          sponsorHierarchy.sponsorL3,  // User address (not PDA)
+        ];
+        console.log('✅ Sponsor user addresses:', sponsorAddresses.map(addr => addr.toString()));
+
+        // Also need to pass the corresponding PDAs for the contract to write to
+        const sponsorPDAs = [
+          derivePdas(sponsorHierarchy.sponsorL1).profile!,
+          derivePdas(sponsorHierarchy.sponsorL2).profile!,
+          derivePdas(sponsorHierarchy.sponsorL3).profile!,
+        ];
+        console.log('✅ Sponsor PDAs for writing:', sponsorPDAs.map(pda => pda.toString()));
+
+        // Check for duplicates in user addresses (contract expects this)
+        const uniqueAddresses = new Set(sponsorAddresses.map(addr => addr.toString()));
+        console.log(`🔍 Unique sponsor addresses: ${uniqueAddresses.size}, Total levels: ${sponsorAddresses.length}`);
+
+        if (uniqueAddresses.size < sponsorAddresses.length) {
+          console.log('🎯 DUPLICATE SPONSORS DETECTED: Contract will accumulate earnings per unique user');
+          console.log('💡 Same sponsor at multiple levels will receive combined earnings');
+        } else {
+          console.log('✅ All sponsors are unique, each will receive their level-specific earnings');
+        }
+
+        // Pass both user addresses AND their PDAs to contract
+        // Contract expects: [userAddr1, userAddr2, userAddr3, pda1, pda2, pda3]
+        finalRemainingAccounts = [
           // First pass user addresses (for deduplication logic)
           ...sponsorAddresses.map(pubkey => ({
             pubkey,
@@ -184,9 +199,15 @@ export async function activateAgent(
           }))
         ];
 
-      // SECURITY: Validate exactly 6 remaining accounts before sending to contract
-      if (finalRemainingAccounts.length !== 6) {
-        throw new Error(`Invalid remaining accounts count: expected 6, got ${finalRemainingAccounts.length}`);
+        // SECURITY: Validate exactly 6 remaining accounts before sending to contract
+        if (finalRemainingAccounts.length !== 6) {
+          throw new Error(`Invalid remaining accounts count: expected 6, got ${finalRemainingAccounts.length}`);
+        }
+
+        console.log('✅ Remaining accounts structure validated:', finalRemainingAccounts.length, 'accounts');
+      } catch (accountsError) {
+        console.error('❌ Failed to construct remaining accounts:', accountsError);
+        throw new Error(`Failed to build affiliate accounts structure: ${accountsError.message}`);
       }
 
       // Get the actual dev profile from config (not from sponsor hierarchy)
@@ -217,6 +238,12 @@ export async function activateAgent(
       console.log('📋 Main accounts:', Object.keys(accounts).map(key => `${key}: ${accounts[key as keyof typeof accounts]?.toString()}`));
 
       try {
+        console.log('🚀 Submitting USDT activation transaction...');
+        console.log('📋 Transaction details:');
+        console.log(`   Amount: ${amountBN.toString()} (${params.amount} USDT)`);
+        console.log(`   Tier: ${params.tier}`);
+        console.log(`   Remaining accounts: ${finalRemainingAccounts.length}`);
+        
         txSignature = await program.methods
           .activateAgentUsdt(amountBN, params.tier)
           .accounts(accounts)
@@ -225,8 +252,30 @@ export async function activateAgent(
         console.log('✅ USDT activation transaction successful:', txSignature);
       } catch (error) {
         console.error('❌ USDT activation transaction failed:', error);
-        console.error('❌ Remaining accounts passed:', finalRemainingAccounts.length);
-        console.error('❌ Remaining accounts details:', finalRemainingAccounts);
+        console.error('❌ Transaction details:');
+        console.error(`   Amount: ${amountBN.toString()}`);
+        console.error(`   Tier: ${params.tier}`);
+        console.error(`   Remaining accounts: ${finalRemainingAccounts.length}`);
+        console.error('❌ Remaining accounts details:', finalRemainingAccounts.map(acc => 
+          `${acc.pubkey.toString()} (writable: ${acc.isWritable})`
+        ));
+        console.error('❌ Main accounts:', Object.keys(accounts).map(key => 
+          `${key}: ${accounts[key as keyof typeof accounts]?.toString()}`
+        ));
+        
+        // Provide more specific error messages
+        if (error instanceof Error) {
+          if (error.message.includes('AccountNotInitialized')) {
+            throw new Error('Required token account not initialized. Please ensure you have a USDT token account.');
+          } else if (error.message.includes('insufficient funds')) {
+            throw new Error('Insufficient USDT balance or SOL for transaction fees.');
+          } else if (error.message.includes('InvalidAccountData')) {
+            throw new Error('Invalid account data. Please check your wallet connection and try again.');
+          } else if (error.message.includes('remaining_accounts')) {
+            throw new Error('Affiliate system error. Please try again or contact support.');
+          }
+        }
+        
         throw error;
       }
 
