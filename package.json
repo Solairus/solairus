@@ -9,6 +9,7 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
+    "start:preview": "vite preview --host 0.0.0.0 --port $PORT",
     "test": "vitest --run",
     "test:watch": "vitest",
     "check-profile": "node scripts/check-user-profile-simple.mjs"

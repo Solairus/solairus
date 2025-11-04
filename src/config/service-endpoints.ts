@@ -13,7 +13,7 @@ export const API_CONFIG = {
   // Base URLs for different environments
   baseUrls: {
     development: 'http://localhost:4000/api',
-    production: '/api', // Relative URL for production
+    production: (import.meta.env.VITE_API_BASE_URL || '/api'), // Allow explicit backend URL on Railway
     staging: 'https://staging-api.solairus.com/api'
   },
   
