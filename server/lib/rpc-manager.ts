@@ -49,8 +49,17 @@ class BackendRpcManager {
     // Devnet endpoints
     const devnetEndpoints: RpcEndpoint[] = []
     
-    // Check for multiple devnet URLs (SOLANA_RPC_URL_DEVNET_1, _2, _3, etc.)
-    for (let i = 1; i <= 5; i++) {
+    // Check for SOLANA_RPC_URL_DEVNET first (without number)
+    const devnetMain = process.env.SOLANA_RPC_URL_DEVNET
+    if (devnetMain) {
+      devnetEndpoints.push({
+        url: devnetMain,
+        name: 'Devnet RPC 1'
+      })
+    }
+    
+    // Check for numbered devnet URLs (SOLANA_RPC_URL_DEVNET_2, _3, _4, _5)
+    for (let i = 2; i <= 5; i++) {
       const url = process.env[`SOLANA_RPC_URL_DEVNET_${i}`]
       if (url) {
         devnetEndpoints.push({
@@ -80,8 +89,17 @@ class BackendRpcManager {
     // Mainnet endpoints
     const mainnetEndpoints: RpcEndpoint[] = []
     
-    // Check for multiple mainnet URLs
-    for (let i = 1; i <= 5; i++) {
+    // Check for SOLANA_RPC_URL_MAINNET first (without number)
+    const mainnetMain = process.env.SOLANA_RPC_URL_MAINNET
+    if (mainnetMain) {
+      mainnetEndpoints.push({
+        url: mainnetMain,
+        name: 'Mainnet RPC 1'
+      })
+    }
+    
+    // Check for numbered mainnet URLs (SOLANA_RPC_URL_MAINNET_2, _3, _4, _5)
+    for (let i = 2; i <= 5; i++) {
       const url = process.env[`SOLANA_RPC_URL_MAINNET_${i}`]
       if (url) {
         mainnetEndpoints.push({
