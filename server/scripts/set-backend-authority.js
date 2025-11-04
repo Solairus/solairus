@@ -38,9 +38,13 @@ try {
 // Constants
 const BPF_LOADER_UPGRADEABLE_ID = new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111')
 
-function getDefaultWalletKeypair() {
-  const walletPath = path.resolve(process.env.HOME || '', '.config/solana/id.json')
-  const raw = JSON.parse(fs.readFileSync(walletPath, 'utf-8'))
+/** Load signer from HOME path: ~/.config/solana/solairus_authority.json */
+function getSignerKeypair() {
+  const signerPath = path.resolve(process.env.HOME || '', '.config', 'solana', 'solairus_authority.json')
+  if (!fs.existsSync(signerPath)) {
+    throw new Error(`Signer file not found at ${signerPath}. Run 'node scripts/create-signer.js' first.`)
+  }
+  const raw = JSON.parse(fs.readFileSync(signerPath, 'utf-8'))
   const secret = Uint8Array.from(raw)
   return Keypair.fromSecretKey(secret)
 }
@@ -152,7 +156,7 @@ async function main() {
   const rpcUrl = process.env.SOLANA_RPC_URL || clusterApiUrl('devnet')
   const conn = new Connection(rpcUrl, 'confirmed')
 
-  const wallet = getDefaultWalletKeypair()
+  const wallet = getSignerKeypair()
   const programId = getProgramId()
 
   // Try initialize_config first (fresh setup); if it fails with already exists, fallback to set_backend_authority
@@ -191,7 +195,7 @@ async function main() {
   console.log('[set-backend-authority] on-chain backend_authority:', actual)
   if (actual !== expected) throw new Error('On-chain backend_authority does not match wallet')
 
-  // Update backend .env with base58-encoded secret
+  // Update backend .env with base58-encoded secret from signer
   const secretBase58 = bs58.encode(wallet.secretKey)
   const envPath = path.resolve(__dirname, '..', '.env')
   updateEnvSecretBase58({ envPath, secretBase58 })

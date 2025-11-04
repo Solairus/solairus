@@ -1,7 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Sparkles, Play } from "lucide-react";
 import heroNetwork from "@/assets/hero-network.jpg";
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTrigger, DialogTitle } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@/components/ui/visually-hidden";
 
 export default function Hero() {
   return (
@@ -55,16 +56,25 @@ export default function Hero() {
               </DialogTrigger>
               {/* Overlay video player */}
               <DialogContent className="max-w-3xl w-[90vw] sm:w-[800px] bg-transparent border-none p-0 shadow-none">
+                <VisuallyHidden>
+                  <DialogTitle>Solairus Introduction Video</DialogTitle>
+                </VisuallyHidden>
                 {/* Purpose: Show intro video in an overlay. Inputs: none. Outputs: video playback UI. */}
                 <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
                   {/* Autoplay may be blocked by some browsers; controls provided as fallback */}
                   <video
-                    src="/media/videos/intro.MP4"
+                    src="/media/videos/vid00.mp4"
                     controls
                     autoPlay
+                    muted
                     playsInline
-                    className="w-full h-full"
-                  />
+                    loop
+                    className="w-full h-full object-cover"
+                    onError={(e) => console.error('Video failed to load:', e)}
+                  >
+                    <source src="/media/videos/vid00.mp4" type="video/mp4" />
+                    Your browser does not support the video tag.
+                  </video>
                 </div>
               </DialogContent>
             </Dialog>
