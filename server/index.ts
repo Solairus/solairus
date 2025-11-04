@@ -1,6 +1,6 @@
 /**
- * Backend entrypoint: Express server wiring
- * Purpose: Expose REST API for transaction tracking
+ * Server entrypoint: Express server for API and static frontend
+ * Purpose: Monolithic server serving both REST API and static frontend
  */
 import 'dotenv/config'
 import express, { Request, Response } from 'express'
@@ -18,21 +18,11 @@ import agentsRouter from './routes/agents'
 const app = express()
 app.use(express.json())
 
-// CORS headers for local dev and Railway
-app.use((req, res, next) => {
-  const origin = process.env.CORS_ORIGIN || 'http://localhost:8080'
-  res.header('Access-Control-Allow-Origin', origin)
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
-  res.header(
-    'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, X-Requested-With, X-User-Agent, X-App-Version, X-Request-ID, Accept'
-  )
-  res.header('Access-Control-Allow-Credentials', 'true')
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200)
-  }
-  next()
-})
+// Production static serving flag
+const isProduction = process.env.NODE_ENV === 'production';
+
+// CORS is no longer needed - frontend served from same origin in production
+// In development, run separate dev servers (vite + tsx server/index.ts)
 
 // Healthcheck
 app.get('/health', (req: Request, res: Response) => res.json({ ok: true }))
@@ -58,7 +48,28 @@ app.use('/api', requireAuth, affiliateRouter)
 app.use('/api', requireAuth, withdrawalsRouter)
 app.use('/api', requireAuth, agentsRouter)
 
+// Start server
 const port = Number(process.env.PORT || 4000)
-app.listen(port, () => {
-  console.log(`[solairus-backend] listening on port ${port}`)
+
+async function startServer() {
+  // Serve static frontend in production
+  if (isProduction) {
+    const { serveStatic, log } = require('./vite-prod');
+    serveStatic(app);
+    log("Serving static frontend from /dist");
+  }
+
+  app.listen(port, '0.0.0.0', () => {
+    const mode = isProduction ? 'production' : 'development';
+    console.log(`[${mode}] Server listening on port ${port}`)
+    if (isProduction) {
+      console.log(`Frontend served at http://localhost:${port}`)
+    }
+    console.log(`API available at http://localhost:${port}/api`)
+  })
+}
+
+startServer().catch((err) => {
+  console.error('Failed to start server:', err)
+  process.exit(1)
 })
