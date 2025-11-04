@@ -63,16 +63,14 @@ export default function Hero() {
                 <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
                   {/* Autoplay may be blocked by some browsers; controls provided as fallback */}
                   <video
-                    src="/media/videos/vid00.mp4"
+                    src="/media/videos/intro.MP4"
                     controls
                     autoPlay
                     muted
                     playsInline
-                    loop
-                    className="w-full h-full object-cover"
-                    onError={(e) => console.error('Video failed to load:', e)}
+                    className="w-full h-full"
                   >
-                    <source src="/media/videos/vid00.mp4" type="video/mp4" />
+                    <source src="/media/videos/intro.MP4" type="video/mp4" />
                     Your browser does not support the video tag.
                   </video>
                 </div>
