@@ -4,6 +4,7 @@
  */
 import 'dotenv/config'
 import express, { Request, Response } from 'express'
+import { serveStatic, log as viteProdLog } from './vite-prod'
 import transactionsRouter from './routes/transactions'
 import authRouter from './routes/auth'
 import { requireAuth } from './middleware/auth'
@@ -21,8 +22,25 @@ app.use(express.json())
 // Production static serving flag
 const isProduction = process.env.NODE_ENV === 'production';
 
-// CORS is no longer needed - frontend served from same origin in production
-// In development, run separate dev servers (vite + tsx server/index.ts)
+// Development CORS: allow frontend dev server origin when running separately
+// In production, frontend is served from same origin and CORS is not needed
+if (!isProduction) {
+  const allowedOrigin = process.env.CORS_ORIGIN || 'http://localhost:8080'
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', allowedOrigin)
+    res.header('Vary', 'Origin')
+    res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
+    res.header(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Requested-With, X-User-Agent, X-App-Version, X-Request-ID'
+    )
+    res.header('Access-Control-Allow-Credentials', 'true')
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end()
+    }
+    next()
+  })
+}
 
 // Healthcheck
 app.get('/health', (req: Request, res: Response) => res.json({ ok: true }))
@@ -54,9 +72,8 @@ const port = Number(process.env.PORT || 4000)
 async function startServer() {
   // Serve static frontend in production
   if (isProduction) {
-    const { serveStatic, log } = require('./vite-prod');
     serveStatic(app);
-    log("Serving static frontend from /dist");
+    viteProdLog("Serving static frontend from /dist");
   }
 
   app.listen(port, '0.0.0.0', () => {
