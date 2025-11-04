@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
     server: {
       host: "::",
       port: 8080,
+      strictPort: true,
       // Ensure HMR uses the active server and avoid cross-port confusion
       hmr: {
         // Vite will infer the correct port; setting clientPort helps when proxies exist

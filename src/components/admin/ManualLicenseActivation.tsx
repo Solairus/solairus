@@ -8,7 +8,7 @@ import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '@/contexts/wallet-context';
 import { useAdminRole } from '@/hooks/useAdminRole';
 import { UserLookup, UserInfo } from './UserLookup';
-import { getProgram, derivePdas } from '@/lib/solairus-main';
+import { getProgram, derivePdas } from '@/lib/solairus-removed';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ResponsiveCard, InfoCard } from './ResponsiveCard';
 import { FormInput } from './FormInput';

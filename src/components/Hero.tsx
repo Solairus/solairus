@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight, Sparkles, Play } from "lucide-react";
 import heroNetwork from "@/assets/hero-network.jpg";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 
 export default function Hero() {
   return (
@@ -38,13 +39,35 @@ export default function Hero() {
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <Button variant="hero" size="xl" className="group">
-              Launch App
-              <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+            <Button asChild variant="hero" size="xl" className="group">
+              <a href="/dapp" aria-label="Launch App">
+                Launch App
+                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              </a>
             </Button>
-            <Button variant="neon" size="xl">
-              Hire Your First Bot
-            </Button>
+            {/* Replace hire button with Watch Intro that opens an overlay video */}
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="neon" size="xl" aria-label="Watch Intro Video" className="group">
+                  <Play className="w-5 h-5 mr-2" />
+                  Watch Intro
+                </Button>
+              </DialogTrigger>
+              {/* Overlay video player */}
+              <DialogContent className="max-w-3xl w-[90vw] sm:w-[800px] bg-transparent border-none p-0 shadow-none">
+                {/* Purpose: Show intro video in an overlay. Inputs: none. Outputs: video playback UI. */}
+                <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
+                  {/* Autoplay may be blocked by some browsers; controls provided as fallback */}
+                  <video
+                    src="/media/videos/intro.MP4"
+                    controls
+                    autoPlay
+                    playsInline
+                    className="w-full h-full"
+                  />
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
           
           {/* Stats */}

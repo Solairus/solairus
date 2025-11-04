@@ -1,76 +1,14 @@
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
-import idl from "@/idl/license_activation.json";
+// Deprecated: license_activation IDL removed; using SolairusPay only
 
 export type Role = "Admin" | "Dev" | "Marketer1" | "Marketer2" | "Reserve";
 
-export const PROGRAM_ID = new PublicKey(idl.metadata.address);
+export const PROGRAM_ID = PublicKey.default;
 
-export function getProgram(provider: anchor.AnchorProvider) {
-  // Fix IDL compatibility issues for Anchor:
-  // 1. Add address field at root level (Anchor expects idl.address)
-  // 2. Convert "publicKey" to "pubkey" for type compatibility
-  // 3. Convert defined types from string to object format (Anchor expects {name: string})
-  // 4. Restructure accounts to move inline types to types array and add discriminators
-  const fixIdlTypes = (obj: unknown): unknown => {
-    if (typeof obj === 'string') {
-      return obj === 'publicKey' ? 'pubkey' : obj;
-    }
-    if (Array.isArray(obj)) {
-      return obj.map(fixIdlTypes);
-    }
-    if (typeof obj === 'object' && obj !== null) {
-      const fixed: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(obj)) {
-        // Fix defined types: convert "Role" to {name: "Role"}
-        if (key === 'defined' && typeof value === 'string') {
-          fixed[key] = { name: value };
-        } else {
-          fixed[key] = fixIdlTypes(value);
-        }
-      }
-      return fixed;
-    }
-    return obj;
-  };
-
-  const baseFixedIdl = fixIdlTypes({
-    ...idl,
-    address: idl.metadata.address  // Add address field for Anchor
-  }) as Record<string, unknown> & {
-    accounts: Record<string, unknown>[];
-    types: Record<string, unknown>[];
-  };
-
-  // Restructure accounts: move inline type definitions to types array and add discriminators
-  const accountTypes: Record<string, unknown>[] = [];
-  const fixedAccounts = baseFixedIdl.accounts.map((account: Record<string, unknown>, index: number) => {
-    if (account.type && !account.discriminator) {
-      // Move the inline type definition to the types array
-      accountTypes.push({
-        name: account.name,
-        type: account.type
-      });
-
-      // Create a simple discriminator (8 bytes, using account index)
-      const discriminator = new Array(8).fill(0);
-      discriminator[0] = index + 1; // Simple discriminator based on index
-
-      return {
-        name: account.name,
-        discriminator
-      };
-    }
-    return account;
-  });
-
-  const finalIdl = {
-    ...baseFixedIdl,
-    accounts: fixedAccounts,
-    types: [...baseFixedIdl.types, ...accountTypes]
-  };
-
-  return new anchor.Program(finalIdl as unknown as anchor.Idl, provider);
+export function getProgram(_provider: anchor.AnchorProvider) {
+  // Deprecated: License activation program has been removed. Use SolairusPay service.
+  throw new Error("License activation program has been deprecated; use SolairusPay service.");
 }
 
 export function derivePdas(user?: PublicKey | null) {

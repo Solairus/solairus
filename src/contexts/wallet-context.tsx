@@ -10,6 +10,7 @@ import { Connection, PublicKey, clusterApiUrl, Transaction, VersionedTransaction
 import { WalletManager } from "@/services/wallet/wallet-manager"
 import { getHealthyRpcConnection, handleRpcError, onNetworkChange } from "@/utils/rpc-switcher"
 import * as anchor from "@coral-xyz/anchor"
+import { AuthService } from '@/services/auth/auth-service'
 
 // Interface for wallet provider with signing capabilities
 interface WalletProviderWithSigning {
@@ -232,6 +233,14 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
         // Skip initial balance fetch to avoid unnecessary RPC calls
         // Balance will be fetched only when user explicitly requests it
         console.log("✅ Wallet connected - skipping automatic balance fetch to preserve RPC limits")
+
+        // Silent backend authentication to create/refresh session
+        try {
+          const res = await AuthService.authenticateWallet(address)
+          console.log('✅ Backend session established for', res.user.user_address)
+        } catch (authError) {
+          console.warn('⚠️ Silent auth failed:', authError)
+        }
       } catch (error) {
         console.error("Wallet connection failed:", error)
         setLastError(error as Error)

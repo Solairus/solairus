@@ -2,7 +2,11 @@ import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
 import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
 
-export default function Header() {
+interface HeaderProps {
+  showWalletConnect?: boolean; // when false, hide connect wallet button
+}
+
+export default function Header({ showWalletConnect = true }: HeaderProps) {
   const { openModal } = useWalletConnection();
   return (
     <header className="fixed top-0 left-0 right-0 z-50 border-b border-border/50 glass">
@@ -15,6 +19,9 @@ export default function Header() {
           
           {/* Navigation - Desktop */}
           <nav className="hidden md:flex items-center gap-8">
+            <a href="/" className="text-muted-foreground hover:text-foreground transition-colors">
+              Home
+            </a>
             <a href="#how" className="text-muted-foreground hover:text-foreground transition-colors">
               How It Works
             </a>
@@ -31,11 +38,13 @@ export default function Header() {
           
           {/* CTA */}
           <div className="flex items-center gap-4">
-            <Button variant="ghost" className="hidden md:inline-flex" onClick={openModal}>
-              Connect Wallet
-            </Button>
-            <Button variant="hero">
-              Launch App
+            {showWalletConnect && (
+              <Button variant="ghost" className="hidden md:inline-flex" onClick={openModal}>
+                Connect Wallet
+              </Button>
+            )}
+            <Button asChild variant="hero">
+              <a href="/dapp" aria-label="Launch App">Launch App</a>
             </Button>
             <Button variant="ghost" size="icon" className="md:hidden">
               <Menu className="w-5 h-5" />

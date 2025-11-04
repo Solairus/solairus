@@ -8,7 +8,7 @@ import { PublicKey, AccountInfo } from '@solana/web3.js';
 import * as anchor from '@coral-xyz/anchor';
 import { LicenseStatusValidator, LicenseValidationResult, CacheValidationResult } from '../license-status-validator';
 import { LicenseDebugUtils } from '../license-debug-utils';
-import { UserProfile, LicenseInfo } from '@/lib/solairus-main';
+import { UserProfile, LicenseInfo } from '@/lib/solairus-removed';
 
 // Mock data
 const mockUserPubkey = new PublicKey('11111111111111111111111111111111');

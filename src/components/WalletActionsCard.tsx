@@ -40,7 +40,7 @@ export default function WalletActionsCard(_props: WalletActionsCardProps) {
   );
 
   const handleMyAgents = () => {
-    navigate('/dapp/history');
+    navigate('/dapp/my-agents');
   };
 
   const handleDeployAgent = () => {
@@ -53,6 +53,10 @@ export default function WalletActionsCard(_props: WalletActionsCardProps) {
 
   const handleStake = () => {
     navigate('/dapp/coming-soon');
+  };
+
+  const handleHistory = () => {
+    navigate('/dapp/transaction-history');
   };
 
   const fetchUserCreditBalance = async () => {
@@ -170,9 +174,9 @@ export default function WalletActionsCard(_props: WalletActionsCardProps) {
           icon={<Coins className="w-5 h-5" />} 
         />
         <Action 
-          label="Transfer" 
-          ariaLabel="Transfer Credits" 
-          onClick={handleTransfer} 
+          label="History" 
+          ariaLabel="Open Transaction History" 
+          onClick={handleHistory} 
           icon={<ArrowRightLeft className="w-5 h-5" />} 
         />
       </div>

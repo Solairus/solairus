@@ -7,27 +7,30 @@ import Index from "./pages/Index";
 import Dapp from "./pages/Dapp";
 import DappHome from "./pages/Dapp/Home";
 import DappMarket from "./pages/Dapp/Market";
-import DappHistory from "./pages/Dapp/History";
+import MyAgents from "./pages/Dapp/Agents/History";
+import DappTransactionHistory from "./pages/Dapp/TransactionHistory";
 import DappHelp from "./pages/Dapp/Help";
-import DappHire from "./pages/Dapp/Hire";
+import DappHire from "./pages/Dapp/Agents/Hire";
 import DappReferral from "./pages/Dapp/Referral";
 import DappAffiliate from "./pages/Dapp/Affiliate";
 import DappLicenseActivation from "./pages/Dapp/LicenseActivation";
 import DappSummary from "./pages/Dapp/Summary";
 import ComingSoon from "./pages/Dapp/ComingSoon";
-import CoreUITest from "./pages/uitests/core";
+
 import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
 import Admin from "./pages/Admin";
 import InstallPrompt from "@/components/InstallPrompt";
 import WalletGate from "@/components/WalletGate";
 import LicenseGuard from "@/components/license/LicenseGuard";
-import LicenseActivationUITest from "./pages/uitests/license_activation";
+
 import { WalletContextProvider } from "@/contexts/wallet-context";
 import { LicenseContextProvider } from "@/contexts/license-context";
 import { createLicenseService } from "@/services/license/license-service";
 import { useWallet } from "@/contexts/wallet-context";
 import { ReactNode, useMemo } from "react";
+import { AuthContextProvider } from '@/contexts/auth-context'
+import { SettingsContextProvider } from '@/contexts/settings-context'
 
 // Initialize configuration validation for agent system
 import "@/utils/config-validator";
@@ -63,73 +66,64 @@ const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <WalletContextProvider>
-      <LicenseContextProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <InstallPrompt />
-          <BrowserRouter
-            future={{
-              v7_startTransition: true,
-              v7_relativeSplatPath: true,
-            }}
-          >
-          <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/dapp/ref/:code" element={<DappReferral />} />
-            <Route
-              path="/dapp"
-              element={
-                <WalletGate>
-                  <LicenseGuardWrapper>
-                    <Dapp />
-                  </LicenseGuardWrapper>
-                </WalletGate>
-              }
-            >
-              <Route index element={<DappHome />} />
-              <Route path="market" element={<DappMarket />} />
-              <Route path="history" element={<DappHistory />} />
-              <Route path="help" element={<DappHelp />} />
-              <Route path="hire" element={<DappHire />} />
-              <Route path="affiliate" element={<DappAffiliate />} />
-              <Route path="license-activation" element={<LicenseActivationWrapper />} />
-              <Route path="summary" element={<DappSummary />} />
-              <Route path="coming-soon" element={<ComingSoon />} />
-            </Route>
-            <Route path="/privacy" element={<Privacy />} />
-            <Route
-              path="/dapp/special"
-              element={
-                <WalletGate>
-                  <Admin />
-                </WalletGate>
-              }
-            />
-            <Route
-              path="/uitests/license_activation"
-              element={
-                <WalletGate>
-                  <LicenseActivationUITest />
-                </WalletGate>
-              }
-            />
-            <Route
-              path="/uitests/core"
-              element={
-                <WalletGate>
-                  <CoreUITest />
-                </WalletGate>
-              }
-            />
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-        </TooltipProvider>
-      </LicenseContextProvider>
-    </WalletContextProvider>
+    <AuthContextProvider>
+      <WalletContextProvider>
+        <LicenseContextProvider>
+          <SettingsContextProvider>
+            <TooltipProvider>
+              <Toaster />
+              <Sonner />
+              <InstallPrompt />
+              <BrowserRouter
+                future={{
+                  v7_startTransition: true,
+                  v7_relativeSplatPath: true,
+                }}
+              >
+              <Routes>
+                <Route path="/" element={<Index />} />
+                <Route path="/dapp/ref/:code" element={<DappReferral />} />
+                <Route
+                  path="/dapp"
+                  element={
+                    <WalletGate>
+                      <LicenseGuardWrapper>
+                        <Dapp />
+                      </LicenseGuardWrapper>
+                    </WalletGate>
+                  }
+                >
+                  <Route index element={<DappHome />} />
+                  <Route path="market" element={<DappMarket />} />
+                  <Route path="my-agents" element={<MyAgents />} />
+                  <Route path="transaction-history" element={<DappTransactionHistory />} />
+                  <Route path="help" element={<DappHelp />} />
+                  <Route path="hire" element={<DappHire />} />
+                  <Route path="affiliate" element={<DappAffiliate />} />
+                  <Route path="license-activation" element={<LicenseActivationWrapper />} />
+                  <Route path="summary" element={<DappSummary />} />
+                  <Route path="coming-soon" element={<ComingSoon />} />
+                </Route>
+                <Route path="/privacy" element={<Privacy />} />
+                <Route
+                  path="/dapp/special"
+                  element={
+                    <WalletGate>
+                      <Admin />
+                    </WalletGate>
+                  }
+                />
+
+
+                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </BrowserRouter>
+            </TooltipProvider>
+          </SettingsContextProvider>
+        </LicenseContextProvider>
+      </WalletContextProvider>
+    </AuthContextProvider>
   </QueryClientProvider>
 );
 

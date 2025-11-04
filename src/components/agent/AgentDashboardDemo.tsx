@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { PublicKey, Connection } from '@solana/web3.js';
 import { AgentDashboard } from './AgentDashboard';
 import { TierSelection } from './TierSelection';
-import { AgentTier } from '@/lib/solairus-main';
+import { AgentTier } from '@/lib/solairus-removed';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/Card';
 

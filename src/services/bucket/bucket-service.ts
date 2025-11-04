@@ -1,6 +1,6 @@
 import * as anchor from '@coral-xyz/anchor';
 import { PublicKey } from '@solana/web3.js';
-import { getProgram, derivePdas, Config } from '@/lib/solairus-main';
+import { getProgram, derivePdas, Config } from '@/lib/solairus-removed';
 import { BucketType } from '@/hooks/useBucketBalances';
 
 // Bucket enum mapping to match the contract

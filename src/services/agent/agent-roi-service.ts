@@ -7,7 +7,7 @@ import {
   canWithdrawRoi,
   getErrorMessage,
   AGENT_TIER_CONFIGS
-} from "@/lib/solairus-main";
+} from "@/lib/solairus-removed";
 import { getWithdrawalLimitStatus, canWithdrawAmount } from "./withdrawal-limit-service";
 import { getUserAgent } from "./agent-service";
 import { AgentErrorHandler } from "@/utils/agent-error-handler";

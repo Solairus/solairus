@@ -13,7 +13,7 @@ const Index = () => {
   // Countdown target
   const countdownTarget = "2025-11-01T20:00:00+08:00";
   return <div className="min-h-screen">
-      <Header />
+      <Header showWalletConnect={false} />
       <main>
         <Hero />
         <HowItWorks />

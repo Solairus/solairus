@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Users, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
-import { getProgram, derivePdas } from "@/lib/solairus-main";
+import { getProgram, derivePdas } from "@/lib/solairus-removed";
 import { useWallet } from "@/contexts/wallet-context";
 import { PublicKey } from "@solana/web3.js";
 

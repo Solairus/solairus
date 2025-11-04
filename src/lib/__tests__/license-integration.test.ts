@@ -15,7 +15,7 @@ import {
   getLicenseExpiryDate,
   checkLicenseStatus,
   needsRegistration,
-} from '../solairus-main';
+} from '../solairus-removed';
 
 // Mock data
 const mockUserPubkey = new PublicKey('11111111111111111111111111111111');

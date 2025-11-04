@@ -12,7 +12,7 @@
 export const API_CONFIG = {
   // Base URLs for different environments
   baseUrls: {
-    development: 'http://localhost:3000/api',
+    development: 'http://localhost:4000/api',
     production: '/api', // Relative URL for production
     staging: 'https://staging-api.solairus.com/api'
   },
@@ -39,7 +39,7 @@ export const API_CONFIG = {
   defaultHeaders: {
     'Content-Type': 'application/json',
     'Accept': 'application/json'
-  }
+  } as HeadersInit
 };
 
 // Agent service endpoints
@@ -56,6 +56,8 @@ export const AGENT_ENDPOINTS = {
   // Withdrawal limit endpoints
   getWithdrawalLimits: '/agents/user/:userAddress/limits',
   checkWithdrawalEligibility: '/agents/:activationId/eligibility',
+  // PnL summary (backend computed)
+  getPnlSummary: '/agents/pnl-summary',
   
   // Agent tier endpoints
   getTierConfigurations: '/agents/tiers',
@@ -185,7 +187,21 @@ export const SERVICE_CONFIG = {
 export const REQUEST_INTERCEPTORS = {
   // Add authentication headers
   addAuth: (config: RequestInit): RequestInit => {
-    // In a real app, you might add JWT tokens here
+    // Attach JWT from local storage if present
+    let token: string | null = null;
+    try {
+      token = localStorage.getItem('solairus.jwt');
+    } catch {
+      token = null;
+    }
+    if (token) {
+      const headers = new Headers(config.headers as HeadersInit);
+      headers.set('Authorization', `Bearer ${token}`);
+      return {
+        ...config,
+        headers,
+      };
+    }
     return config;
   },
   
@@ -244,12 +260,13 @@ export class ApiClient {
     const startTime = Date.now();
     
     // Apply request interceptors
-    let config = {
+    const mergedHeaders: HeadersInit = {
+      ...(API_CONFIG.defaultHeaders as HeadersInit),
+      ...(options.headers as HeadersInit),
+    };
+    let config: RequestInit = {
       ...options,
-      headers: {
-        ...API_CONFIG.defaultHeaders,
-        ...options.headers
-      }
+      headers: mergedHeaders,
     };
     
     config = REQUEST_INTERCEPTORS.addRequestId(config);

@@ -13,7 +13,7 @@ import * as anchor from '@coral-xyz/anchor';
 import {
   UserProfile,
   Config,
-} from '../solairus-main';
+} from '../solairus-removed';
 
 // Mock data for testing - using generated keypairs for valid public keys
 const mockUserPubkey = Keypair.generate().publicKey;

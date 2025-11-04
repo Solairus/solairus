@@ -1,6 +1,6 @@
 import React, { createContext, useContext, ReactNode } from "react";
 import { useLicenseStatus } from "@/hooks/license/use-license-status";
-import { LicenseInfo } from "@/lib/solairus-main";
+import { LicenseInfo } from "@/lib/solairus-removed";
 import { LicenseService } from "@/services/license/license-service";
 
 interface LicenseContextType {

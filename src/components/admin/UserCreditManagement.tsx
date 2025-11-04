@@ -7,7 +7,7 @@ import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '@/contexts/wallet-context';
 import { useAdminRole } from '@/hooks/useAdminRole';
 import { UserLookup, UserInfo } from './UserLookup';
-import { getProgram, derivePdas } from '@/lib/solairus-main';
+import { getProgram, derivePdas } from '@/lib/solairus-removed';
 import { useAdminErrorHandler } from '@/utils/admin-error-handler';
 import { useTransactionStatus } from '@/hooks/useTransactionStatus';
 import { createAdminService } from '@/services/admin/admin-service';

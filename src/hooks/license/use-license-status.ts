@@ -1,7 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { useWallet } from "@/contexts/wallet-context";
-import { LicenseService, createLicenseService } from "@/services/license/license-service";
-import { LicenseInfo, LicenseStatus } from "@/lib/solairus-main";
+import { useAuth } from "@/contexts/auth-context";
+import { LicenseBackendService, type BackendLicenseStatus } from "@/services/license/license-backend";
+import type { LicenseService } from "@/services/license/license-service";
+
+export interface LicenseInfo {
+  status: BackendLicenseStatus | 'none' | 'near-expiry' | 'expired' | 'active';
+  isValid: boolean;
+  daysRemaining?: number;
+}
 
 interface UseLicenseStatusReturn {
   licenseInfo: LicenseInfo;
@@ -15,15 +22,15 @@ interface UseLicenseStatusReturn {
 
 /**
  * useLicenseStatus
- * Purpose: Hook for managing license status with wallet integration
+ * Purpose: Backend-only license status management tied to AuthContext
  * Features:
- * - Automatic license status checking
- * - License activation functionality
- * - Error handling and retry logic
- * - Integration with wallet context
+ * - Reads license status from backend user session
+ * - Refreshes via backend service and updates session
+ * - Provides activation hook (backend-driven)
  */
 export function useLicenseStatus(): UseLicenseStatusReturn {
-  const { anchorProvider, publicKey, isConnected } = useWallet();
+  const { publicKey, isConnected } = useWallet();
+  const { user, refreshSession } = useAuth();
   
   const [licenseInfo, setLicenseInfo] = useState<LicenseInfo>({
     status: 'none',
@@ -32,103 +39,102 @@ export function useLicenseStatus(): UseLicenseStatusReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isActivating, setIsActivating] = useState(false);
-  const [licenseService, setLicenseService] = useState<LicenseService | null>(null);
   const [hasCheckedOnce, setHasCheckedOnce] = useState(false);
 
-  // Initialize license service when anchor provider is available
+  // Initialize from current backend user session
   useEffect(() => {
-    if (anchorProvider) {
-      try {
-        const service = createLicenseService(anchorProvider);
-        setLicenseService(service);
-      } catch (err) {
-        console.error('Failed to create license service:', err);
-        setLicenseService(null);
+    if (!user) return;
+    const status = (user.license_status || 'none') as BackendLicenseStatus;
+    let daysRemaining = 0;
+    let isValid = status === 'active';
+
+    try {
+      if (user.license_expiration) {
+        const exp = new Date(user.license_expiration).getTime();
+        const now = Date.now();
+        const diffDays = Math.max(0, Math.floor((exp - now) / (1000 * 60 * 60 * 24)));
+        daysRemaining = diffDays;
+        if (diffDays <= 0) {
+          isValid = false;
+        } else if (diffDays <= 7 && isValid) {
+          // Mark as near-expiry if within 7 days
+          setLicenseInfo({ status: 'near-expiry', isValid, daysRemaining: diffDays });
+          return;
+        }
       }
-    } else {
-      setLicenseService(null);
+    } catch {
+      // ignore parse errors
     }
-  }, [anchorProvider]);
 
-  // Simple refresh function without dependencies that cause loops
+    setLicenseInfo({ status, isValid, daysRemaining });
+  }, [user]);
+
   const refreshLicenseStatus = useCallback(async () => {
-    // Don't check if already loading or no service
-    if (isLoading || !licenseService || !publicKey || !isConnected) {
-      return;
-    }
-
+    if (isLoading || !isConnected || !publicKey) return;
     try {
       setIsLoading(true);
       setError(null);
-      console.log('🔄 Manual license status refresh');
-      
-      const info = await licenseService.getLicenseInfo(publicKey);
-      setLicenseInfo(info);
-      setHasCheckedOnce(true); // Mark as checked
+      const info = await LicenseBackendService.getInfo();
+      const status = (info.license_status || 'none') as BackendLicenseStatus;
+      let daysRemaining = 0;
+      let isValid = status === 'active';
+      if (info.license_expiration) {
+        const exp = new Date(info.license_expiration).getTime();
+        const now = Date.now();
+        const diffDays = Math.max(0, Math.floor((exp - now) / (1000 * 60 * 60 * 24)));
+        daysRemaining = diffDays;
+        if (diffDays <= 0) {
+          isValid = false;
+        }
+      }
+      setLicenseInfo({ status, isValid, daysRemaining });
+      setHasCheckedOnce(true);
     } catch (err) {
-      console.error('Failed to check license status:', err);
-      setError(err instanceof Error ? err.message : 'Failed to check license status');
-      
-      // Set fallback state on error
-      setLicenseInfo({
-        status: 'none',
-        isValid: false,
-      });
+      console.error('Failed to refresh license status (backend):', err);
+      setError(err instanceof Error ? err.message : 'Failed to refresh license status');
+      setLicenseInfo({ status: 'none', isValid: false });
     } finally {
       setIsLoading(false);
     }
-  }, [licenseService, publicKey, isConnected]); // Removed isLoading to prevent loops
+  }, [isLoading, isConnected, publicKey]);
 
-  // Activate license
   const activateLicense = useCallback(async () => {
-    if (!publicKey || !licenseService) {
-      throw new Error('Wallet not connected or license service not available');
-    }
-
     try {
       setIsActivating(true);
       setError(null);
-
-      const result = await licenseService.activateLicenseComplete(publicKey);
-      console.log('License activation successful:', result);
-
-      // Refresh license info after activation without causing loops
-      setTimeout(async () => {
-        try {
-          const info = await licenseService.getLicenseInfo(publicKey);
-          setLicenseInfo(info);
-        } catch (err) {
-          console.error('Failed to refresh license after activation:', err);
-        }
-      }, 2000);
+      // Backend-only activation; transaction verification handled in page flow
+      const result = await LicenseBackendService.activate();
+      await refreshSession();
+      const status = (result.license_status || 'active') as BackendLicenseStatus;
+      let daysRemaining = 0;
+      if (result.license_expiration) {
+        const exp = new Date(result.license_expiration).getTime();
+        const now = Date.now();
+        daysRemaining = Math.max(0, Math.floor((exp - now) / (1000 * 60 * 60 * 24)));
+      }
+      setLicenseInfo({ status, isValid: status === 'active', daysRemaining });
     } catch (err) {
-      console.error('License activation failed:', err);
+      console.error('License activation failed (backend):', err);
       const errorMessage = err instanceof Error ? err.message : 'License activation failed';
       setError(errorMessage);
       throw err;
     } finally {
       setIsActivating(false);
     }
-  }, [publicKey, licenseService]); // Removed refreshLicenseStatus dependency
+  }, [refreshSession]);
 
-  // Only check license once when service becomes available
+  // One-time refresh when connected
   useEffect(() => {
     let mounted = true;
-    
-    const checkLicense = async () => {
-      if (licenseService && publicKey && isConnected && !isLoading && !hasCheckedOnce && mounted) {
-        console.log('🔍 Performing one-time license check');
+    const check = async () => {
+      if (isConnected && publicKey && !isLoading && !hasCheckedOnce && mounted) {
         await refreshLicenseStatus();
         setHasCheckedOnce(true);
       }
     };
-    
-    checkLicense();
-    
-    return () => {
-      mounted = false;
-    };
-  }, [licenseService, publicKey, isConnected, hasCheckedOnce, isLoading, refreshLicenseStatus]); // Check only once per session
+    check();
+    return () => { mounted = false; };
+  }, [isConnected, publicKey, isLoading, hasCheckedOnce, refreshLicenseStatus]);
 
   return {
     licenseInfo,
@@ -137,6 +143,6 @@ export function useLicenseStatus(): UseLicenseStatusReturn {
     refreshLicenseStatus,
     activateLicense,
     isActivating,
-    licenseService,
+    licenseService: null,
   };
 }

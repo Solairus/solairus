@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Clock, CheckCircle, AlertTriangle, XCircle } from "lucide-react";
-import { LicenseStatus } from "@/lib/solairus-main";
+import { LicenseStatus } from "@/lib/solairus-removed";
 import CountdownTimer from "@/components/license/CountdownTimer";
 
 interface LicenseStatusCardProps {

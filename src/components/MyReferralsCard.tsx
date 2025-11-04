@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -7,8 +7,7 @@ import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
 import { useWallet } from "@/contexts/wallet-context";
 import { PublicKey } from "@solana/web3.js";
 import { toast } from "sonner";
-import { getProgram } from "@/lib/solairus-main";
-import { getSponsorReferrals } from "@/services/admin/sponsor-management-service";
+import { AffiliateBackendService } from "@/services/affiliate/affiliate-backend";
 
 interface MyReferralsCardProps {
   userPublicKey: PublicKey;
@@ -30,32 +29,32 @@ export default function MyReferralsCard({ userPublicKey, referralCount }: MyRefe
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
 
   const loadReferrals = useCallback(async () => {
-    if (!anchorProvider?.connection || !account) return;
+    if (!account) return;
 
     try {
       setIsLoading(true);
       setError(null);
 
-      const program = getProgram(anchorProvider);
-      const referralAddresses = await getSponsorReferrals(program, userPublicKey);
-
-      // Convert PublicKey addresses to display format
-      const referralInfos: ReferralInfo[] = referralAddresses.map(address => ({
-        address: address.toString(),
-        shortAddress: `${address.toString().slice(0, 4)}...${address.toString().slice(-4)}`,
-        // TODO: We could fetch join dates from transaction history if needed
+      const pubkeys = await AffiliateBackendService.getReferrals();
+      const referralInfos: ReferralInfo[] = pubkeys.map((addr) => ({
+        address: addr,
+        shortAddress: `${addr.slice(0, 4)}...${addr.slice(-4)}`,
       }));
 
       setReferrals(referralInfos);
       console.log(`✅ Loaded ${referralInfos.length} referrals`);
-
     } catch (err) {
       console.error('Failed to load referrals:', err);
       setError('Failed to load referral list');
     } finally {
       setIsLoading(false);
     }
-  }, [anchorProvider, account, userPublicKey]);
+  }, [account]);
+
+  // Auto-load referrals on initial mount or when wallet/account becomes available
+  useEffect(() => {
+    loadReferrals();
+  }, [loadReferrals]);
 
   const handleCopyAddress = async (address: string) => {
     try {
@@ -70,9 +69,23 @@ export default function MyReferralsCard({ userPublicKey, referralCount }: MyRefe
     }
   };
 
+  const getEffectiveCluster = (): 'mainnet-beta' | 'devnet' | 'testnet' => {
+    // Detect from UI override first, then environment variable
+    const override = (() => {
+      try { return (localStorage.getItem('solana_cluster_override') ?? '').toLowerCase(); } catch { return ''; }
+    })();
+    const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? 'devnet').toLowerCase();
+    const effective = override || envCluster;
+    if (effective.startsWith('mainnet')) return 'mainnet-beta';
+    if (effective === 'testnet') return 'testnet';
+    return 'devnet';
+  };
+
   const openInExplorer = (address: string) => {
-    const explorerUrl = `https://explorer.solana.com/address/${address}?cluster=devnet`;
-    window.open(explorerUrl, '_blank');
+    const cluster = getEffectiveCluster();
+    const base = `https://explorer.solana.com/address/${address}`;
+    const url = cluster === 'mainnet-beta' ? base : `${base}?cluster=${cluster}`;
+    window.open(url, '_blank');
   };
 
   const formatAddress = (address: string) => {

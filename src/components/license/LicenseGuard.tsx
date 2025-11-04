@@ -6,6 +6,7 @@ import { useWallet } from "@/contexts/wallet-context";
 import { Card, CardContent } from "@/components/ui/card";
 import LicenseExpiryNotification from "./LicenseExpiryNotification";
 import { isSpecialAccount } from "@/utils/admin-roles";
+import { useAuth } from '@/contexts/auth-context'
 
 interface LicenseGuardProps {
   children: ReactNode;
@@ -47,11 +48,15 @@ export default function LicenseGuard({ children }: LicenseGuardProps) {
     error,
     refreshLicenseStatus
   } = useLicense();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   // Check if the connected wallet is a special account (admin/dev/marketer)
   const isSpecialWallet = isSpecialAccount(publicKey);
+
+  // Backend license status (JWT session)
+  const backendHasValidLicense = user?.license_status === 'active';
 
   // Check if license guard is enabled
   const licenseGuardEnabled = (
@@ -68,13 +73,14 @@ export default function LicenseGuard({ children }: LicenseGuardProps) {
   // Skip license check for special accounts (admin/dev/marketers)
   // Preserve current path to redirect back after license activation
   React.useEffect(() => {
-    if (licenseGuardEnabled && isConnected && !isSpecialWallet && !licenseInfo.isValid && !isLoading && !isLicenseActivationPage) {
+    const hasValid = backendHasValidLicense || licenseInfo.isValid;
+    if (licenseGuardEnabled && isConnected && !isSpecialWallet && !hasValid && !isLoading && !isLicenseActivationPage) {
       navigate('/dapp/license-activation', { 
         replace: true,
         state: { returnPath: location.pathname }
       });
     }
-  }, [licenseGuardEnabled, isConnected, isSpecialWallet, licenseInfo.isValid, isLoading, isLicenseActivationPage, navigate, location.pathname]);
+  }, [backendHasValidLicense, licenseGuardEnabled, isConnected, isSpecialWallet, licenseInfo.isValid, isLoading, isLicenseActivationPage, navigate, location.pathname]);
 
   // If license guard is disabled, always allow access
   if (!licenseGuardEnabled) {
@@ -138,8 +144,8 @@ export default function LicenseGuard({ children }: LicenseGuardProps) {
     );
   }
 
-  // If license is valid, render children with optional expiry notification
-  if (licenseInfo.isValid) {
+  // If license is valid (backend or on-chain), render children with optional expiry notification
+  if (backendHasValidLicense || licenseInfo.isValid) {
     return (
       <>
         {/* Show expiry notification for near-expiry licenses */}

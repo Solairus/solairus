@@ -5,8 +5,11 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
 import { useWallet } from "@/contexts/wallet-context";
-import { getProgram, derivePdas, UserProfile, Config, MyReferrals } from "@/lib/solairus-main";
+import { AffiliateBackendService, type AffiliateSummary } from "@/services/affiliate/affiliate-backend";
 import { PublicKey } from "@solana/web3.js";
+import { Transaction } from "@solana/web3.js";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { ApiClient, API_CONFIG } from "@/config/service-endpoints";
 import { toast } from "sonner";
 import AffiliateEarningsCard from "@/components/AffiliateEarningsCard";
 import ReferralNetworkCard from "@/components/ReferralNetworkCard";
@@ -14,156 +17,167 @@ import AffiliateLinkCard from "@/components/AffiliateLinkCard";
 import MyReferralsCard from "@/components/MyReferralsCard";
 // import EarningsHistoryCard from "@/components/EarningsHistoryCard";
 import { DollarSign, Users, Share2, TrendingUp, RefreshCw, ArrowDownToLine } from "lucide-react";
-import * as anchor from "@coral-xyz/anchor";
+// Removed on-chain calls; using backend-only services
 import BackButton from '@/components/ui/BackButton';
 
 export default function AffiliatePage() {
-  // Helper function to format USDT amounts safely
-  const formatUsdt = (amount: anchor.BN) => {
-    // Use string division to avoid precision issues with large numbers
-    const amountStr = amount.toString();
-    const wholePart = amountStr.slice(0, -6) || '0';
-    const decimalPart = amountStr.slice(-6).padStart(6, '0');
-    return `${wholePart}.${decimalPart.slice(0, 2)}`;
+  // Helper function to format USDT micro amounts safely
+  const formatUsdtMicro = (micro?: number | string) => {
+    const n = Number(micro ?? 0);
+    const usd = n / 1_000_000;
+    return usd.toFixed(2);
   };
 
   const { account } = useWalletConnection();
-  const { anchorProvider } = useWallet();
+  const { anchorProvider, signTransaction } = useWallet();
   
-  // Get actual referral count from MyReferrals account
+  // Referral count not provided via backend summary yet; default to 0
   const [referralCount, setReferralCount] = useState<number>(0);
-  
-  const loadReferralCount = useCallback(async () => {
-    if (!account || !anchorProvider) return;
-
-    try {
-      const program = getProgram(anchorProvider);
-      const userPubkey = new PublicKey(account);
-      const { referrals } = derivePdas(userPubkey);
-
-      if (referrals) {
-        try {
-          const referralData = await program.account["myReferrals"].fetch(referrals);
-          setReferralCount(referralData.totalCount || 0);
-        } catch (referralError) {
-          // Referral account doesn't exist yet (no referrals)
-          setReferralCount(0);
-        }
-      }
-    } catch (err) {
-      console.warn("Failed to load referral count:", err);
-      setReferralCount(0);
-    }
-  }, [account, anchorProvider]);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [config, setConfig] = useState<Config | null>(null);
+  const [summary, setSummary] = useState<AffiliateSummary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [showWithdrawForm, setShowWithdrawForm] = useState(false);
 
-  const loadUserData = useCallback(async () => {
-    if (!account || !anchorProvider) return;
-
+  const loadSummary = useCallback(async () => {
+    if (!account) return;
     try {
       setIsLoading(true);
       setError(null);
-
-      const program = getProgram(anchorProvider);
-      const userPubkey = new PublicKey(account);
-      const { config: configPda, profile } = derivePdas(userPubkey);
-
-      // Load config
-      try {
-        const configData = await program.account["config"].fetch(configPda) as Config;
-        setConfig(configData);
-      } catch (configError) {
-        console.warn("Config not available:", configError);
-        // Continue without config - use fallback values
-      }
-
-      // Load user profile
-      try {
-        const profileData = await program.account["userProfile"].fetch(profile) as UserProfile;
-        setUserProfile(profileData);
-      } catch (profileError) {
-        console.warn("User profile not found:", profileError);
-        setUserProfile(null);
-      }
-
+      const s = await AffiliateBackendService.getSummary();
+      setSummary(s);
     } catch (err) {
-      console.error("Failed to load user data:", err);
+      console.error("Failed to load affiliate summary:", err);
       setError("Failed to load affiliate data");
     } finally {
       setIsLoading(false);
     }
-  }, [account, anchorProvider]);
+  }, [account]);
 
   useEffect(() => {
-    if (account && anchorProvider) {
-      loadUserData();
-      loadReferralCount();
+    if (account) {
+      loadSummary();
+      // Also fetch referrals to derive count
+      (async () => {
+        try {
+          const list = await AffiliateBackendService.getReferrals();
+          setReferralCount(Array.isArray(list) ? list.length : 0);
+        } catch (e) {
+          // Keep previous value on error; avoid noisy toasts on initial load
+          console.warn('Failed to load referrals for count:', e);
+        }
+      })();
     }
-  }, [account, anchorProvider, loadUserData, loadReferralCount]);
+  }, [account, loadSummary]);
 
   const handleRefresh = () => {
-    loadUserData();
-    loadReferralCount();
+    loadSummary();
     toast.success("Data refreshed");
   };
 
-  const handleWithdraw = async () => {
-    if (!account || !anchorProvider || !userProfile) {
-      toast.error("Wallet not connected");
-      return;
-    }
-
-    const amount = parseFloat(withdrawAmount);
-    if (isNaN(amount) || amount <= 0) {
-      toast.error("Please enter a valid amount");
-      return;
-    }
-
-    const availableAmount = parseFloat(formatUsdt(userProfile.totalAffiliateEarnings.sub(userProfile.totalAffiliateWithdrawn)));
-    if (amount > availableAmount) {
-      toast.error(`Insufficient funds. Available: ${availableAmount} USDT`);
-      return;
-    }
-
+  // Helper: resolve USDT mint based on cluster override/env
+  const resolveUsdtMint = useCallback((): PublicKey => {
+    let override = "";
     try {
+      override = (localStorage.getItem("solana_cluster_override") ?? "").toLowerCase();
+    } catch {
+      // ignore
+    }
+    const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? "devnet").toLowerCase();
+    const effective = override || envCluster;
+    const normalized = effective.startsWith("mainnet") ? "mainnet-beta" : "devnet";
+
+    const mintStr = normalized === "mainnet-beta"
+      ? (import.meta.env.VITE_USDT_MINT as string)
+      : (import.meta.env.VITE_USDT_MINT_DEVNET as string);
+
+    if (!mintStr) throw new Error("USDT mint not configured in environment (.env)");
+    return new PublicKey(mintStr);
+  }, []);
+
+  const handleWithdraw = async () => {
+    try {
+      if (!account || !anchorProvider) throw new Error("Wallet not connected");
+      if (!signTransaction) throw new Error("Wallet does not support transaction signing");
+
+      const availableMicro = Number(summary?.available_to_withdraw_micro ?? summary?.bonus_balance_micro ?? 0);
+      const requestedUsd = Number(withdrawAmount);
+      if (!Number.isFinite(requestedUsd) || requestedUsd <= 0) {
+        toast.error("Enter a valid amount in USDT");
+        return;
+      }
+      const amountMicro = Math.floor(requestedUsd * 1_000_000);
+      if (amountMicro > availableMicro) {
+        toast.error("Amount exceeds available balance");
+        return;
+      }
+
       setIsWithdrawing(true);
-      
-      const program = getProgram(anchorProvider);
+
+      // Prepare init payload
       const userPubkey = new PublicKey(account);
-      const usdtMint = config?.usdtMint || new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
-      
-      // Convert to smallest unit (6 decimals)
-      const amountBN = new anchor.BN(Math.floor(amount * 1_000_000));
-      
-      // Import the withdrawal function
-      const { withdrawAffiliateEarnings } = await import("@/lib/solairus-main");
-      const signature = await withdrawAffiliateEarnings(
-        program,
+      const mint = resolveUsdtMint();
+      const recipientAta = getAssociatedTokenAddressSync(
+        mint,
         userPubkey,
-        amountBN,
-        usdtMint
+        false,
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
       );
 
-      toast.success(`Successfully withdrew ${amount} USDT`);
-      console.log("Withdrawal transaction:", signature);
-      
-      // Reset form
-      setWithdrawAmount("");
-      setShowWithdrawForm(false);
-      
-      // Trigger refresh of user profile
-      loadUserData();
-      
-    } catch (error) {
-      console.error("Withdrawal failed:", error);
-      const errorMessage = error instanceof Error ? error.message : "Withdrawal failed";
-      toast.error(errorMessage);
+      // Call backend to init withdrawal and build tx
+      const baseUrl = API_CONFIG.getBaseUrl();
+      const initUrl = `${baseUrl}/withdrawals/init`;
+      const initResp = await ApiClient.post(initUrl, {
+        mintAddress: mint.toBase58(),
+        amountMicro,
+        recipientAta: recipientAta.toBase58(),
+      });
+      const initJson = await initResp.json();
+      const { orderId, txBase64 } = initJson as { orderId: string; txBase64: string };
+      if (!orderId || !txBase64) throw new Error("Invalid init response from backend");
+
+      // Decode, sign and send transaction
+      const tx = Transaction.from(Buffer.from(txBase64, "base64"));
+      const signed = await signTransaction(tx) as Transaction;
+      const signature = await anchorProvider.connection.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+
+      // Confirm on-chain
+      const conf = await anchorProvider.connection.confirmTransaction(signature, "confirmed");
+      const ok = !conf?.value?.err;
+
+      // Backend verification will be handled via orderId polling below.
+      // The initial record created by /withdrawals/init has no signature yet,
+      // so posting to /transactions/verify by signature would 404 until it’s attached.
+      // We rely on GET /transactions/:orderId which resolves the signature via reference
+      // and updates status accordingly.
+
+      // Poll order status briefly to update UI derivations (status/uiStatus/finalized)
+      const statusUrl = `${baseUrl}/transactions/${orderId}`;
+      let finalized = false;
+      for (let i = 0; i < 5 && !finalized; i++) {
+        await new Promise(r => setTimeout(r, 1500));
+        try {
+          const sResp = await ApiClient.get(statusUrl);
+          const sJson = await sResp.json();
+          finalized = Boolean(sJson?.finalized);
+        } catch {
+          // ignore polling errors
+        }
+      }
+
+      if (ok) {
+        toast.success("Withdrawal sent and confirmed");
+        setShowWithdrawForm(false);
+        setWithdrawAmount("");
+        await loadSummary();
+      } else {
+        toast.error("Withdrawal broadcast failed");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(msg || "Withdrawal failed");
     } finally {
       setIsWithdrawing(false);
     }
@@ -186,7 +200,6 @@ export default function AffiliatePage() {
   }
 
   const userPubkey = new PublicKey(account);
-  const usdtMint = config?.usdtMint || new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"); // Mainnet USDT
 
   return (
     <div className="space-y-4">
@@ -220,7 +233,7 @@ export default function AffiliatePage() {
           <CardContent className="p-4">
             <p className="text-red-800 text-sm">{error}</p>
             <Button
-              onClick={loadUserData}
+              onClick={loadSummary}
               variant="outline"
               size="sm"
               className="mt-2"
@@ -243,7 +256,7 @@ export default function AffiliatePage() {
                 <div className="flex-1">
                   <p className="text-xs text-muted-foreground">Total Earned</p>
                   <p className="text-sm font-bold">
-                    ${userProfile ? formatUsdt(userProfile.totalAffiliateEarnings) : '0.00'}
+                    ${formatUsdtMicro(summary?.total_earnings_affiliate_micro ?? 0)}
                   </p>
                 </div>
               </div>
@@ -259,10 +272,7 @@ export default function AffiliatePage() {
                 <div className="flex-1">
                   <p className="text-xs text-muted-foreground">Available</p>
                   <p className="text-sm font-bold">
-                    ${userProfile ?
-                      formatUsdt(userProfile.totalAffiliateEarnings.sub(userProfile.totalAffiliateWithdrawn)) :
-                      '0.00'
-                    }
+                    ${formatUsdtMicro(summary?.available_to_withdraw_micro ?? summary?.bonus_balance_micro ?? 0)}
                   </p>
                 </div>
               </div>
@@ -278,7 +288,7 @@ export default function AffiliatePage() {
                 <div className="flex-1">
                   <p className="text-xs text-muted-foreground">Total Withdrawn</p>
                   <p className="text-sm font-bold">
-                    ${userProfile ? formatUsdt(userProfile.totalAffiliateWithdrawn) : '0.00'}
+                    ${formatUsdtMicro(summary?.total_withdrawn_micro ?? 0)}
                   </p>
                 </div>
               </div>
@@ -305,14 +315,10 @@ export default function AffiliatePage() {
       </div>
 
       {/* Withdrawal Section */}
-      {userProfile && (() => {
-        const earnings = {
-          totalEarnings: userProfile.totalAffiliateEarnings,
-          totalWithdrawn: userProfile.totalAffiliateWithdrawn,
-          availableToWithdraw: userProfile.totalAffiliateEarnings.sub(userProfile.totalAffiliateWithdrawn)
-        };
-        const availableDisplay = formatUsdt(earnings.availableToWithdraw);
-        const hasAvailableEarnings = earnings.availableToWithdraw.gt(new anchor.BN(0));
+      {summary && (() => {
+        const availableMicro = Number(summary.available_to_withdraw_micro ?? summary.bonus_balance_micro ?? 0);
+        const availableDisplay = formatUsdtMicro(availableMicro);
+        const hasAvailableEarnings = availableMicro > 0;
 
         return (
           <div className="space-y-3">
@@ -393,9 +399,7 @@ export default function AffiliatePage() {
 
 
         <TabsContent value="earnings" className="space-y-4">
-          <AffiliateEarningsCard
-            userProfile={userProfile}
-          />
+          <AffiliateEarningsCard />
 
           {/* TODO: Implement proper earnings history with RPC fallbacks */}
           {/* <EarningsHistoryCard userPublicKey={userPubkey} /> */}
@@ -461,7 +465,7 @@ export default function AffiliatePage() {
       </Tabs>
 
       {/* Registration Notice */}
-      {!userProfile && (
+      {!summary && (
         <Card className="border-yellow-200 bg-yellow-50">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">

@@ -1,6 +1,6 @@
 import * as anchor from '@coral-xyz/anchor';
 import { PublicKey } from '@solana/web3.js';
-import { getProgram, derivePdas, type Config } from '@/lib/solairus-main';
+import { getProgram, derivePdas, type Config } from '@/lib/solairus-removed';
 
 export interface SetConfigArgs {
   activationFeeUsdt: anchor.BN;

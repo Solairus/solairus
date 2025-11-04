@@ -1,4 +1,4 @@
-import { LicenseInfo, PROGRAM_ID } from "@/lib/solairus-main";
+import { LicenseInfo, PROGRAM_ID } from "@/lib/solairus-removed";
 import { PublicKey } from "@solana/web3.js";
 
 /**
@@ -157,6 +157,11 @@ export class LicenseCache {
     } catch (error) {
       return true;
     }
+  }
+
+  // Alias used by validator; maintains backward compatibility
+  static needsBackgroundRefresh(userPubkey: PublicKey): boolean {
+    return this.needsFreshValidation(userPubkey);
   }
 
   /**

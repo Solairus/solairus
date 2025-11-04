@@ -7,14 +7,15 @@ import {
   Config,
   LicenseInfo,
   getLicenseInfo,
+  getErrorMessage,
   isLicenseActive,
   getLicenseExpiryDate,
-  getErrorMessage,
   activateLicenseUsdt,
-} from "@/lib/solairus-main";
+} from "@/lib/solairus-removed";
 import { getSponsorL1, type SponsorHierarchy } from "@/lib/sponsor-tree";
 import { LicenseErrorHandler } from "@/utils/license-error-handler";
 import { LicensePerformanceMonitor } from "@/utils/license-performance";
+import { ensureAtaExists } from "@/utils/token-ata";
 
 /**
  * LicenseService
@@ -313,6 +314,33 @@ export class LicenseService {
       const licenseAmount = amount || (await this.getLicenseFee()).amount;
       const { usdtMint } = await this.getLicenseFee();
       console.log('💵 License amount:', licenseAmount.toString(), 'USDT mint:', usdtMint.toString());
+
+      // Client-side FIX: Ensure user/vault ATAs exist before contract call
+      // Derive and idempotently create missing ATAs to prevent AccountNotInitialized
+      const provider = this.provider;
+      const userAta = anchor.utils.token.associatedAddress({ mint: usdtMint, owner: userPubkey });
+      const { vault } = derivePdas(userPubkey);
+
+      console.log('🔎 Checking user ATA:', userAta.toBase58());
+      const userAtaResult = await ensureAtaExists(provider, userPubkey, userPubkey, usdtMint);
+      if (userAtaResult.created) {
+        console.log('✅ User ATA created:', userAtaResult.ata.toBase58(), 'tx:', userAtaResult.signature);
+      } else {
+        console.log('✓ User ATA exists:', userAtaResult.ata.toBase58());
+      }
+
+      if (vault) {
+        const vaultAta = anchor.utils.token.associatedAddress({ mint: usdtMint, owner: vault });
+        console.log('🔎 Checking vault ATA:', vaultAta.toBase58());
+        const vaultAtaResult = await ensureAtaExists(provider, userPubkey, vault, usdtMint);
+        if (vaultAtaResult.created) {
+          console.log('✅ Vault ATA created:', vaultAtaResult.ata.toBase58(), 'tx:', vaultAtaResult.signature);
+        } else {
+          console.log('✓ Vault ATA exists:', vaultAtaResult.ata.toBase58());
+        }
+      } else {
+        console.warn('⚠️ Vault PDA not available from derivePdas; skipping vault ATA check');
+      }
 
       // Use the statically imported activation function
       console.log('📦 Using statically imported activation function...');

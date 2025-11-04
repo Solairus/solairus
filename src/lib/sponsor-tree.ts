@@ -1,6 +1,6 @@
 import { PublicKey } from '@solana/web3.js';
 import { getSponsorAddress } from './address-crypto';
-import { derivePdas, getProgram } from './solairus-main';
+import { derivePdas, getProgram } from './solairus-removed';
 import * as anchor from '@coral-xyz/anchor';
 
 // Get program ID from environment variable

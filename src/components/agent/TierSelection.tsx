@@ -1,5 +1,5 @@
 import React from 'react';
-import { AgentTier } from '@/lib/solairus-main';
+import { AgentTier } from '@/lib/solairus-removed';
 import { EXTENDED_AGENT_TIER_CONFIGS, ExtendedTierConfig } from '@/config/agent-config';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

@@ -20,8 +20,20 @@ const steps = [
 
 export default function HowItWorks() {
   return (
-    <section className="py-24 relative">
-      <div className="container mx-auto px-4">
+    <section className="py-24 relative overflow-hidden">
+      {/* Background overlay image */}
+      <div 
+        className="absolute inset-0 z-0"
+        style={{
+          backgroundImage: `url(/media/images/img13.jpeg)`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          opacity: 0.35
+        }}
+      />
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background/60 to-background z-0" />
+
+      <div className="container mx-auto px-4 z-10 relative">
         <div className="text-center mb-16">
           <h2 className="text-4xl md:text-5xl font-bold mb-4">
             How <span className="gradient-text">SOLAIRUS</span> Works

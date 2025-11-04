@@ -6,7 +6,7 @@ import { useLicense } from "@/contexts/license-context";
 import { getUserAgents } from "@/services/agent/agent-service";
 import { getLiveRoi } from "@/services/agent/live-roi-service";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { getProgram, derivePdas, UserProfile } from "@/lib/solairus-main";
+import { getProgram, derivePdas, UserProfile } from "@/lib/solairus-removed";
 import { PublicKey } from "@solana/web3.js";
 import * as anchor from "@coral-xyz/anchor";
 import Swal from "sweetalert2";

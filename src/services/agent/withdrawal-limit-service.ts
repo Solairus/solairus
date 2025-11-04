@@ -1,12 +1,17 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { 
-  getProgram,
-  derivePdas,
-  UserProfile,
-  WithdrawalLimitStatus,
-  calculateWithdrawalLimitStatus
-} from "@/lib/solairus-main";
+
+// Local fallback types and helpers to remove solairus-removed dependency.
+// These stubs ensure the UI can render without on-chain integrations.
+export interface WithdrawalLimitStatus {
+  totalDeposits: anchor.BN;
+  totalWithdrawn: anchor.BN;
+  maxWithdrawable: anchor.BN;
+  remainingWithdrawable: anchor.BN;
+  limitReached: boolean;
+  isPrivileged: boolean;
+  usagePercentage: number; // 0-100
+}
 
 // Privileged user roles that are exempt from withdrawal limits
 const PRIVILEGED_ROLES = {
@@ -24,34 +29,9 @@ export async function isPrivilegedUser(
   connection: Connection,
   userPublicKey: PublicKey
 ): Promise<boolean> {
-  try {
-    const provider = new anchor.AnchorProvider(
-      connection,
-      // Create a dummy wallet for read-only operations
-      { publicKey: userPublicKey, signTransaction: async () => { throw new Error('Read-only'); }, signAllTransactions: async () => { throw new Error('Read-only'); } },
-      { commitment: 'confirmed' }
-    );
-    
-    const program = getProgram(provider);
-    const { config } = derivePdas();
-    
-    // Fetch config to get privileged user addresses
-    const configData = await program.account["config"].fetch(config);
-    
-    // Check if user matches any privileged role
-    const privilegedAddresses = [
-      configData.admin,
-      configData.dev,
-      configData.marketer1,
-      configData.marketer2,
-      configData.trader
-    ];
-    
-    return privilegedAddresses.some(addr => addr.equals(userPublicKey));
-  } catch (error) {
-    console.warn('⚠️ Error checking privileged user status:', error);
-    return false; // Default to non-privileged if check fails
-  }
+  // Stubbed: without on-chain config, default to non-privileged.
+  // If backend provides roles later, wire it in here.
+  return false;
 }
 
 /**
@@ -61,64 +41,17 @@ export async function getWithdrawalLimitStatus(
   connection: Connection,
   userPublicKey: PublicKey
 ): Promise<WithdrawalLimitStatus> {
-  try {
-    console.log('🔍 Getting withdrawal limit status for user:', userPublicKey.toString());
-    
-    const provider = new anchor.AnchorProvider(
-      connection,
-      // Create a dummy wallet for read-only operations
-      { publicKey: userPublicKey, signTransaction: async () => { throw new Error('Read-only'); }, signAllTransactions: async () => { throw new Error('Read-only'); } },
-      { commitment: 'confirmed' }
-    );
-    
-    const program = getProgram(provider);
-    const { profile } = derivePdas(userPublicKey);
-    
-    if (!profile) {
-      throw new Error("Could not derive user profile PDA");
-    }
-    
-    // Check if user is privileged (exempt from limits)
-    const isPrivileged = await isPrivilegedUser(connection, userPublicKey);
-    console.log('🔐 User privileged status:', isPrivileged);
-    
-    // Fetch user profile to get deposit and withdrawal data
-    let userProfile: UserProfile;
-    try {
-      userProfile = await program.account["userProfile"].fetch(profile) as UserProfile;
-    } catch (error) {
-      console.warn('⚠️ User profile not found, returning default status');
-      // Return default status for users without profiles
-      return {
-        totalDeposits: new anchor.BN(0),
-        totalWithdrawn: new anchor.BN(0),
-        maxWithdrawable: new anchor.BN(0),
-        remainingWithdrawable: new anchor.BN(0),
-        limitReached: false,
-        isPrivileged,
-        usagePercentage: 0
-      };
-    }
-    
-    // Calculate withdrawal limit status
-    const status = calculateWithdrawalLimitStatus(userProfile, isPrivileged);
-    
-    console.log('✅ Withdrawal limit status calculated:', {
-      totalDeposits: status.totalDeposits.toString(),
-      totalWithdrawn: status.totalWithdrawn.toString(),
-      maxWithdrawable: status.maxWithdrawable.toString(),
-      remainingWithdrawable: status.remainingWithdrawable.toString(),
-      limitReached: status.limitReached,
-      isPrivileged: status.isPrivileged,
-      usagePercentage: status.usagePercentage
-    });
-    
-    return status;
-    
-  } catch (error) {
-    console.error('❌ Error getting withdrawal limit status:', error);
-    throw new Error(`Failed to get withdrawal limit status: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  // Stubbed: without on-chain profile, return safe defaults.
+  const isPrivileged = await isPrivilegedUser(connection, userPublicKey);
+  return {
+    totalDeposits: new anchor.BN(0),
+    totalWithdrawn: new anchor.BN(0),
+    maxWithdrawable: new anchor.BN(0),
+    remainingWithdrawable: new anchor.BN(0),
+    limitReached: false,
+    isPrivileged,
+    usagePercentage: 0
+  };
 }
 
 /**

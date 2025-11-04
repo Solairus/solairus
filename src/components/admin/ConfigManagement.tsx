@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { PublicKey } from '@solana/web3.js';
 import * as anchor from '@coral-xyz/anchor';
-import { type Config } from '@/lib/solairus-main';
+import { type Config } from '@/lib/solairus-removed';
 import { createConfigService, type SetConfigArgs } from '@/services/config/config-service';
 
 interface RoleAddresses extends Record<string, string> {

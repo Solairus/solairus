@@ -9,7 +9,7 @@
 
 import { PublicKey } from "@solana/web3.js";
 import * as anchor from "@coral-xyz/anchor";
-import { getErrorMessage } from "@/lib/solairus-main";
+import { getErrorMessage } from "@/lib/solairus-removed";
 import { 
   ProfileErrorContext, 
   EnhancedProfileError,

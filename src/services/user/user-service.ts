@@ -1,6 +1,6 @@
 import * as anchor from '@coral-xyz/anchor';
 import { PublicKey } from '@solana/web3.js';
-import { getProgram, derivePdas } from '@/lib/solairus-main';
+import { getProgram, derivePdas } from '@/lib/solairus-removed';
 
 /**
  * User Transfer Parameters

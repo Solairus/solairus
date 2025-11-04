@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@/contexts/wallet-context';
-import { getProgram, derivePdas, Config } from '@/lib/solairus-main';
+import { getProgram, derivePdas, Config } from "@/lib/solairus-removed";
 import * as anchor from '@coral-xyz/anchor';
 
 export type BucketType = 'admin' | 'dev' | 'marketer1' | 'marketer2' | 'trader' | 'systemreserve';

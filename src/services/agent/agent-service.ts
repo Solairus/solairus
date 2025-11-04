@@ -7,7 +7,7 @@ import {
   getAgentTierConfig,
   canWithdrawRoi,
   calculateYieldCapProgress
-} from "@/lib/solairus-main";
+} from "@/lib/solairus-removed";
 import { handleRpcError, getHealthyRpcConnection } from "@/utils/rpc-switcher";
 import { getAgentServiceConfig } from "@/config/agent-config";
 import { getContractSecondsPerDay } from "./contract-timing-service";

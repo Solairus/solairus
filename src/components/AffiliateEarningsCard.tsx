@@ -1,26 +1,51 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { DollarSign, TrendingUp, Wallet, ArrowDownToLine } from "lucide-react";
+import { DollarSign, TrendingUp } from "lucide-react";
 import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
-import { getProgram, withdrawAffiliateEarnings, getAffiliateEarnings, UserProfile } from "@/lib/solairus-main";
-import { useWallet } from "@/contexts/wallet-context";
-import { PublicKey } from "@solana/web3.js";
-import { toast } from "sonner";
 import * as anchor from "@coral-xyz/anchor";
+import { AffiliateBackendService } from "@/services/affiliate/affiliate-backend";
 
-interface AffiliateEarningsCardProps {
-  userProfile: UserProfile | null;
-}
+export default function AffiliateEarningsCard() {
+  const { account } = useWalletConnection();
+  const [earnings, setEarnings] = useState({
+    totalEarnings: new anchor.BN(0),
+    totalWithdrawn: new anchor.BN(0),
+    availableToWithdraw: new anchor.BN(0),
+    level1Earnings: new anchor.BN(0),
+    level2Earnings: new anchor.BN(0),
+    level3Earnings: new anchor.BN(0),
+  });
 
-export default function AffiliateEarningsCard({ 
-  userProfile
-}: AffiliateEarningsCardProps) {
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        // Avoid backend call when wallet is not connected
+        if (!account) return;
+        const summary = await AffiliateBackendService.getSummary();
+        const per = summary.per_level_micro || {};
+        const bn = (v?: string | number) => new anchor.BN(String(v ?? 0));
+        const next = {
+          totalEarnings: bn(summary.total_earnings_affiliate_micro ?? 0),
+          totalWithdrawn: bn(summary.total_withdrawn_micro ?? 0),
+          availableToWithdraw: bn(summary.available_to_withdraw_micro ?? summary.bonus_balance_micro ?? 0),
+          level1Earnings: bn(per['L1'] ?? per['1'] ?? 0),
+          level2Earnings: bn(per['L2'] ?? per['2'] ?? 0),
+          level3Earnings: bn(per['L3'] ?? per['3'] ?? 0),
+        };
+        if (mounted) setEarnings(next);
+      } catch (e) {
+        console.error('Failed to fetch affiliate summary', e);
+      }
+    };
+    load();
+    return () => { mounted = false; };
+  }, [account]);
 
-  if (!userProfile) {
+  // Early return after hooks are declared to keep hook order consistent
+  if (!account) {
     return (
       <Card className="bg-background/50 border-border/30">
         <CardContent className="p-4 text-center">
@@ -31,8 +56,6 @@ export default function AffiliateEarningsCard({
       </Card>
     );
   }
-
-  const earnings = getAffiliateEarnings(userProfile);
   
   // Convert from smallest unit (6 decimals for USDT) to display format
   const formatUsdt = (amount: anchor.BN) => {
@@ -53,7 +76,6 @@ export default function AffiliateEarningsCard({
 
 
   const hasEarnings = earnings.totalEarnings.gt(new anchor.BN(0));
-  const hasAvailableEarnings = earnings.availableToWithdraw.gt(new anchor.BN(0));
 
   return (
     <Card className="bg-background/50 border-border/30">

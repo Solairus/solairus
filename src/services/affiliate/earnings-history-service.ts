@@ -7,7 +7,7 @@
 
 import { Connection, PublicKey } from '@solana/web3.js';
 import * as anchor from '@coral-xyz/anchor';
-import { getProgram, derivePdas, PROGRAM_ID } from '@/lib/solairus-main';
+import { getProgram, derivePdas, PROGRAM_ID } from '@/lib/solairus-removed';
 
 export interface EarningsHistoryItem {
   type: 'withdrawal';

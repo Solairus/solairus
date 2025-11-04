@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, X, Clock } from "lucide-react";
-import { LicenseInfo } from "@/lib/solairus-main";
+import { LicenseInfo } from "@/lib/solairus-removed";
 
 interface LicenseExpiryNotificationProps {
   licenseInfo: LicenseInfo;

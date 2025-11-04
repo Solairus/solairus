@@ -9,7 +9,7 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { vi, describe, it, beforeEach, expect } from 'vitest';
 import { TierSelection } from '../TierSelection';
-import { AgentTier } from '@/lib/solairus-main';
+import { AgentTier } from '@/lib/solairus-removed';
 
 // Mock the solairus-main lib
 vi.mock('@/lib/solairus-main', () => ({

@@ -1,6 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey, AccountInfo } from "@solana/web3.js";
-import { LicenseInfo, UserProfile, getLicenseInfo } from "@/lib/solairus-main";
+import { LicenseInfo, UserProfile, getLicenseInfo } from "@/lib/solairus-removed";
 import { LicenseCache } from "@/utils/license-cache";
 import { LicenseStatusValidator, LicenseValidationResult, CacheValidationResult } from "./license-status-validator";
 

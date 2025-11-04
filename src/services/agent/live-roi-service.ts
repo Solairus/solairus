@@ -13,7 +13,7 @@ import {
   deriveAgentActivationPda,
   UserAgentActivation,
   AGENT_TIER_CONFIGS
-} from "@/lib/solairus-main";
+} from "@/lib/solairus-removed";
 import { getContractSecondsPerDay } from "./contract-timing-service";
 
 export interface LiveRoiData {

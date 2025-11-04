@@ -8,7 +8,7 @@
  * - UI constants and theming
  */
 
-import { AgentTier, AGENT_TIER_CONFIGS } from '@/lib/solairus-main';
+import { AgentTier, AGENT_TIER_CONFIGS } from '@/lib/solairus-removed';
 
 // Extended tier metadata for UI components
 export interface ExtendedTierConfig {

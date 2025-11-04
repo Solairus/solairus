@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PublicKey, Connection } from '@solana/web3.js';
-import { AgentTier, AGENT_TIER_CONFIGS } from '@/lib/solairus-main';
+import { AgentTier, AGENT_TIER_CONFIGS } from '@/lib/solairus-removed';
 import { TierSelection } from './TierSelection';
 import { 
   activateAgent, 

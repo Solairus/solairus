@@ -9,7 +9,7 @@
 
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey, Connection } from "@solana/web3.js";
-import { derivePdas, getErrorMessage, UserProfile } from "@/lib/solairus-main";
+import { derivePdas, getErrorMessage, UserProfile } from "@/lib/solairus-removed";
 // Placeholder types for missing services
 interface AccountStateInspection {
   [key: string]: unknown;

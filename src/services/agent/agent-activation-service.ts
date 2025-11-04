@@ -8,7 +8,7 @@ import {
   AgentTier,
   getErrorMessage,
   PROGRAM_ID
-} from '@/lib/solairus-main';
+} from '@/lib/solairus-removed';
 import { buildSponsorHierarchy } from '@/lib/sponsor-tree';
 import { AgentErrorHandler } from '@/utils/agent-error-handler';
 

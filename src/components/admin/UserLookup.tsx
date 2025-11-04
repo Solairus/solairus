@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Search, User, Calendar, Wallet, AlertCircle, CheckCircle, Clock } from 'lucide-react';
 import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '@/contexts/wallet-context';
-import { getProgram, derivePdas, UserProfile, getLicenseInfo, getAffiliateEarnings } from '@/lib/solairus-main';
+import { getProgram, derivePdas, UserProfile, getLicenseInfo, getAffiliateEarnings } from '@/lib/solairus-removed';
 import { toast } from 'sonner';
 import * as anchor from '@coral-xyz/anchor';
 

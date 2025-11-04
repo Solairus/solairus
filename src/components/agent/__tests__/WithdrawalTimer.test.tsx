@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { WithdrawalTimer, MultiAgentTimer } from '../WithdrawalTimer';
 import { AgentData } from '@/services/agent/agent-service';
-import { AgentTier } from '@/lib/solairus-main';
+import { AgentTier } from '@/lib/solairus-removed';
 import { PublicKey } from '@solana/web3.js';
 
 // Mock agent data for testing
