@@ -38,15 +38,37 @@ try {
 // Constants
 const BPF_LOADER_UPGRADEABLE_ID = new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111')
 
-/** Load signer from HOME path: ~/.config/solana/solairus_authority.json */
-function getSignerKeypair() {
+/** Load payer keypair: prefer ANCHOR_WALLET or DEPLOYER_KEYPAIR, fallback to default CLI wallet */
+function getPayerKeypair() {
+  const candidate = process.env.ANCHOR_WALLET || process.env.DEPLOYER_KEYPAIR || path.resolve(process.env.HOME || '', '.config', 'solana', 'id.json')
+  if (!fs.existsSync(candidate)) {
+    throw new Error(`Payer keyfile not found at ${candidate}. Set ANCHOR_WALLET or DEPLOYER_KEYPAIR env to the deployer keyfile path.`)
+  }
+  const raw = JSON.parse(fs.readFileSync(candidate, 'utf-8'))
+  const secret = Uint8Array.from(raw)
+  return Keypair.fromSecretKey(secret)
+}
+
+/** Load backend authority pubkey: prefer SOLAIRUS_AUTHORITY_SECRET_BASE58, fallback to ~/.config/solana/solairus_authority.json */
+function getBackendAuthorityPubkey() {
+  const base58 = process.env.SOLAIRUS_AUTHORITY_SECRET_BASE58
+  if (base58 && base58.trim().length > 0) {
+    try {
+      const secret = bs58.decode(base58.trim())
+      const kp = Keypair.fromSecretKey(secret)
+      return kp.publicKey
+    } catch (_) {
+      throw new Error('Invalid SOLAIRUS_AUTHORITY_SECRET_BASE58: failed to decode')
+    }
+  }
   const signerPath = path.resolve(process.env.HOME || '', '.config', 'solana', 'solairus_authority.json')
   if (!fs.existsSync(signerPath)) {
-    throw new Error(`Signer file not found at ${signerPath}. Run 'node scripts/create-signer.js' first.`)
+    throw new Error(`Backend authority file not found at ${signerPath}. Run 'node scripts/create-signer.js' and set SOLAIRUS_AUTHORITY_SECRET_BASE58 in .env.`)
   }
   const raw = JSON.parse(fs.readFileSync(signerPath, 'utf-8'))
   const secret = Uint8Array.from(raw)
-  return Keypair.fromSecretKey(secret)
+  const kp = Keypair.fromSecretKey(secret)
+  return kp.publicKey
 }
 
 function getProgramId() {
@@ -75,30 +97,20 @@ function deriveConfigPda(programId) {
   return pda
 }
 
-function getProgramDataAddress(programId) {
-  const [pda] = PublicKey.findProgramAddressSync([programId.toBuffer()], BPF_LOADER_UPGRADEABLE_ID)
-  return pda
-}
-
 function getSetBackendAuthorityDiscriminator() {
   // Anchor instruction discriminator: sha256("global:set_backend_authority").slice(0, 8)
   const h = crypto.createHash('sha256').update('global:set_backend_authority').digest()
   return h.slice(0, 8)
 }
 
-function buildSetBackendAuthorityIx({ programId, upgradeAuthority, newBackendAuthority }) {
+function buildSetBackendAuthorityIx({ programId, authority, newBackendAuthority }) {
   const configPda = deriveConfigPda(programId)
-  const programData = getProgramDataAddress(programId)
-
   const disc = getSetBackendAuthorityDiscriminator()
   const data = Buffer.concat([disc, newBackendAuthority.toBuffer() /* 32 bytes */])
-
   return new TransactionInstruction({
     keys: [
-      { pubkey: upgradeAuthority.publicKey, isSigner: true, isWritable: true }, // upgrade_authority
-      { pubkey: configPda, isSigner: false, isWritable: true }, // config (init_if_needed)
-      { pubkey: programId, isSigner: false, isWritable: false }, // program (const)
-      { pubkey: programData, isSigner: false, isWritable: false }, // program_data
+      { pubkey: authority.publicKey, isSigner: true, isWritable: true }, // current backend authority
+      { pubkey: configPda, isSigner: false, isWritable: true }, // config
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
     ],
     programId,
@@ -155,31 +167,24 @@ function updateEnvSecretBase58({ envPath, secretBase58 }) {
 async function main() {
   const rpcUrl = process.env.SOLANA_RPC_URL || clusterApiUrl('devnet')
   const conn = new Connection(rpcUrl, 'confirmed')
-
-  const wallet = getSignerKeypair()
+  const payer = getPayerKeypair()
   const programId = getProgramId()
+  const backendAuthorityPubkey = getBackendAuthorityPubkey()
 
   // Try initialize_config first (fresh setup); if it fails with already exists, fallback to set_backend_authority
   let sig
   try {
-    const initIx = buildInitializeConfigIx({ programId, payer: wallet, backendAuthority: wallet.publicKey })
-    sig = await sendAndConfirmTransaction(conn, new Transaction().add(initIx), [wallet], {
+    const initIx = buildInitializeConfigIx({ programId, payer, backendAuthority: backendAuthorityPubkey })
+    sig = await sendAndConfirmTransaction(conn, new Transaction().add(initIx), [payer], {
       commitment: 'confirmed',
       preflightCommitment: 'confirmed',
     })
     console.log('[set-backend-authority] initialize_config confirmed:', sig)
   } catch (e) {
     console.log('[set-backend-authority] initialize_config failed, attempting set_backend_authority...')
-    const setIx = buildSetBackendAuthorityIx({
-      programId,
-      upgradeAuthority: wallet,
-      newBackendAuthority: wallet.publicKey,
-    })
-    sig = await sendAndConfirmTransaction(conn, new Transaction().add(setIx), [wallet], {
-      commitment: 'confirmed',
-      preflightCommitment: 'confirmed',
-    })
-    console.log('[set-backend-authority] set_backend_authority confirmed:', sig)
+    // set_backend_authority must be signed by current backend authority; payer cannot perform it
+    console.log('[set-backend-authority] Skipping set_backend_authority fallback: requires current backend authority signer.')
+    throw e
   }
 
   // Verify backend_authority from config
@@ -190,16 +195,29 @@ async function main() {
   }
   const backendAuthorityBytes = info.data.slice(8, 8 + 32)
   const backendAuthority = new PublicKey(backendAuthorityBytes)
-  const expected = wallet.publicKey.toBase58()
+  const expected = backendAuthorityPubkey.toBase58()
   const actual = backendAuthority.toBase58()
   console.log('[set-backend-authority] on-chain backend_authority:', actual)
   if (actual !== expected) throw new Error('On-chain backend_authority does not match wallet')
 
   // Update backend .env with base58-encoded secret from signer
-  const secretBase58 = bs58.encode(wallet.secretKey)
+  // If env already contains SOLAIRUS_AUTHORITY_SECRET_BASE58, keep it; otherwise attempt to write from local signer file
+  const secretBase58 = process.env.SOLAIRUS_AUTHORITY_SECRET_BASE58 || (() => {
+    try {
+      const signerPath = path.resolve(process.env.HOME || '', '.config', 'solana', 'solairus_authority.json')
+      const raw = JSON.parse(fs.readFileSync(signerPath, 'utf-8'))
+      return bs58.encode(Uint8Array.from(raw))
+    } catch (_) {
+      return ''
+    }
+  })()
   const envPath = path.resolve(__dirname, '..', '.env')
-  updateEnvSecretBase58({ envPath, secretBase58 })
-  console.log('[set-backend-authority] updated backend .env: SOLAIRUS_AUTHORITY_SECRET_BASE58=(secret)')
+  if (secretBase58 && secretBase58.length > 0) {
+    updateEnvSecretBase58({ envPath, secretBase58 })
+    console.log('[set-backend-authority] ensured backend .env has SOLAIRUS_AUTHORITY_SECRET_BASE58')
+  } else {
+    console.log('[set-backend-authority] skipped .env secret update (no local signer secret available)')
+  }
 }
 
 main().catch((err) => {
