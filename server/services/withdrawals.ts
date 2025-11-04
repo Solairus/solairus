@@ -17,8 +17,9 @@
  *  - Construct Transaction (feePayer=user), set recent blockhash (TTL ~2 min), partial-sign with backend authority
  *  - Serialize base64 with requireAllSignatures=false
  */
-import { Connection, PublicKey, Transaction, TransactionInstruction, clusterApiUrl, SystemProgram, ParsedAccountData } from '@solana/web3.js'
+import { PublicKey, Transaction, TransactionInstruction, SystemProgram, ParsedAccountData } from '@solana/web3.js'
 import { getAuthorityKeypair } from '../lib/authority'
+import { getConnection } from '../lib/rpc-manager'
 
 // Program IDs and constants from IDL
 const PROGRAM_ID = new PublicKey(process.env.SOLAIRUS_PAY_PROGRAM_ID || '5eRuzYxGUE4VHadPEhihHMpuPa6n2WvCR6ENx3WSW6ek')
@@ -74,8 +75,8 @@ export async function buildClaimRewardsTx(params: {
   memo?: string
   referencePubkey: string
 }): Promise<{ referencePubkey: string; txBase64: string; ttlMs: number }> {
-  const rpcUrl = process.env.SOLANA_RPC_URL || clusterApiUrl('devnet')
-  const connection = new Connection(rpcUrl, 'confirmed')
+  // Use RPC manager for automatic failover
+  const connection = getConnection()
 
   const initiator = new PublicKey(params.initiatorWallet)
   const recipient = new PublicKey(params.recipient)

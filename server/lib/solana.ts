@@ -4,7 +4,8 @@
  * Inputs: `SOLANA_RPC_URL` (optional), `SOLAIRUS_PAY_PROGRAM_ID` (optional)
  * Outputs: Backend authority public key (base58 string)
  */
-import { Connection, PublicKey, clusterApiUrl } from '@solana/web3.js'
+import { PublicKey } from '@solana/web3.js'
+import { retryOperation } from './rpc-manager'
 
 /** Default program ID for solairus_pay (from IDL). Can be overridden by env. */
 const DEFAULT_SOLAIRUS_PAY_PROGRAM_ID = new PublicKey('6hvnwbkJqbFAWBKbrj22giH33hVUTLuLcPAvtCkkpSZ4')
@@ -20,15 +21,19 @@ export function deriveSolairusPayConfigPda(programId?: PublicKey): PublicKey {
  * Read backend authority from the solairus_pay config account.
  * - Verifies account exists
  * - Extracts 8-byte discriminator then 32-byte pubkey
+ * - Uses RPC manager with automatic failover
  */
 export async function getBackendAuthorityPublicKey(): Promise<string> {
-  const rpcUrl = process.env.SOLANA_RPC_URL || clusterApiUrl('devnet')
   const programIdStr = process.env.SOLAIRUS_PAY_PROGRAM_ID
   const programId = programIdStr ? new PublicKey(programIdStr) : DEFAULT_SOLAIRUS_PAY_PROGRAM_ID
 
-  const connection = new Connection(rpcUrl, 'confirmed')
   const configPda = deriveSolairusPayConfigPda(programId)
-  const info = await connection.getAccountInfo(configPda)
+  
+  // Use RPC manager with retry for reliability
+  const info = await retryOperation(
+    async (connection) => connection.getAccountInfo(configPda),
+    'getBackendAuthorityPublicKey'
+  )
 
   if (!info || !info.data || info.data.length < 8 + 32) {
     throw new Error('SolairusPay config account not found or invalid')

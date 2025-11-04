@@ -9,7 +9,8 @@ import { randomUUID } from 'crypto'
 import { query } from '../db'
 import { Transaction, TransactionStatus, TransactionType } from '../types'
 import { z } from 'zod'
-import { Connection, clusterApiUrl, PublicKey, ParsedInstruction, PartiallyDecodedInstruction } from '@solana/web3.js'
+import { Connection, PublicKey, ParsedInstruction, PartiallyDecodedInstruction } from '@solana/web3.js'
+import { getConnection } from '../lib/rpc-manager'
 import { attemptExpiredWithdrawalRefund } from '../services/withdrawal_refund'
 
 const router = Router()
@@ -167,8 +168,7 @@ async function createTransactionHandler(req: Request, res: Response) {
       record.id,
     ])
 
-    const rpcUrl = process.env.SOLANA_RPC_URL || clusterApiUrl('devnet')
-    const connection = new Connection(rpcUrl, 'confirmed')
+    const connection = getConnection()
     const statusResp = await connection.getSignatureStatuses([record.signature], { searchTransactionHistory: true })
     const status = statusResp.value[0]
     const isConfirmed = status && !status.err && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')
@@ -254,8 +254,7 @@ router.post('/transactions/verify', async (req: Request, res: Response) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
 
   const signature = parsed.data.signature
-  const rpcUrl = process.env.SOLANA_RPC_URL || clusterApiUrl('devnet')
-  const connection = new Connection(rpcUrl, 'confirmed')
+  const connection = getConnection()
 
   // Find record by signature
   const { rows } = await query<Transaction>('SELECT * FROM transactions WHERE signature = $1', [signature])
@@ -346,8 +345,7 @@ async function reapplyLicenseHandler(req: Request, res: Response) {
   // If signature is missing but we have orderId, try to resolve from recent signatures with memo
   if (!record.signature && orderId) {
     try {
-      const rpcUrl = process.env.SOLANA_RPC_URL || clusterApiUrl('devnet')
-      const connection = new Connection(rpcUrl, 'confirmed')
+      const connection = getConnection()
       const pub = new PublicKey(initiatorWallet)
       const sigs = await connection.getSignaturesForAddress(pub, { limit: 50 })
       const memoProgramId = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'
@@ -438,9 +436,8 @@ router.get('/transactions/:orderId([0-9a-fA-F-]{36})', async (req: Request, res:
     if (canResolveByReference) {
       const m = record.metadata as Record<string, unknown> | null
       const ref = m && (m['reference'] as string | undefined)
-      const rpcUrl = process.env.SOLANA_RPC_URL || clusterApiUrl('devnet')
       if (ref) {
-        const connection = new Connection(rpcUrl, 'confirmed')
+        const connection = getConnection()
         const refPub = new PublicKey(ref)
         // Search recent signatures for the reference account
         const sigs = await connection.getSignaturesForAddress(refPub, { limit: 25 })
@@ -534,8 +531,7 @@ async function createOrResumeLicenseActivationHandler(req: Request, res: Respons
   }
 
   const initiator = parsed.data.initiatorWallet
-  const rpcUrl = process.env.SOLANA_RPC_URL || clusterApiUrl('devnet')
-  const connection = new Connection(rpcUrl, 'confirmed')
+  const connection = getConnection()
 
   // Check user license status to determine reactivation
   const userRes = await query<{ id: number; license_status: string; license_expiration: string | null }>(
