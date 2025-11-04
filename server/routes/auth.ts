@@ -37,12 +37,26 @@ interface UserRow {
   created_at?: string
   updated_at?: string
 }
-function sanitizeUser(row: UserRow) {
+async function getBonusBalanceMicro(userId: number): Promise<string> {
+  try {
+    const res = await query<{ bonus_balance: string | number }>('SELECT bonus_balance FROM balances WHERE user_id = $1 LIMIT 1', [userId])
+    const raw = res.rows[0]?.bonus_balance ?? 0
+    // Return as string to avoid BigInt precision issues in JSON
+    return typeof raw === 'number' ? String(raw) : (raw ?? '0')
+  } catch (_e) {
+    // If balances row doesn't exist yet, default to 0
+    return '0'
+  }
+}
+
+async function sanitizeUser(row: UserRow) {
+  const bonus_balance_micro = await getBonusBalanceMicro(row.id)
   return {
     user_address: row.user_address,
     license_status: row.license_status,
     license_expiration: row.license_expiration,
     ref_by: row.ref_by ?? null,
+    bonus_balance_micro,
   }
 }
 
@@ -116,7 +130,8 @@ router.post('/auth/wallet', async (req: Request, res: Response) => {
     if (!user) return res.status(500).json({ error: 'Failed to create or fetch user' })
 
     const token = issueJwt({ sub: user.id, addr })
-    return res.json({ jwt: token, user: sanitizeUser(user as UserRow) })
+    const sanitized = await sanitizeUser(user as UserRow)
+    return res.json({ jwt: token, user: sanitized })
   } catch (err) {
     console.error('[auth/wallet] error', err)
     return res.status(500).json({ error: 'Wallet auth failed' })
@@ -134,7 +149,8 @@ router.get('/auth/session', requireAuth, async (req: Request, res: Response) => 
     const { sub } = res.locals.auth as { sub: number; addr: string }
     const { rows } = await query('SELECT * FROM users WHERE id = $1 LIMIT 1', [sub])
     if (!rows.length) return res.status(404).json({ error: 'User not found' })
-    return res.json({ jwtValid: true, user: sanitizeUser(rows[0] as UserRow) })
+    const sanitized = await sanitizeUser(rows[0] as UserRow)
+    return res.json({ jwtValid: true, user: sanitized })
   } catch (err) {
     console.error('[auth/session] error', err)
     return res.status(500).json({ error: 'Session check failed' })

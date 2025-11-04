@@ -9,6 +9,8 @@ export interface BackendUser {
   ref_by: number | null;
   created_at: string;
   updated_at: string;
+  // Bonus balance from backend DB (micro-USDT, string to preserve precision)
+  bonus_balance_micro?: string;
 }
 
 export interface AuthResponse {

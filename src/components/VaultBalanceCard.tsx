@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect, useCallback } from "react";
 import cardBg from "@/assets/card-bg.jpg";
 import { Info, Copy, RefreshCcw, Repeat, LogOut, Shield, AlertTriangle } from "lucide-react";
 import { useWallet } from "@/contexts/wallet-context";
+import { useAuth } from "@/contexts/auth-context";
 import { useLicense } from "@/contexts/license-context";
 import { getUserAgents } from "@/services/agent/agent-service";
 import { getLiveRoi } from "@/services/agent/live-roi-service";
@@ -25,6 +26,7 @@ export default function VaultBalanceCard({
   delta = "+$0.00 · +0.00%",
 }: VaultBalanceCardProps) {
   const { account, formatAddress, getChainInfo, switchNetwork, openConnectModal, disconnectWallet, provider, publicKey } = useWallet();
+  const { user } = useAuth();
   const { hasValidLicense, isNearExpiry, daysRemaining, licenseInfo } = useLicense();
   
   // State for claimable balance
@@ -66,6 +68,12 @@ export default function VaultBalanceCard({
     const decimalPart = amountStr.slice(-6).padStart(6, '0');
     return parseFloat(`${wholePart}.${decimalPart.slice(0, 2)}`);
   };
+
+  // Read bonus balance from auth user (micro-USDT -> display USD)
+  const bonusBalance = useMemo(() => {
+    const micro = user?.bonus_balance_micro ? Number(user.bonus_balance_micro) : 0;
+    return micro / 1_000_000;
+  }, [user?.bonus_balance_micro]);
 
   // Fetch total claimable amount from all active agents + affiliate commission
   const fetchTotalClaimable = useCallback(async () => {
@@ -256,7 +264,7 @@ export default function VaultBalanceCard({
         {/* Total Amount with refresh */}
         <div className="mt-1 flex items-center gap-2">
           <div className="text-4xl font-bold">
-            ${(totalClaimable + affiliateCommission).toLocaleString('en-US', { 
+            ${(bonusBalance || (totalClaimable + affiliateCommission)).toLocaleString('en-US', { 
               minimumFractionDigits: 2,
               maximumFractionDigits: 2 
             })}
@@ -274,6 +282,15 @@ export default function VaultBalanceCard({
         {/* Breakdown */}
         {(totalClaimable > 0 || affiliateCommission > 0) && (
           <div className="mt-3 space-y-1">
+            {bonusBalance > 0 && (
+              <div className="flex justify-between text-xs text-white/70">
+                <span>Affiliate Bonus (DB):</span>
+                <span>${bonusBalance.toLocaleString('en-US', { 
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2 
+                })}</span>
+              </div>
+            )}
             {totalClaimable > 0 && (
               <div className="flex justify-between text-xs text-white/70">
                 <span>Agent ROI:</span>
