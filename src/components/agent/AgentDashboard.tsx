@@ -374,7 +374,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   return (
     <div className="space-y-4">
       {/* Withdrawal Limit Status */}
-      {state.withdrawalLimitStatus && (
+      {/* Show PnL banner only if user has at least one activated agent */}
+      {state.totalCount > 0 && state.withdrawalLimitStatus && (
         <WithdrawalLimitDisplayComponent status={state.withdrawalLimitStatus} />
       )}
       {/* Multi-Agent Timer Overview */}
