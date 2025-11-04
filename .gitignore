@@ -36,3 +36,4 @@ kriptiz
 
 # Debug and temporary files
 .debugs
+.yarn/install-state.gz
