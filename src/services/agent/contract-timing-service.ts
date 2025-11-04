@@ -7,7 +7,7 @@
 
 import { Connection, PublicKey } from '@solana/web3.js';
 import * as anchor from '@coral-xyz/anchor';
-import { getProgram } from '@/lib/solairus-main';
+import { getProgram } from '@/lib/solairus-removed';
 
 // Cache for the contract timing to avoid repeated RPC calls
 let cachedSecondsPerDay: number | null = null;
@@ -29,6 +29,15 @@ export async function getContractSecondsPerDay(
   }
 
   try {
+    // 0) Allow explicit override via environment for testing (typed access)
+    const envSecondsRaw = import.meta.env.VITE_WITHDRAWAL_WINDOW_SECONDS;
+    const envSeconds = envSecondsRaw ? Number(envSecondsRaw) : NaN;
+    if (!Number.isNaN(envSeconds) && envSeconds > 0) {
+      cachedSecondsPerDay = envSeconds;
+      cacheTimestamp = now;
+      return cachedSecondsPerDay;
+    }
+
     // For debug mode, we know the contract uses 300 seconds (5 minutes)
     // For production mode, it uses 86400 seconds (24 hours)
     // We can detect this by checking if we're in debug mode
@@ -95,14 +104,19 @@ export async function getContractTimingInfo(
   description: string;
 }> {
   const secondsPerDay = await getContractSecondsPerDay(connection);
-  const isDebugMode = secondsPerDay === 300;
+  const isDebugMode = secondsPerDay !== 86400; // treat any non-24h as debug/testing
+  const displayName = secondsPerDay >= 3600
+    ? `${Math.round(secondsPerDay / 3600)} hours`
+    : secondsPerDay >= 60
+      ? `${Math.round(secondsPerDay / 60)} minutes`
+      : `${secondsPerDay} seconds`;
   
   return {
     secondsPerDay,
     isDebugMode,
-    displayName: isDebugMode ? '5 minutes' : '24 hours',
+    displayName,
     description: isDebugMode 
-      ? 'Debug mode: 5 minutes = 1 day for rapid testing'
+      ? `Debug/Testing mode: ${displayName} = 1 day for rapid testing`
       : 'Production mode: 24 hours between withdrawals'
   };
 }

@@ -1,16 +1,84 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { PublicKey, Connection } from '@solana/web3.js';
 import * as anchor from '@coral-xyz/anchor';
-import { AgentData, getUserAgents, GetUserAgentsOptions, GetUserAgentsResult } from '@/services/agent/agent-service';
-import { WithdrawalLimitDisplay, getWithdrawalLimitDisplay } from '@/services/agent/withdrawal-limit-service';
-import { getCurrentRpcConnection, shouldSwitchRpc, switchRpcEndpoint } from '@/utils/rpc-connection-manager';
+import { AgentData, GetUserAgentsOptions } from '@/services/agent/agent-service';
+import { fetchUserAgentActivations, type BackendAgentActivation } from '@/services/agent/agent-backend';
+import type { WithdrawalLimitDisplay } from '@/services/agent/withdrawal-limit-service';
+import { fetchGlobalPnlSummary } from '@/services/agent/pnl-backend';
 import { AgentCard } from './AgentCard';
 import { WithdrawalLimitDisplay as WithdrawalLimitDisplayComponent } from './WithdrawalLimitDisplay';
 import { AgentActivationModal } from './AgentActivationModal';
 import { MultiAgentTimer } from './WithdrawalTimer';
+import { calculateNextWithdrawalTime } from '@/services/agent/contract-timing-service';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/Card';
 import { Loader2, Plus, RefreshCw } from 'lucide-react';
+
+// Local UI tier config (DB-only view; avoids contract module dependency)
+type TierUIConfig = {
+  name: string;
+  emoji: string;
+  description: string;
+  dailyRange: string;
+  yieldCapPct: number;
+};
+
+const UI_TIER_CONFIGS: Record<string, TierUIConfig> = {
+  NOVA: {
+    name: 'NOVA',
+    emoji: '🪶',
+    description: 'Entry tier with stable daily yields',
+    dailyRange: '1.25% - 1.75%',
+    yieldCapPct: 200,
+  },
+  VEGA: {
+    name: 'VEGA',
+    emoji: '🔮',
+    description: 'Balanced risk and return',
+    dailyRange: '1.75% - 2.15%',
+    yieldCapPct: 200,
+  },
+  ORION: {
+    name: 'ORION',
+    emoji: '⚡',
+    description: 'Higher yields with moderate risk',
+    dailyRange: '2.15% - 2.75%',
+    yieldCapPct: 200,
+  },
+  PRIME: {
+    name: 'PRIME',
+    emoji: '🧠',
+    description: 'Elite tier with top yields',
+    dailyRange: '2.75% - 3.25%',
+    yieldCapPct: 200,
+  },
+};
+
+function getTierUIConfig(tierName: string): TierUIConfig {
+  return UI_TIER_CONFIGS[tierName] ?? UI_TIER_CONFIGS.NOVA;
+}
+
+function calculateYieldCapProgressLocal(
+  _tier: string | number,
+  _activationAmount: number,
+  _totalRoiWithdrawn: number
+): number {
+  // DB-only dashboard does not compute on-chain yield progress
+  return 0;
+}
+
+// DB-only placeholder for the withdrawal summary banner
+const DEFAULT_WITHDRAWAL_DISPLAY: WithdrawalLimitDisplay = {
+  totalDeposits: '—',
+  totalWithdrawn: '—',
+  maxWithdrawable: '—',
+  remainingWithdrawable: '—',
+  usagePercentage: 0,
+  limitReached: false,
+  isPrivileged: false,
+  warningLevel: 'none',
+  statusMessage: ''
+};
 
 interface AgentDashboardProps {
   userPublicKey: PublicKey;
@@ -41,7 +109,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     agents: [],
     totalCount: 0,
     hasMore: false,
-    withdrawalLimitStatus: null,
+    withdrawalLimitStatus: DEFAULT_WITHDRAWAL_DISPLAY,
     loading: true,
     error: null,
     refreshing: false,
@@ -51,56 +119,123 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [sortOrder, setSortOrder] = useState<GetUserAgentsOptions['sortOrder']>('desc');
   const [isActivationModalOpen, setIsActivationModalOpen] = useState(false);
 
-  // Load agents and withdrawal limit status
+  // Load agents (DB-only) and omit RPC calls to keep it fast
   const loadDashboardData = useCallback(async (refresh = false) => {
+    if (refresh) {
+      setState(prev => ({ ...prev, refreshing: true, error: null }));
+    } else {
+      setState(prev => ({ ...prev, loading: true, error: null }));
+    }
+
     try {
-      if (refresh) {
-        setState(prev => ({ ...prev, refreshing: true, error: null }));
-      } else {
-        setState(prev => ({ ...prev, loading: true, error: null }));
-      }
+      // 1) Fetch from backend
+      const backendRows = await fetchUserAgentActivations(userPublicKey.toBase58());
 
-      // Get current RPC connection (no retries, just use what's available)
-      let currentConnection = getCurrentRpcConnection();
-
-      try {
-        // Load agents and withdrawal limit status in parallel
-        const [agentsResult, withdrawalStatus] = await Promise.all([
-          getUserAgents(currentConnection, userPublicKey, {
-            limit: 50,
-            offset: 0,
-            sortBy,
-            sortOrder,
-          }),
-          getWithdrawalLimitDisplay(currentConnection, userPublicKey),
-        ]);
-
-        setState(prev => ({
-          ...prev,
-          agents: agentsResult.agents,
-          totalCount: agentsResult.totalCount,
-          hasMore: agentsResult.hasMore,
-          withdrawalLimitStatus: withdrawalStatus,
-          loading: false,
-          refreshing: false,
-          error: null,
-        }));
-      } catch (rpcError) {
-        // If RPC error, switch endpoint and show user-friendly message
-        if (shouldSwitchRpc(rpcError)) {
-          console.log('🔄 RPC error detected, switching endpoint for next request');
-          switchRpcEndpoint(); // Switch for next time, don't retry now
-          
-          setState(prev => ({
-            ...prev,
-            loading: false,
-            refreshing: false,
-            error: 'RPC endpoint issue detected. Please try again - we\'ve switched to a different server.',
-          }));
-        } else {
-          throw rpcError; // Let other errors bubble up
+      // 2) Map backend rows to AgentData without any on-chain dependencies
+      const mappedAgents: AgentData[] = await Promise.all(backendRows.map(async (row: BackendAgentActivation): Promise<AgentData> => {
+        const tierName = (row.metadata?.tier_name ?? 'NOVA'); // default safe tier
+        const tierConfig = getTierUIConfig(tierName);
+        const activationAmountUsdt = row.amount ?? 0; // already normalized to USDT by backend
+        const ts = row.activated_at ?? row.created_at;
+        let activatedAt = ts ? new Date(ts) : new Date(row.created_at);
+        // Guard against future timestamps from backend; clamp to 'now' to preserve UX
+        const now = Date.now();
+        if (activatedAt.getTime() > now) {
+          const createdAt = new Date(row.created_at);
+          activatedAt = createdAt.getTime() > now ? new Date(now) : createdAt;
         }
+
+        // Withdrawal totals and progress from backend, with safe fallbacks
+        const totalRoiWithdrawn = row.total_earned ?? 0;
+        const capBp = row.reward_cap_bp ?? 20000; // default 200%
+        const capPct = capBp / 100;
+        const computedProgress = activationAmountUsdt > 0
+          ? Math.min(((totalRoiWithdrawn / activationAmountUsdt) * 100), capPct)
+          : 0;
+        const yieldCapProgress = row.yield_cap_progress_pct ?? computedProgress;
+        const yieldCapReached = row.yield_cap_reached ?? (yieldCapProgress >= capPct);
+        type AccountDataStub = {
+          id?: anchor.BN;
+          principalUsdt?: anchor.BN;
+          startedAt?: anchor.BN;
+        };
+
+        const accountData: AccountDataStub = {
+          id: new anchor.BN(row.id),
+          principalUsdt: new anchor.BN(row.amount ?? 0),
+          startedAt: new anchor.BN(Math.floor(activatedAt.getTime() / 1000)),
+        };
+
+        // Compute timing window using contract timing service (60s override supported)
+        const nextTime = await calculateNextWithdrawalTime(connection, activatedAt, null);
+        const canWithdraw = !nextTime && !yieldCapReached && activationAmountUsdt > 0;
+
+        return {
+          activationId: row.id,
+          tier: tierName as unknown as AgentData['tier'],
+          tierConfig: {
+            name: tierConfig.name,
+            emoji: tierConfig.emoji,
+            description: tierConfig.description,
+            dailyRange: tierConfig.dailyRange,
+            // Use backend cap if provided; fallback to UI config
+            yieldCapPct: capPct || tierConfig.yieldCapPct,
+          },
+          activationAmount: activationAmountUsdt,
+          activatedAt,
+          lastRoiWithdrawal: null,
+          totalRoiWithdrawn,
+          yieldCapReached,
+          yieldCapProgress,
+          canWithdraw,
+          nextWithdrawalAt: nextTime ?? null,
+          withdrawalStatus: { canWithdraw },
+          // Provide safe placeholders for PDA/account data; not used in DB-only view
+          pda: new PublicKey('11111111111111111111111111111111'),
+          accountData: accountData as unknown as AgentData['accountData'],
+        };
+      }));
+
+      // 3) Client-side sort to respect existing UI controls
+      mappedAgents.sort((a, b) => {
+        let comparison = 0;
+        switch (sortBy) {
+          case 'activatedAt':
+            comparison = a.activatedAt.getTime() - b.activatedAt.getTime();
+            break;
+          case 'tier':
+            comparison = (a.tier as string).localeCompare(b.tier as string);
+            break;
+          case 'activationAmount':
+            comparison = a.activationAmount - b.activationAmount;
+            break;
+          default:
+            comparison = a.activatedAt.getTime() - b.activatedAt.getTime();
+        }
+        return sortOrder === 'desc' ? -comparison : comparison;
+      });
+
+      const totalCount = mappedAgents.length;
+      const hasMore = false;
+
+      // 4) Fetch backend-computed PnL summary for the banner
+      let banner: WithdrawalLimitDisplay = DEFAULT_WITHDRAWAL_DISPLAY;
+      try {
+        banner = await fetchGlobalPnlSummary();
+      } catch (e) {
+        console.warn('⚠️ Failed to load PnL summary; using defaults', e);
       }
+
+      setState(prev => ({
+        ...prev,
+        agents: mappedAgents,
+        totalCount,
+        hasMore,
+        withdrawalLimitStatus: banner,
+        loading: false,
+        refreshing: false,
+        error: null,
+      }));
     } catch (error) {
       console.error('❌ Error loading dashboard data:', error);
       setState(prev => ({
@@ -207,7 +342,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         {state.withdrawalLimitStatus && (
           <WithdrawalLimitDisplayComponent status={state.withdrawalLimitStatus} />
         )}
-        
         {/* Empty State */}
         <Card title="Agent Portfolio" subtitle="Start building your AI trading portfolio">
           <div className="text-center py-12">
@@ -243,7 +377,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       {state.withdrawalLimitStatus && (
         <WithdrawalLimitDisplayComponent status={state.withdrawalLimitStatus} />
       )}
-      
       {/* Multi-Agent Timer Overview */}
       {state.agents.length > 0 && (
         <MultiAgentTimer agents={state.agents} connection={connection} />
