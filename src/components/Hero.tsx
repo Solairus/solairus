@@ -66,8 +66,10 @@ export default function Hero() {
                     key="intro-video"
                     controls
                     controlsList="nodownload"
+                    autoPlay
+                    muted
                     playsInline
-                    preload="metadata"
+                    preload="auto"
                     className="w-full h-full object-contain"
                     style={{ backgroundColor: '#000' }}
                   >
