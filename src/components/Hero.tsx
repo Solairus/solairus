@@ -34,9 +34,7 @@ export default function Hero() {
           </h1>
           
           <p className="text-xl md:text-2xl text-muted-foreground max-w-3xl mx-auto mb-12">
-            Autonomous DeFi wealth powered by intelligent Solana AI agents.
-            <br />
-            <span className="text-primary font-semibold">1-5% daily USDT rewards</span> on autopilot.
+            Earn automated daily profits through intelligent Solana-based DeFi strategies.
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
