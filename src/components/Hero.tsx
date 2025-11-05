@@ -55,23 +55,26 @@ export default function Hero() {
                 </Button>
               </DialogTrigger>
               {/* Overlay video player */}
-              <DialogContent className="max-w-3xl w-[90vw] sm:w-[800px] bg-transparent border-none p-0 shadow-none">
+              <DialogContent className="max-w-3xl w-[90vw] sm:w-[800px] bg-black border-none p-0 shadow-2xl">
                 <VisuallyHidden>
                   <DialogTitle>Solairus Introduction Video</DialogTitle>
                 </VisuallyHidden>
+                <VisuallyHidden>
+                  <p id="video-description">Watch the Solairus platform introduction video</p>
+                </VisuallyHidden>
                 {/* Purpose: Show intro video in an overlay. Inputs: none. Outputs: video playback UI. */}
                 <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
-                  {/* Autoplay may be blocked by some browsers; controls provided as fallback */}
                   <video
-                    src="/media/videos/video-hero.mp4"
+                    key="intro-video"
                     controls
-                    autoPlay
-                    muted
+                    controlsList="nodownload"
                     playsInline
-                    className="w-full h-full"
+                    preload="metadata"
+                    className="w-full h-full object-contain"
+                    style={{ backgroundColor: '#000' }}
                   >
                     <source src="/media/videos/video-hero.mp4" type="video/mp4" />
-                    Your browser does not support the video tag.
+                    <p>Your browser does not support the video tag. Please try a modern browser.</p>
                   </video>
                 </div>
               </DialogContent>
