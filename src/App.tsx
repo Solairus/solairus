@@ -26,9 +26,7 @@ import LicenseGuard from "@/components/license/LicenseGuard";
 
 import { WalletContextProvider } from "@/contexts/wallet-context";
 import { LicenseContextProvider } from "@/contexts/license-context";
-import { createLicenseService } from "@/services/license/license-service";
-import { useWallet } from "@/contexts/wallet-context";
-import { ReactNode, useMemo } from "react";
+import { ReactNode } from "react";
 import { AuthContextProvider } from '@/contexts/auth-context'
 import { SettingsContextProvider } from '@/contexts/settings-context'
 import { AppKitProvider } from '@/components/shared/appkit-provider'
@@ -80,7 +78,13 @@ const App = () => (
         >
         <Routes>
           <Route path="/" element={<Index />} />
-          <Route path="/dapp/ref/:code" element={<DappReferral />} />
+          <Route path="/dapp/ref/:code" element={
+            <AppKitProvider>
+              <WalletContextProvider>
+                <DappReferral />
+              </WalletContextProvider>
+            </AppKitProvider>
+          } />
                 <Route
                   path="/dapp"
                   element={
