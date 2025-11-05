@@ -68,7 +68,7 @@ export default function Hero() {
                 <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
                   {isVideoDialogOpen && (
                     <ReactPlayer
-                      url="/media/videos/ivideo.mp4"
+                      url="/media/videos/vid03.mp4"
                       controls
                       playing
                       muted
