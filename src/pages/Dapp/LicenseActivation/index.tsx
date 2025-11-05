@@ -58,6 +58,8 @@ export default function LicenseActivationPage() {
   const [transactionHash, setTransactionHash] = useState<string>('');
   const [usingFallbackData, setUsingFallbackData] = useState(false);
   const [attemptedRecovery, setAttemptedRecovery] = useState(false);
+  const [isCheckingPayment, setIsCheckingPayment] = useState(false);
+  const [recoveryMessage, setRecoveryMessage] = useState<string>('');
 
   // Helper to safely compare active status without literal union mismatch
   const isActiveStatus = (s: unknown): boolean => s === 'active';
@@ -76,6 +78,65 @@ export default function LicenseActivationPage() {
       return `${Number(whole).toLocaleString('en-US')}.${fractional2dp}`;
     } catch {
       return '0.00';
+    }
+  };
+
+  // Manual payment recovery function (can be triggered by user)
+  const checkPaymentStatus = async () => {
+    if (!account) return;
+    
+    try {
+      setIsCheckingPayment(true);
+      setRecoveryMessage('Checking for pending payments...');
+      setError(null);
+
+      // Ensure JWT present
+      const token = localStorage.getItem('solairus.jwt');
+      if (!token) {
+        await AuthService.authenticateWallet(account);
+      }
+
+      const lastUrl = `${API_CONFIG.getBaseUrl()}/transactions/last-confirmed?initiatorWallet=${encodeURIComponent(account)}`;
+      const lastRes = await ApiClient.get(lastUrl);
+      const lastData = await lastRes.json();
+      const record = lastData?.record;
+
+      if (record && record.order_id) {
+        setRecoveryMessage('Found pending transaction. Verifying on-chain payment...');
+        
+        // Reapply activation using UUID order_id
+        const reapplyUrl = `${API_CONFIG.getBaseUrl()}/transactions/reapply-license`;
+        const reapplyBody = { initiatorWallet: account, orderId: record.order_id };
+        const reappliedRes = await ApiClient.post(reapplyUrl, reapplyBody);
+        const reappliedData = await reappliedRes.json();
+
+        if (reappliedData?.reapplied) {
+          setRecoveryMessage('Payment verified! Activating your license...');
+          
+          // Refresh auth session (license context will auto-update from user state)
+          await refreshSession();
+          
+          setAttemptedRecovery(true);
+          
+          // Navigate to return path after a brief delay to ensure context is updated
+          setTimeout(() => {
+            navigate(returnPath, { replace: true });
+          }, 1500);
+        } else {
+          setRecoveryMessage('');
+          setError('No matching on-chain payment found. Please try activating normally.');
+        }
+      } else {
+        setRecoveryMessage('');
+        setError('No pending transaction found. Please activate your license first.');
+      }
+    } catch (err) {
+      console.error('Payment recovery check failed:', err);
+      setRecoveryMessage('');
+      const errorMsg = err instanceof Error ? err.message : 'Failed to check payment status';
+      setError(errorMsg);
+    } finally {
+      setIsCheckingPayment(false);
     }
   };
 
@@ -131,10 +192,12 @@ export default function LicenseActivationPage() {
               const reappliedData = await reappliedRes.json();
 
               if (reappliedData?.reapplied) {
-                // Refresh auth session to get updated license status
+                // Refresh auth session (license context will auto-update from user state)
                 await refreshSession();
+                
                 // Prevent repeat attempts on the next render
                 setAttemptedRecovery(true);
+                
                 // Use router navigation instead of full reload to avoid SPA MIME issues
                 navigate(returnPath, { replace: true });
                 return;
@@ -256,6 +319,8 @@ export default function LicenseActivationPage() {
 
       // 4) Only now, after verification, activate license in backend (pass signature)
       const result = await LicenseBackendService.activate({ signature: txSig });
+      
+      // Refresh auth session (license context will auto-update from user state)
       await refreshSession();
 
       const exp = new Date(result.license_expiration);
@@ -372,8 +437,17 @@ export default function LicenseActivationPage() {
                 <Button
                   onClick={() => setShowOrderSummary(true)}
                   className="bg-blue-600 hover:bg-blue-700 text-white"
+                  disabled={isCheckingPayment}
                 >
                   <Shield className="w-4 h-4 mr-2" /> Activate License ({termDays} Days)
+                </Button>
+                <Button
+                  onClick={checkPaymentStatus}
+                  disabled={isCheckingPayment}
+                  variant="outline"
+                  className="border-blue-300 text-blue-700 hover:bg-blue-50 text-sm"
+                >
+                  {isCheckingPayment ? 'Checking...' : 'Already Paid? Check Status'}
                 </Button>
               </div>
             </>
@@ -385,6 +459,14 @@ export default function LicenseActivationPage() {
               onConfirm={confirmActivation}
               onCancel={() => setShowOrderSummary(false)}
             />
+          )}
+
+          {/* Recovery Message Display */}
+          {recoveryMessage && (
+            <div className="text-left bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-sm font-semibold text-blue-700">Checking Payment</p>
+              <p className="text-xs text-blue-600">{recoveryMessage}</p>
+            </div>
           )}
 
           {/* Error Display */}
@@ -405,6 +487,15 @@ export default function LicenseActivationPage() {
                   className="border-red-300 text-red-700 hover:bg-red-100 text-xs px-2 py-1"
                 >
                   Try Again
+                </Button>
+                <Button
+                  onClick={checkPaymentStatus}
+                  disabled={isCheckingPayment}
+                  size="sm"
+                  variant="outline"
+                  className="border-blue-300 text-blue-700 hover:bg-blue-100 text-xs px-2 py-1"
+                >
+                  {isCheckingPayment ? 'Checking...' : 'Check Payment Status'}
                 </Button>
                 <Button
                   onClick={() => {

@@ -293,6 +293,7 @@ router.post('/transactions/verify', async (req: Request, res: Response) => {
 /**
  * GET /api/transactions/last-confirmed
  * Return the latest confirmed license_activation transaction for a wallet.
+ * Falls back to most recent pending transaction if no confirmed transaction exists.
  */
 async function lastConfirmedHandler(req: Request, res: Response) {
   const schema = z.object({ initiatorWallet: z.string().min(32).max(64) })
@@ -302,18 +303,104 @@ async function lastConfirmedHandler(req: Request, res: Response) {
   const { initiatorWallet } = parsed.data
   const sql = `
     SELECT * FROM transactions
-    WHERE type = $1 AND status = $2 AND initiator_wallet = $3
-    ORDER BY id DESC
+    WHERE type = $1 AND initiator_wallet = $2
+      AND (status = $3 OR status = $4)
+    ORDER BY 
+      CASE WHEN status = $3 THEN 0 ELSE 1 END,
+      id DESC
     LIMIT 1
   `
-  const { rows } = await query<Transaction>(sql, ['license_activation', 'confirmed', initiatorWallet])
+  const { rows } = await query<Transaction>(sql, ['license_activation', initiatorWallet, 'confirmed', 'pending'])
   const record = rows[0] ?? null
   return res.json({ record })
 }
 
 /**
+ * Helper: Find transaction signature by searching for PaymentMade events from solairus_pay program
+ * that contain the orderId in the memo field.
+ */
+async function findSignatureByPaymentEvent(
+  connection: Connection,
+  userPublicKey: PublicKey,
+  orderId: string,
+  solairusPayProgramId: string
+): Promise<string | null> {
+  try {
+    // Get recent signatures for the user's wallet
+    const sigs = await connection.getSignaturesForAddress(userPublicKey, { limit: 50 })
+    
+    for (const s of sigs) {
+      try {
+        const tx = await connection.getParsedTransaction(s.signature, {
+          commitment: 'confirmed',
+          maxSupportedTransactionVersion: 0,
+        })
+        
+        if (!tx || !tx.meta) continue
+        
+        // Check if solairus_pay program is involved
+        const accountKeys = tx.transaction.message.accountKeys
+        const involvesSolairusPay = accountKeys.some((k) => k?.pubkey?.toBase58() === solairusPayProgramId)
+        
+        if (!involvesSolairusPay) continue
+        
+        // Parse transaction logs for PaymentMade event
+        // PaymentMade event discriminator: [227, 251, 123, 16, 133, 220, 83, 242]
+        const logs = tx.meta.logMessages || []
+        
+        // Look for program data in logs - Anchor events are emitted as base64 in logs
+        // Format: "Program data: <base64>"
+        for (const log of logs) {
+          if (log.includes('Program data:')) {
+            try {
+              const dataStr = log.split('Program data: ')[1]?.trim()
+              if (!dataStr) continue
+              
+              const eventData = Buffer.from(dataStr, 'base64')
+              
+              // Check if this is a PaymentMade event by discriminator
+              const discriminator = eventData.slice(0, 8)
+              const expectedDiscriminator = Buffer.from([227, 251, 123, 16, 133, 220, 83, 242])
+              
+              if (!discriminator.equals(expectedDiscriminator)) continue
+              
+              // Decode the event data - memo is the last field as a string
+              // Event structure: payer(32) + recipient(32) + mint(32) + amount(8) + decimals(1) + reference(32) + memo(length-prefixed string)
+              const memoOffset = 32 + 32 + 32 + 8 + 1 + 32 // 137 bytes before memo
+              if (eventData.length <= memoOffset + 4) continue
+              
+              const memoLength = eventData.readUInt32LE(memoOffset)
+              const memoStart = memoOffset + 4
+              
+              if (eventData.length < memoStart + memoLength) continue
+              
+              const memo = eventData.slice(memoStart, memoStart + memoLength).toString('utf8')
+              
+              if (memo === orderId) {
+                return s.signature
+              }
+            } catch (parseErr) {
+              // Continue to next log
+              continue
+            }
+          }
+        }
+      } catch (txErr) {
+        // Continue to next signature
+        continue
+      }
+    }
+    
+    return null
+  } catch (err) {
+    console.error('Error finding signature by payment event:', err)
+    return null
+  }
+}
+
+/**
  * POST /api/transactions/reapply-license
- * Re-apply license activation for a confirmed transaction without re-paying.
+ * Re-apply license activation for a transaction (confirmed or pending with on-chain payment).
  */
 async function reapplyLicenseHandler(req: Request, res: Response) {
   const bodySchema = z
@@ -340,52 +427,55 @@ async function reapplyLicenseHandler(req: Request, res: Response) {
 
   if (!record) return res.status(404).json({ error: 'Transaction not found' })
   if (record.type !== 'license_activation') return res.status(400).json({ error: 'Invalid transaction type' })
-  if (record.status !== 'confirmed') return res.status(400).json({ error: 'Transaction is not confirmed' })
+  
+  // Allow both confirmed and pending transactions (pending may have been paid on-chain)
+  const connection = getConnection()
+  const solairusPayProgramId = 'CMvEEAXnNKZs7brTjVp4dqtPzkdRqSjnFNG9zpBjUP3g'
 
-  // If signature is missing but we have orderId, try to resolve from recent signatures with memo
+  // If signature is missing but we have orderId, try to find it via PaymentMade events
   if (!record.signature && orderId) {
     try {
-      const connection = getConnection()
       const pub = new PublicKey(initiatorWallet)
-      const sigs = await connection.getSignaturesForAddress(pub, { limit: 50 })
-      const memoProgramId = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'
-      let foundSig: string | null = null
-
-      type MemoParsed = { type?: string; info?: { memo?: string } }
-
-      for (const s of sigs) {
-        const pt = await connection.getParsedTransaction(s.signature, {
-          commitment: 'confirmed',
-          maxSupportedTransactionVersion: 0,
-        })
-        if (!pt) continue
-        const ixs = pt.transaction.message.instructions as (ParsedInstruction | PartiallyDecodedInstruction)[]
-        for (const ix of ixs) {
-          const pid = ix.programId.toBase58()
-          if (pid === memoProgramId) {
-            let memoText: string | undefined
-            if ('parsed' in ix) {
-              const parsedIx = ix as ParsedInstruction
-              memoText = (parsedIx.parsed as MemoParsed).info?.memo
-            } else if ('data' in ix && typeof ix.data === 'string') {
-              memoText = Buffer.from(ix.data, 'base64').toString('utf8')
-            }
-            if (memoText === orderId) {
-              foundSig = s.signature
-              break
-            }
-          }
-        }
-        if (foundSig) break
-      }
+      const foundSig = await findSignatureByPaymentEvent(connection, pub, orderId, solairusPayProgramId)
 
       if (foundSig) {
         const upd = await query<Transaction>('UPDATE transactions SET signature = $1 WHERE id = $2 RETURNING *', [foundSig, record.id])
         record = upd.rows[0] ?? record
+      } else {
+        return res.status(404).json({ error: 'On-chain payment not found for this order' })
       }
     } catch (e) {
-      // Non-fatal: if we cannot resolve signature via memo, continue
+      console.error('Error finding payment signature:', e)
+      return res.status(500).json({ error: 'Failed to search for on-chain payment' })
     }
+  }
+
+  // If transaction is pending with signature, verify it on-chain and update status
+  if (record.status === 'pending' && record.signature) {
+    const statusResp = await connection.getSignatureStatuses([record.signature], { searchTransactionHistory: true })
+    const status = statusResp.value[0]
+    const isConfirmed = status && !status.err && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')
+
+    if (isConfirmed) {
+      const match = await verifyOnChainMatchesRecord(connection, record)
+      const dbStatus: TransactionStatus = match.ok ? 'confirmed' : 'failed'
+      const update = await query<Transaction>(
+        'UPDATE transactions SET status = $1, metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
+        [dbStatus, match.ok ? {} : { failureReason: match.reason ?? 'Verification mismatch' }, record.id]
+      )
+      record = update.rows[0]
+      
+      if (record.status !== 'confirmed') {
+        return res.status(400).json({ error: `Payment verification failed: ${match.reason}` })
+      }
+    } else {
+      return res.status(400).json({ error: 'Transaction signature not confirmed on-chain' })
+    }
+  }
+
+  // If still not confirmed after all attempts, reject
+  if (record.status !== 'confirmed') {
+    return res.status(400).json({ error: 'Transaction is not confirmed. Please ensure payment was completed on-chain.' })
   }
 
   await applyPostConfirmation(record)
