@@ -71,7 +71,7 @@ export default function Hero() {
                     className="w-full h-full object-contain"
                     style={{ backgroundColor: '#000' }}
                   >
-                    <source src="/media/videos/solairus.mp4" type="video/mp4" />
+                    <source src="/media/videos/vid01.mp4" type="video/mp4" />
                     <p>Your browser does not support the video tag. Please try a modern browser.</p>
                   </video>
                 </div>
