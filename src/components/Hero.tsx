@@ -63,14 +63,14 @@ export default function Hero() {
                 <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
                   {/* Autoplay may be blocked by some browsers; controls provided as fallback */}
                   <video
-                    src="/media/videos/intro.mp4"
+                    src="/media/videos/video-hero.mp4"
                     controls
                     autoPlay
                     muted
                     playsInline
                     className="w-full h-full"
                   >
-                    <source src="/media/videos/intro.mp4" type="video/mp4" />
+                    <source src="/media/videos/video-hero.mp4" type="video/mp4" />
                     Your browser does not support the video tag.
                   </video>
                 </div>
