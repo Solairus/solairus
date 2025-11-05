@@ -3,6 +3,7 @@ import { ArrowRight, Sparkles, Play } from "lucide-react";
 import heroNetwork from "@/assets/hero-network.jpg";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@/components/ui/visually-hidden";
+import ReactPlayer from "react-player";
 
 export default function Hero() {
   return (
@@ -62,21 +63,25 @@ export default function Hero() {
                 </VisuallyHidden>
                 {/* Purpose: Show intro video in an overlay. Inputs: none. Outputs: video playback UI. */}
                 <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
-                  <video
-                    key="intro-video"
+                  <ReactPlayer
+                    url="/media/videos/ivideo.mp4"
                     controls
-                    controlsList="nodownload"
-                    autoPlay
+                    playing
                     muted
                     loop
-                    playsInline
-                    preload="auto"
-                    className="w-full h-full object-contain"
+                    width="100%"
+                    height="100%"
+                    playsinline
+                    config={{
+                      file: {
+                        attributes: {
+                          controlsList: 'nodownload',
+                          preload: 'auto'
+                        }
+                      }
+                    }}
                     style={{ backgroundColor: '#000' }}
-                  >
-                    <source src="/media/videos/ivideo.mp4" type="video/mp4" />
-                    <p>Your browser does not support the video tag. Please try a modern browser.</p>
-                  </video>
+                  />
                 </div>
               </DialogContent>
             </Dialog>
