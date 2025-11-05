@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Sparkles, Play } from "lucide-react";
 import heroNetwork from "@/assets/hero-network.jpg";
@@ -6,6 +7,8 @@ import { VisuallyHidden } from "@/components/ui/visually-hidden";
 import ReactPlayer from "react-player";
 
 export default function Hero() {
+  const [isVideoDialogOpen, setIsVideoDialogOpen] = useState(false);
+  
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
       {/* Animated background */}
@@ -46,7 +49,7 @@ export default function Hero() {
               </a>
             </Button>
             {/* Replace hire button with Watch Intro that opens an overlay video */}
-            <Dialog>
+            <Dialog open={isVideoDialogOpen} onOpenChange={setIsVideoDialogOpen}>
               <DialogTrigger asChild>
                 <Button variant="neon" size="xl" aria-label="Watch Intro Video" className="group">
                   <Play className="w-5 h-5 mr-2" />
@@ -63,25 +66,27 @@ export default function Hero() {
                 </VisuallyHidden>
                 {/* Purpose: Show intro video in an overlay. Inputs: none. Outputs: video playback UI. */}
                 <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
-                  <ReactPlayer
-                    url="/media/videos/ivideo.mp4"
-                    controls
-                    playing
-                    muted
-                    loop
-                    width="100%"
-                    height="100%"
-                    playsinline
-                    config={{
-                      file: {
-                        attributes: {
-                          controlsList: 'nodownload',
-                          preload: 'auto'
+                  {isVideoDialogOpen && (
+                    <ReactPlayer
+                      url="/media/videos/ivideo.mp4"
+                      controls
+                      playing
+                      muted
+                      loop
+                      width="100%"
+                      height="100%"
+                      playsinline
+                      config={{
+                        file: {
+                          attributes: {
+                            controlsList: 'nodownload',
+                            preload: 'auto'
+                          }
                         }
-                      }
-                    }}
-                    style={{ backgroundColor: '#000' }}
-                  />
+                      }}
+                      style={{ backgroundColor: '#000' }}
+                    />
+                  )}
                 </div>
               </DialogContent>
             </Dialog>

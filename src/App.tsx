@@ -67,30 +67,33 @@ const queryClient = new QueryClient();
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthContextProvider>
-      <WalletContextProvider>
-        <LicenseContextProvider>
-          <SettingsContextProvider>
-            <TooltipProvider>
-              <Toaster />
-              <Sonner />
-              <InstallPrompt />
-              <BrowserRouter
-                future={{
-                  v7_startTransition: true,
-                  v7_relativeSplatPath: true,
-                }}
-              >
-              <Routes>
-                <Route path="/" element={<Index />} />
-                <Route path="/dapp/ref/:code" element={<DappReferral />} />
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <InstallPrompt />
+        <BrowserRouter
+          future={{
+            v7_startTransition: true,
+            v7_relativeSplatPath: true,
+          }}
+        >
+        <Routes>
+          <Route path="/" element={<Index />} />
+          <Route path="/dapp/ref/:code" element={<DappReferral />} />
                 <Route
                   path="/dapp"
                   element={
-                    <WalletGate>
-                      <LicenseGuardWrapper>
-                        <Dapp />
-                      </LicenseGuardWrapper>
-                    </WalletGate>
+                    <WalletContextProvider>
+                      <LicenseContextProvider>
+                        <SettingsContextProvider>
+                          <WalletGate>
+                            <LicenseGuardWrapper>
+                              <Dapp />
+                            </LicenseGuardWrapper>
+                          </WalletGate>
+                        </SettingsContextProvider>
+                      </LicenseContextProvider>
+                    </WalletContextProvider>
                   }
                 >
                   <Route index element={<DappHome />} />
@@ -108,9 +111,15 @@ const App = () => (
                 <Route
                   path="/dapp/special"
                   element={
-                    <WalletGate>
-                      <Admin />
-                    </WalletGate>
+                    <WalletContextProvider>
+                      <LicenseContextProvider>
+                        <SettingsContextProvider>
+                          <WalletGate>
+                            <Admin />
+                          </WalletGate>
+                        </SettingsContextProvider>
+                      </LicenseContextProvider>
+                    </WalletContextProvider>
                   }
                 />
 
@@ -119,10 +128,7 @@ const App = () => (
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </BrowserRouter>
-            </TooltipProvider>
-          </SettingsContextProvider>
-        </LicenseContextProvider>
-      </WalletContextProvider>
+          </TooltipProvider>
     </AuthContextProvider>
   </QueryClientProvider>
 );
