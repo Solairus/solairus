@@ -83,17 +83,19 @@ const App = () => (
                 <Route
                   path="/dapp"
                   element={
-                    <WalletContextProvider>
-                      <LicenseContextProvider>
-                        <SettingsContextProvider>
-                          <WalletGate>
-                            <LicenseGuardWrapper>
-                              <Dapp />
-                            </LicenseGuardWrapper>
-                          </WalletGate>
-                        </SettingsContextProvider>
-                      </LicenseContextProvider>
-                    </WalletContextProvider>
+                    <AppKitProvider>
+                      <WalletContextProvider>
+                        <LicenseContextProvider>
+                          <SettingsContextProvider>
+                            <WalletGate>
+                              <LicenseGuardWrapper>
+                                <Dapp />
+                              </LicenseGuardWrapper>
+                            </WalletGate>
+                          </SettingsContextProvider>
+                        </LicenseContextProvider>
+                      </WalletContextProvider>
+                    </AppKitProvider>
                   }
                 >
                   <Route index element={<DappHome />} />
@@ -111,15 +113,17 @@ const App = () => (
                 <Route
                   path="/dapp/special"
                   element={
-                    <WalletContextProvider>
-                      <LicenseContextProvider>
-                        <SettingsContextProvider>
-                          <WalletGate>
-                            <Admin />
-                          </WalletGate>
-                        </SettingsContextProvider>
-                      </LicenseContextProvider>
-                    </WalletContextProvider>
+                    <AppKitProvider>
+                      <WalletContextProvider>
+                        <LicenseContextProvider>
+                          <SettingsContextProvider>
+                            <WalletGate>
+                              <Admin />
+                            </WalletGate>
+                          </SettingsContextProvider>
+                        </LicenseContextProvider>
+                      </WalletContextProvider>
+                    </AppKitProvider>
                   }
                 />
 

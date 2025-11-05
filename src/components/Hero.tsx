@@ -1,14 +1,10 @@
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Sparkles, Play } from "lucide-react";
 import heroNetwork from "@/assets/hero-network.jpg";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@/components/ui/visually-hidden";
-import ReactPlayer from "react-player";
 
 export default function Hero() {
-  const [isVideoDialogOpen, setIsVideoDialogOpen] = useState(false);
-  
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
       {/* Animated background */}
@@ -49,7 +45,7 @@ export default function Hero() {
               </a>
             </Button>
             {/* Replace hire button with Watch Intro that opens an overlay video */}
-            <Dialog open={isVideoDialogOpen} onOpenChange={setIsVideoDialogOpen}>
+            <Dialog>
               <DialogTrigger asChild>
                 <Button variant="neon" size="xl" aria-label="Watch Intro Video" className="group">
                   <Play className="w-5 h-5 mr-2" />
@@ -57,7 +53,7 @@ export default function Hero() {
                 </Button>
               </DialogTrigger>
               {/* Overlay video player */}
-              <DialogContent className="max-w-3xl w-[90vw] sm:w-[800px] bg-black border-none p-0 shadow-2xl">
+              <DialogContent className="max-w-3xl w-[90vw] sm:w-[800px] bg-black border-none p-4 shadow-2xl">
                 <VisuallyHidden>
                   <DialogTitle>Solairus Introduction Video</DialogTitle>
                 </VisuallyHidden>
@@ -66,27 +62,18 @@ export default function Hero() {
                 </VisuallyHidden>
                 {/* Purpose: Show intro video in an overlay. Inputs: none. Outputs: video playback UI. */}
                 <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
-                  {isVideoDialogOpen && (
-                    <ReactPlayer
-                      url="/media/videos/vid03.mp4"
-                      controls
-                      playing
-                      muted
-                      loop
-                      width="100%"
-                      height="100%"
-                      playsinline
-                      config={{
-                        file: {
-                          attributes: {
-                            controlsList: 'nodownload',
-                            preload: 'auto'
-                          }
-                        }
-                      }}
-                      style={{ backgroundColor: '#000' }}
-                    />
-                  )}
+                  <video
+                    controls
+                    autoPlay
+                    muted
+                    loop
+                    playsInline
+                    className="w-full h-full"
+                    style={{ backgroundColor: '#000' }}
+                  >
+                    <source src="/media/videos/vid03.mp4" type="video/mp4" />
+                    Your browser does not support the video tag.
+                  </video>
                 </div>
               </DialogContent>
             </Dialog>

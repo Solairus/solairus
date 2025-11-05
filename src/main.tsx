@@ -1,8 +1,6 @@
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
-import { AppKitProvider } from "@/components/shared/appkit-provider";
-import { WalletContextProvider } from "@/contexts/wallet-context";
 import { Buffer } from "buffer";
 
 // Polyfill Buffer for browser libs expecting Node Buffer
@@ -14,11 +12,7 @@ import { Buffer } from "buffer";
 (global as any).Buffer = Buffer;
 
 createRoot(document.getElementById("root")!).render(
-  <AppKitProvider>
-    <WalletContextProvider>
-      <App />
-    </WalletContextProvider>
-  </AppKitProvider>
+  <App />
 );
 
 // Register service worker for PWA installability (production only)
