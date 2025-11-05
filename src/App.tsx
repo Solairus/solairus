@@ -31,6 +31,7 @@ import { useWallet } from "@/contexts/wallet-context";
 import { ReactNode, useMemo } from "react";
 import { AuthContextProvider } from '@/contexts/auth-context'
 import { SettingsContextProvider } from '@/contexts/settings-context'
+import { AppKitProvider } from '@/components/shared/appkit-provider'
 
 // Initialize configuration validation for agent system
 import "@/utils/config-validator";
