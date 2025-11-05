@@ -68,12 +68,13 @@ export default function Hero() {
                     controlsList="nodownload"
                     autoPlay
                     muted
+                    loop
                     playsInline
                     preload="auto"
                     className="w-full h-full object-contain"
                     style={{ backgroundColor: '#000' }}
                   >
-                    <source src="/media/videos/solairus-web.mp4" type="video/mp4" />
+                    <source src="/media/videos/ivideo.mp4" type="video/mp4" />
                     <p>Your browser does not support the video tag. Please try a modern browser.</p>
                   </video>
                 </div>
