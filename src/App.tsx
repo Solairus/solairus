@@ -65,42 +65,45 @@ const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <AuthContextProvider>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <InstallPrompt />
-        <BrowserRouter
-          future={{
-            v7_startTransition: true,
-            v7_relativeSplatPath: true,
-          }}
-        >
-        <Routes>
-          <Route path="/" element={<Index />} />
-          <Route path="/dapp/ref/:code" element={
+    <TooltipProvider>
+      <Toaster />
+      <Sonner />
+      <InstallPrompt />
+      <BrowserRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
+      <Routes>
+        <Route path="/" element={<Index />} />
+        <Route path="/dapp/ref/:code" element={
+          <AuthContextProvider>
             <AppKitProvider>
               <WalletContextProvider>
                 <DappReferral />
               </WalletContextProvider>
             </AppKitProvider>
-          } />
+          </AuthContextProvider>
+        } />
                 <Route
                   path="/dapp"
                   element={
-                    <AppKitProvider>
-                      <WalletContextProvider>
-                        <LicenseContextProvider>
-                          <SettingsContextProvider>
-                            <WalletGate>
-                              <LicenseGuardWrapper>
-                                <Dapp />
-                              </LicenseGuardWrapper>
-                            </WalletGate>
-                          </SettingsContextProvider>
-                        </LicenseContextProvider>
-                      </WalletContextProvider>
-                    </AppKitProvider>
+                    <AuthContextProvider>
+                      <AppKitProvider>
+                        <WalletContextProvider>
+                          <LicenseContextProvider>
+                            <SettingsContextProvider>
+                              <WalletGate>
+                                <LicenseGuardWrapper>
+                                  <Dapp />
+                                </LicenseGuardWrapper>
+                              </WalletGate>
+                            </SettingsContextProvider>
+                          </LicenseContextProvider>
+                        </WalletContextProvider>
+                      </AppKitProvider>
+                    </AuthContextProvider>
                   }
                 >
                   <Route index element={<DappHome />} />
@@ -118,17 +121,19 @@ const App = () => (
                 <Route
                   path="/dapp/special"
                   element={
-                    <AppKitProvider>
-                      <WalletContextProvider>
-                        <LicenseContextProvider>
-                          <SettingsContextProvider>
-                            <WalletGate>
-                              <Admin />
-                            </WalletGate>
-                          </SettingsContextProvider>
-                        </LicenseContextProvider>
-                      </WalletContextProvider>
-                    </AppKitProvider>
+                    <AuthContextProvider>
+                      <AppKitProvider>
+                        <WalletContextProvider>
+                          <LicenseContextProvider>
+                            <SettingsContextProvider>
+                              <WalletGate>
+                                <Admin />
+                              </WalletGate>
+                            </SettingsContextProvider>
+                          </LicenseContextProvider>
+                        </WalletContextProvider>
+                      </AppKitProvider>
+                    </AuthContextProvider>
                   }
                 />
 
@@ -138,7 +143,6 @@ const App = () => (
               </Routes>
             </BrowserRouter>
           </TooltipProvider>
-    </AuthContextProvider>
   </QueryClientProvider>
 );
 
