@@ -3,7 +3,6 @@ import Hero from "@/components/Hero";
 import HowItWorks from "@/components/HowItWorks";
 import Features from "@/components/Features";
 import ContentSections from "@/components/ContentSections";
-import Affiliate from "@/components/Affiliate";
 import CTA from "@/components/CTA";
 import ComingSoonOverlay from "./ComingSoonOverlay";
 import ConsentBanner from "@/components/ConsentBanner";
@@ -19,7 +18,6 @@ const Index = () => {
         <HowItWorks />
         <Features />
         <ContentSections />
-        <Affiliate />
         <CTA />
       </main>
       <footer className="border-t border-border/50 glass py-8">
