@@ -1,13 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
-import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
 
 interface HeaderProps {
   showWalletConnect?: boolean; // when false, hide connect wallet button
+  onWalletConnect?: () => void; // optional callback for wallet connect button
 }
 
-export default function Header({ showWalletConnect = true }: HeaderProps) {
-  const { openModal } = useWalletConnection();
+export default function Header({ showWalletConnect = true, onWalletConnect }: HeaderProps) {
   return (
     <header className="fixed top-0 left-0 right-0 z-50 border-b border-border/50 glass">
       <div className="container mx-auto px-4">
@@ -38,8 +37,8 @@ export default function Header({ showWalletConnect = true }: HeaderProps) {
           
           {/* CTA */}
           <div className="flex items-center gap-4">
-            {showWalletConnect && (
-              <Button variant="ghost" className="hidden md:inline-flex" onClick={openModal}>
+            {showWalletConnect && onWalletConnect && (
+              <Button variant="ghost" className="hidden md:inline-flex" onClick={onWalletConnect}>
                 Connect Wallet
               </Button>
             )}
