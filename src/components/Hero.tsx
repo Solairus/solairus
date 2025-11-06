@@ -1,14 +1,16 @@
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Sparkles, Play } from "lucide-react";
+import { ArrowRight, Sparkles, Play, Volume2 } from "lucide-react";
 import heroNetwork from "@/assets/hero-network.jpg";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@/components/ui/visually-hidden";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function Hero() {
   // Hero intro video source — single source only (no fallback)
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const INTRO_SRC = "/media/videos/ivideo.mp4";
+  // Track mute state to allow user to enable sound after autoplay
+  const [isMuted, setIsMuted] = useState(true);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -83,11 +85,43 @@ export default function Hero() {
                 </VisuallyHidden>
                 {/* Purpose: Show intro video in an overlay. Inputs: none. Outputs: video playback UI. */}
                 <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
+                  {/* Unmute control overlay: enables sound after user interaction */}
+                  {isMuted && (
+                    <div className="absolute top-3 right-3 z-20">
+                      <Button
+                        variant="neon"
+                        size="sm"
+                        aria-label="Unmute intro video"
+                        onClick={() => {
+                          const v = videoRef.current;
+                          if (!v) return;
+                          try {
+                            v.muted = false;
+                            v.volume = 1.0;
+                            setIsMuted(false);
+                            const p = v.play();
+                            if (p && typeof (p as Promise<void>).then === "function") {
+                              (p as Promise<void>).catch((e) => {
+                                console.warn("[HeroVideo] unmute play() promise rejected", e);
+                              });
+                            }
+                            console.info("[HeroVideo] unmute", { volume: v.volume });
+                          } catch (e) {
+                            console.warn("[HeroVideo] error on unmute", e);
+                          }
+                        }}
+                        className="glass"
+                      >
+                        <Volume2 className="w-4 h-4 mr-1" />
+                        Unmute
+                      </Button>
+                    </div>
+                  )}
                   <video
                     ref={videoRef}
                     controls
                     autoPlay
-                    muted
+                    muted={isMuted}
                     loop
                     playsInline
                     className="w-full h-full"
@@ -121,6 +155,10 @@ export default function Hero() {
                     onPause={(e) => {
                       const v = e.currentTarget;
                       console.info('[HeroVideo] pause', { src: v.currentSrc || INTRO_SRC });
+                    }}
+                    onVolumeChange={(e) => {
+                      const v = e.currentTarget;
+                      console.info('[HeroVideo] volumechange', { muted: v.muted, volume: v.volume });
                     }}
                     onWaiting={(e) => {
                       const v = e.currentTarget;
