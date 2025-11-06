@@ -70,8 +70,64 @@ export default function Hero() {
                     playsInline
                     className="w-full h-full"
                     style={{ backgroundColor: '#000' }}
+                    // Debug: log playback lifecycle to diagnose issues with specific files
+                    onLoadedMetadata={(e) => {
+                      const v = e.currentTarget;
+                      console.info('[HeroVideo] loadedmetadata', {
+                        src: v.currentSrc || v.src,
+                        duration: v.duration,
+                        videoWidth: v.videoWidth,
+                        videoHeight: v.videoHeight,
+                      });
+                    }}
+                    onLoadedData={(e) => {
+                      const v = e.currentTarget;
+                      console.info('[HeroVideo] loadeddata', { src: v.currentSrc || v.src });
+                    }}
+                    onCanPlay={(e) => {
+                      const v = e.currentTarget;
+                      console.info('[HeroVideo] canplay', { src: v.currentSrc || v.src });
+                    }}
+                    onCanPlayThrough={(e) => {
+                      const v = e.currentTarget;
+                      console.info('[HeroVideo] canplaythrough', { src: v.currentSrc || v.src });
+                    }}
+                    onPlay={(e) => {
+                      const v = e.currentTarget;
+                      console.info('[HeroVideo] play', { src: v.currentSrc || v.src });
+                    }}
+                    onPause={(e) => {
+                      const v = e.currentTarget;
+                      console.info('[HeroVideo] pause', { src: v.currentSrc || v.src });
+                    }}
+                    onWaiting={(e) => {
+                      const v = e.currentTarget;
+                      console.warn('[HeroVideo] waiting', { src: v.currentSrc || v.src });
+                    }}
+                    onStalled={(e) => {
+                      const v = e.currentTarget;
+                      console.warn('[HeroVideo] stalled', { src: v.currentSrc || v.src });
+                    }}
+                    onError={(e) => {
+                      const v = e.currentTarget as HTMLVideoElement;
+                      const err = (v.error && {
+                        code: v.error.code,
+                        message:
+                          v.error.code === 1
+                            ? 'MEDIA_ERR_ABORTED'
+                            : v.error.code === 2
+                            ? 'MEDIA_ERR_NETWORK'
+                            : v.error.code === 3
+                            ? 'MEDIA_ERR_DECODE'
+                            : v.error.code === 4
+                            ? 'MEDIA_ERR_SRC_NOT_SUPPORTED'
+                            : 'UNKNOWN',
+                      }) || null;
+                      console.error('[HeroVideo] error', { src: v.currentSrc || v.src, error: err });
+                    }}
                   >
-                    <source src="/media/videos/vid03.mp4" type="video/mp4" />
+                    {/* Use the specified ivideo.mp4 for testing playback */}
+                    <source src="/media/videos/ivideo.mp4" type="video/mp4" />
                     Your browser does not support the video tag.
                   </video>
                 </div>
