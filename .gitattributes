@@ -1,3 +1,5 @@
 public/media/videos/*.MP4 filter=lfs diff=lfs merge=lfs -text
 public/media/videos/*.mp4 filter=lfs diff=lfs merge=lfs -text
 public/media/videos/intro.MP4 filter=lfs diff=lfs merge=lfs -text
+# Override: do NOT track ivideo.mp4 with Git LFS
+public/media/videos/ivideo.mp4 -filter -diff -merge -text
