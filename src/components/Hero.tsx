@@ -3,6 +3,7 @@ import { ArrowRight, Sparkles, Play } from "lucide-react";
 import heroNetwork from "@/assets/hero-network.jpg";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@/components/ui/visually-hidden";
+import { useEffect, useRef, useState } from "react";
 
 export default function Hero() {
   return (
@@ -53,7 +54,7 @@ export default function Hero() {
                 </Button>
               </DialogTrigger>
               {/* Overlay video player */}
-              <DialogContent className="max-w-3xl w-[90vw] sm:w-[800px] bg-black border-none p-4 shadow-2xl">
+              <DialogContent className="max-w-3xl w-[90vw] sm:w-[800px] bg-black border-none p-4 shadow-2xl" aria-describedby="video-description">
                 <VisuallyHidden>
                   <DialogTitle>Solairus Introduction Video</DialogTitle>
                 </VisuallyHidden>
@@ -62,74 +63,110 @@ export default function Hero() {
                 </VisuallyHidden>
                 {/* Purpose: Show intro video in an overlay. Inputs: none. Outputs: video playback UI. */}
                 <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
-                  <video
-                    controls
-                    autoPlay
-                    muted
-                    loop
-                    playsInline
-                    className="w-full h-full"
-                    style={{ backgroundColor: '#000' }}
-                    // Debug: log playback lifecycle to diagnose issues with specific files
-                    onLoadedMetadata={(e) => {
-                      const v = e.currentTarget;
-                      console.info('[HeroVideo] loadedmetadata', {
-                        src: v.currentSrc || v.src,
-                        duration: v.duration,
-                        videoWidth: v.videoWidth,
-                        videoHeight: v.videoHeight,
-                      });
-                    }}
-                    onLoadedData={(e) => {
-                      const v = e.currentTarget;
-                      console.info('[HeroVideo] loadeddata', { src: v.currentSrc || v.src });
-                    }}
-                    onCanPlay={(e) => {
-                      const v = e.currentTarget;
-                      console.info('[HeroVideo] canplay', { src: v.currentSrc || v.src });
-                    }}
-                    onCanPlayThrough={(e) => {
-                      const v = e.currentTarget;
-                      console.info('[HeroVideo] canplaythrough', { src: v.currentSrc || v.src });
-                    }}
-                    onPlay={(e) => {
-                      const v = e.currentTarget;
-                      console.info('[HeroVideo] play', { src: v.currentSrc || v.src });
-                    }}
-                    onPause={(e) => {
-                      const v = e.currentTarget;
-                      console.info('[HeroVideo] pause', { src: v.currentSrc || v.src });
-                    }}
-                    onWaiting={(e) => {
-                      const v = e.currentTarget;
-                      console.warn('[HeroVideo] waiting', { src: v.currentSrc || v.src });
-                    }}
-                    onStalled={(e) => {
-                      const v = e.currentTarget;
-                      console.warn('[HeroVideo] stalled', { src: v.currentSrc || v.src });
-                    }}
-                    onError={(e) => {
-                      const v = e.currentTarget as HTMLVideoElement;
-                      const err = (v.error && {
-                        code: v.error.code,
-                        message:
-                          v.error.code === 1
-                            ? 'MEDIA_ERR_ABORTED'
-                            : v.error.code === 2
-                            ? 'MEDIA_ERR_NETWORK'
-                            : v.error.code === 3
-                            ? 'MEDIA_ERR_DECODE'
-                            : v.error.code === 4
-                            ? 'MEDIA_ERR_SRC_NOT_SUPPORTED'
-                            : 'UNKNOWN',
-                      }) || null;
-                      console.error('[HeroVideo] error', { src: v.currentSrc || v.src, error: err });
-                    }}
-                  >
-                    {/* Use the specified ivideo.mp4 for testing playback */}
-                    <source src="/media/videos/ivideo.mp4" type="video/mp4" />
-                    Your browser does not support the video tag.
-                  </video>
+                  {/**
+                   * Playback sources with fallback strategy.
+                   * If ivideo.mp4 404s or fails to decode in production, switch to a known-good video.
+                   */}
+                  {(() => {
+                    const FALLBACKS = [
+                      "/media/videos/ivideo.mp4",
+                      "/media/videos/vid03.mp4",
+                    ];
+                    const videoRef = useRef<HTMLVideoElement | null>(null);
+                    const [currentVideo, setCurrentVideo] = useState<string>(FALLBACKS[0]);
+
+                    useEffect(() => {
+                      const v = videoRef.current;
+                      if (!v) return;
+                      try {
+                        v.load();
+                        const p = v.play();
+                        if (p && typeof p.then === "function") {
+                          p.catch(() => {});
+                        }
+                      } catch {}
+                    }, [currentVideo]);
+
+                    return (
+                      <video
+                        ref={videoRef}
+                        controls
+                        autoPlay
+                        muted
+                        loop
+                        playsInline
+                        className="w-full h-full"
+                        style={{ backgroundColor: '#000' }}
+                        // Debug: log playback lifecycle to diagnose issues with specific files
+                        onLoadedMetadata={(e) => {
+                          const v = e.currentTarget;
+                          console.info('[HeroVideo] loadedmetadata', {
+                            src: v.currentSrc || currentVideo,
+                            duration: v.duration,
+                            videoWidth: v.videoWidth,
+                            videoHeight: v.videoHeight,
+                          });
+                        }}
+                        onLoadedData={(e) => {
+                          const v = e.currentTarget;
+                          console.info('[HeroVideo] loadeddata', { src: v.currentSrc || currentVideo });
+                        }}
+                        onCanPlay={(e) => {
+                          const v = e.currentTarget;
+                          console.info('[HeroVideo] canplay', { src: v.currentSrc || currentVideo });
+                        }}
+                        onCanPlayThrough={(e) => {
+                          const v = e.currentTarget;
+                          console.info('[HeroVideo] canplaythrough', { src: v.currentSrc || currentVideo });
+                        }}
+                        onPlay={(e) => {
+                          const v = e.currentTarget;
+                          console.info('[HeroVideo] play', { src: v.currentSrc || currentVideo });
+                        }}
+                        onPause={(e) => {
+                          const v = e.currentTarget;
+                          console.info('[HeroVideo] pause', { src: v.currentSrc || currentVideo });
+                        }}
+                        onWaiting={(e) => {
+                          const v = e.currentTarget;
+                          console.warn('[HeroVideo] waiting', { src: v.currentSrc || currentVideo });
+                        }}
+                        onStalled={(e) => {
+                          const v = e.currentTarget;
+                          console.warn('[HeroVideo] stalled', { src: v.currentSrc || currentVideo });
+                        }}
+                        onError={(e) => {
+                          const v = e.currentTarget as HTMLVideoElement;
+                          const err = (v.error && {
+                            code: v.error.code,
+                            message:
+                              v.error.code === 1
+                                ? 'MEDIA_ERR_ABORTED'
+                                : v.error.code === 2
+                                ? 'MEDIA_ERR_NETWORK'
+                                : v.error.code === 3
+                                ? 'MEDIA_ERR_DECODE'
+                                : v.error.code === 4
+                                ? 'MEDIA_ERR_SRC_NOT_SUPPORTED'
+                                : 'UNKNOWN',
+                          }) || null;
+                          console.error('[HeroVideo] error', { src: v.currentSrc || currentVideo, error: err });
+
+                          // Fallback: switch to the next source if available
+                          const idx = FALLBACKS.indexOf(currentVideo);
+                          if (idx !== -1 && idx + 1 < FALLBACKS.length) {
+                            const next = FALLBACKS[idx + 1];
+                            console.warn('[HeroVideo] switching to fallback source', { next });
+                            setCurrentVideo(next);
+                          }
+                        }}
+                      >
+                        {/* Current source; React re-renders on state change */}
+                        <source src={currentVideo} type="video/mp4" />
+                        Your browser does not support the video tag.
+                      </video>
+                    );
+                  })()}
                 </div>
               </DialogContent>
             </Dialog>
