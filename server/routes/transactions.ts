@@ -16,6 +16,33 @@ import solairusPayIdl from '../idl/solairus_pay.json'
 import { getConnection } from '../lib/rpc-manager'
 import { attemptExpiredWithdrawalRefund } from '../services/withdrawal_refund'
 
+/**
+ * Resolve mainnet RPC URL using the same logic as scripts/find-payment-event.mjs
+ * Always uses mainnet endpoints regardless of SOLANA_CLUSTER setting
+ */
+function resolveMainnetRpcUrl(): string {
+  const RPC_ENV_KEYS = [
+    'SOLANA_RPC_URL_MAINNET',
+    'SOLANA_RPC_URL_MAINNET_2',
+    'SOLANA_RPC_URL_MAINNET_3',
+    'SOLANA_RPC_URL_MAINNET_4',
+    'SOLANA_RPC_URL_MAINNET_5',
+    'VITE_SOLANA_RPC_URL_MAINNET',
+    'VITE_SOLANA_RPC_URL_MAINNET_2',
+    'VITE_SOLANA_RPC_URL_MAINNET_3',
+    'VITE_SOLANA_RPC_URL_MAINNET_4',
+    'VITE_SOLANA_RPC_URL_MAINNET_5',
+  ];
+
+  for (const key of RPC_ENV_KEYS) {
+    const value = process.env[key];
+    if (value) {
+      return value.endsWith('/') ? value : `${value}/`;
+    }
+  }
+  throw new Error('No mainnet RPC endpoint provided. Set SOLANA_RPC_URL_MAINNET or similar environment variable.');
+}
+
 const router = Router()
 
 // Zod schemas for input validation
@@ -429,17 +456,51 @@ async function lastConfirmedHandler(req: Request, res: Response) {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
 
   const { initiatorWallet } = parsed.data
+  const connection = new Connection(resolveMainnetRpcUrl(), 'confirmed')
+  const solairusPayProgramId =
+    process.env.SOLAIRUS_PAY_PROGRAM_ID ?? (solairusPayIdl as { address?: string }).address ?? ''
+
   const sql = `
     SELECT * FROM transactions
     WHERE type = $1 AND initiator_wallet = $2
       AND (status = $3 OR status = $4)
-    ORDER BY 
+    ORDER BY
       CASE WHEN status = $3 THEN 0 ELSE 1 END,
       id DESC
     LIMIT 1
   `
   const { rows } = await query<Transaction>(sql, ['license_activation', initiatorWallet, 'confirmed', 'pending'])
-  const record = rows[0] ?? null
+  let record = rows[0] ?? null
+
+  if (
+    record &&
+    record.type === 'license_activation' &&
+    record.order_id &&
+    !record.signature &&
+    solairusPayProgramId
+  ) {
+    try {
+      const payerKey = new PublicKey(initiatorWallet)
+      const found = await findSignatureByPaymentEvent(connection, record.order_id, payerKey, solairusPayProgramId)
+      if (found) {
+        const metaPatch = {
+          recoveredVia: 'order_id',
+          eventSlot: found.slot,
+          payer: found.event.payer?.toBase58(),
+          recipient: found.event.recipient?.toBase58(),
+          memo: found.event.memo,
+        }
+        const upd = await query<Transaction>(
+          'UPDATE transactions SET signature = COALESCE(signature, $1), metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
+          [found.signature, JSON.stringify(metaPatch), record.id]
+        )
+        record = upd.rows[0] ?? record
+      }
+    } catch (err) {
+      console.warn('Failed to resolve signature during last-confirmed lookup:', err)
+    }
+  }
+
   return res.json({ record })
 }
 
@@ -470,7 +531,7 @@ async function findSignatureByPaymentEvent(
   const coder = new BorshCoder(solairusPayIdl as Idl)
   const parser = new EventParser(new PublicKey(solairusPayProgramId), coder)
 
-  const signatures = await connection.getSignaturesForAddress(payerPublicKey, { limit: 200 })
+  const signatures = await connection.getSignaturesForAddress(payerPublicKey, { limit: 100 })
 
   for (const sig of signatures) {
     try {
@@ -562,7 +623,7 @@ async function reapplyLicenseHandler(req: Request, res: Response) {
   if (record.type !== 'license_activation') return res.status(400).json({ error: 'Invalid transaction type' })
   
   // Allow both confirmed and pending transactions (pending may have been paid on-chain)
-  const connection = getConnection()
+  const connection = new Connection(resolveMainnetRpcUrl(), 'confirmed')
   const solairusPayProgramId =
     process.env.SOLAIRUS_PAY_PROGRAM_ID ??
     (solairusPayIdl as { address?: string }).address ??
