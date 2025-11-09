@@ -11,7 +11,7 @@ import { Transaction, TransactionStatus, TransactionType } from '../types'
 import { z } from 'zod'
 import { Connection, PublicKey, ParsedInstruction, PartiallyDecodedInstruction } from '@solana/web3.js'
 import { BorshCoder, EventParser, Idl, utils } from '@coral-xyz/anchor'
-import solairusPayIdl from '../../idl/solairus_pay.json'
+import solairusPayIdl from '../idl/solairus_pay.json'
 import { getConnection } from '../lib/rpc-manager'
 import { attemptExpiredWithdrawalRefund } from '../services/withdrawal_refund'
 
