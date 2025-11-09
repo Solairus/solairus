@@ -29,6 +29,12 @@ const TransactionCreateSchema = z.object({
 })
 
 const TransactionVerifySchema = z.object({ signature: z.string().min(32).max(128) })
+const LicenseActivationSignatureSchema = z.object({
+  type: z.literal('license_activation'),
+  orderId: z.string().uuid(),
+  signature: z.string().min(32).max(128),
+  metadata: z.record(z.string(), z.any()).optional(),
+})
 
 /**
  * Helper to map zod input to DB column names.
@@ -123,6 +129,51 @@ async function verifyOnChainMatchesRecord(
         ok: false,
         reason: `Mismatch: amountOk=${amountOk}, decimalsOk=${decimalsOk}, recipientOk=${recipientOk}, foundMint=${foundMint}, referenceOk=${referenceOk}`,
       }
+}
+
+function metadataToObject(meta: unknown): Record<string, unknown> {
+  if (!meta || typeof meta !== 'object') return {}
+  return meta as Record<string, unknown>
+}
+
+async function verifyAndApplyLicenseRecord(
+  connection: Connection,
+  record: Transaction
+): Promise<{ record: Transaction; verified: boolean; reason?: string }> {
+  if (!record.signature) {
+    return { record, verified: false, reason: 'Signature missing' }
+  }
+
+  const statusResp = await connection.getSignatureStatuses([record.signature], { searchTransactionHistory: true })
+  const status = statusResp.value[0]
+  const isConfirmed = status && !status.err && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')
+
+  if (!isConfirmed) {
+    await query<Transaction>('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
+      JSON.stringify({ phase: 'signature_recorded', verified: false }),
+      record.id,
+    ])
+    return { record, verified: false, reason: 'Signature not confirmed' }
+  }
+
+  const match = await verifyOnChainMatchesRecord(connection, record)
+  const dbStatus: TransactionStatus = match.ok ? 'confirmed' : 'failed'
+  const metaUpdate = match.ok
+    ? { phase: 'verifying_complete', verified: true, failureReason: null }
+    : { phase: 'verification_failed', verified: false, failureReason: match.reason ?? 'Verification mismatch' }
+  const update = await query<Transaction>(
+    'UPDATE transactions SET status = $1, metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
+    [dbStatus, JSON.stringify(metaUpdate), record.id]
+  )
+  record = update.rows[0]
+
+  if (record.status === 'confirmed') {
+    await applyPostConfirmation(record)
+    const refreshed = await query<Transaction>('SELECT * FROM transactions WHERE id = $1', [record.id])
+    record = refreshed.rows[0] ?? record
+  }
+
+  return { record, verified: match.ok, reason: match.reason }
 }
 
 /**
@@ -613,9 +664,41 @@ router.get('/transactions/:orderId([0-9a-fA-F-]{36})', async (req: Request, res:
 
 // Specialized handler: create or resume license activation and pre-verify on-chain
 async function createOrResumeLicenseActivationHandler(req: Request, res: Response) {
+  const isSignatureUpdate = typeof req.body.orderId === 'string'
+  if (isSignatureUpdate) {
+    const signatureParsed = LicenseActivationSignatureSchema.safeParse(req.body)
+    if (!signatureParsed.success) return res.status(400).json({ error: signatureParsed.error.flatten() })
+    const { orderId, signature, metadata } = signatureParsed.data
+
+    const { rows } = await query<Transaction>('SELECT * FROM transactions WHERE order_id = $1 LIMIT 1', [orderId])
+    if (!rows.length) return res.status(404).json({ error: 'Activation order not found' })
+    let record = rows[0]
+    if (record.type !== 'license_activation') return res.status(400).json({ error: 'Invalid transaction type' })
+
+    const connection = getConnection()
+    const metaBase = metadataToObject(record.metadata)
+    const metaPayload = JSON.stringify({ ...metaBase, ...(metadata ?? {}), phase: 'signature_recorded' })
+
+    if (record.signature !== signature) {
+      const update = await query<Transaction>(
+        'UPDATE transactions SET signature = $1, metadata = $2::jsonb WHERE id = $3 RETURNING *',
+        [signature, metaPayload, record.id]
+      )
+      record = update.rows[0] ?? record
+    } else if (metadata) {
+      const updateMeta = await query<Transaction>(
+        'UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2 RETURNING *',
+        [JSON.stringify(metadata), record.id]
+      )
+      record = updateMeta.rows[0] ?? record
+    }
+
+    const result = await verifyAndApplyLicenseRecord(connection, record)
+    return res.status(200).json({ resumed: true, updated: true, verified: result.verified, reason: result.reason, record: result.record })
+  }
+
   const parsed = TransactionCreateSchema.safeParse(req.body)
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
-  // Enforce license_activation only
   if (parsed.data.type !== 'license_activation') {
     return res.status(400).json({ error: 'Invalid transaction type for this endpoint' })
   }
@@ -678,17 +761,12 @@ async function createOrResumeLicenseActivationHandler(req: Request, res: Respons
 
     // If we have a signature, try to auto-verify and activate
     if (record.signature) {
-      const statusResp = await connection.getSignatureStatuses([record.signature], { searchTransactionHistory: true })
-      const status = statusResp.value[0]
-      const isConfirmed = status && !status.err && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')
-
-      if (isConfirmed) {
-        const match = await verifyOnChainMatchesRecord(connection, record)
-        const dbStatus: TransactionStatus = match.ok ? 'confirmed' : 'failed'
-        const update = await query<Transaction>('UPDATE transactions SET status = $1 WHERE id = $2 RETURNING *', [dbStatus, record.id])
-        record = update.rows[0]
-        if (record.status === 'confirmed') await applyPostConfirmation(record)
-        return res.status(200).json({ resumed: true, autoverified: match.ok, reason: match.reason, record })
+      const result = await verifyAndApplyLicenseRecord(connection, record)
+      if (result.verified) {
+        return res.status(200).json({ resumed: true, autoverified: true, record: result.record })
+      }
+      if (result.reason) {
+        return res.status(200).json({ resumed: true, autoverified: false, reason: result.reason, record: result.record })
       }
     }
 
@@ -729,33 +807,13 @@ async function createOrResumeLicenseActivationHandler(req: Request, res: Respons
   let record = rows[0]
 
   if (record.signature) {
-    // Mark phase as verifying during on-chain check
     await query<Transaction>('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
       { phase: 'verifying' },
       record.id,
     ])
-    const statusResp = await connection.getSignatureStatuses([record.signature], { searchTransactionHistory: true })
-    const status = statusResp.value[0]
-    const isConfirmed = status && !status.err && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')
-
-    if (isConfirmed) {
-      const match = await verifyOnChainMatchesRecord(connection, record)
-      const dbStatus: TransactionStatus = match.ok ? 'confirmed' : 'failed'
-      const update = await query<Transaction>(
-        'UPDATE transactions SET status = $1, metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
-        [dbStatus, match.ok ? {} : { failureReason: match.reason ?? 'Verification mismatch' }, record.id]
-      )
-      record = update.rows[0]
-      if (record.status === 'confirmed') await applyPostConfirmation(record)
-      return res.status(201).json({ autoverified: match.ok, reason: match.reason, record })
-    } else {
-      const update = await query<Transaction>(
-        'UPDATE transactions SET status = $1, metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
-        ['failed', { failureReason: 'Signature not confirmed' }, record.id]
-      )
-      record = update.rows[0]
-      return res.status(201).json({ autoverified: false, reason: 'Signature not confirmed', record })
-    }
+    const result = await verifyAndApplyLicenseRecord(connection, record)
+    const statusCode = result.verified ? 201 : 202
+    return res.status(statusCode).json({ autoverified: result.verified, reason: result.reason, record: result.record })
   }
 
   return res.status(201).json(record)

@@ -99,7 +99,7 @@ export class SolairusPayService {
     // Idempotently ensure ATAs exist before RPC to avoid AccountNotInitialized
     const provider = this.program.provider as anchor.AnchorProvider;
     const { ata: payerAta } = await ensureAtaExists(provider, payer, payer, mint);
-    const { ata: vaultAta } = await ensureAtaExists(provider, payer, vaultAuthority, mint);
+    const vaultAta = vaultAtaDerived;
 
     const args = {
       recipient,

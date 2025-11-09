@@ -36,12 +36,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
   const { executeWithRetry } = useAgentRetryMechanism('withdrawal');
   
   // Live ROI tracking (updates every minute)
-  const { liveRoi } = useLiveRoi(
-    connection, 
-    agent.pda ? agent.accountData.user : undefined, 
-    agent.activationId,
-    60000 // Update every minute
-  );
+  const { liveRoi } = useLiveRoi();
 
   // Handle ROI withdrawal with enhanced error handling and retry logic
   const handleWithdraw = async () => {

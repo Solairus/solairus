@@ -1,21 +1,12 @@
-import * as anchor from "@coral-xyz/anchor";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { 
-  PROGRAM_ID, 
-  UserAgentActivation, 
-  AgentTier,
-  getAgentTierConfig,
-  canWithdrawRoi,
-  calculateYieldCapProgress
-} from "@/lib/solairus-removed";
-import { handleRpcError, getHealthyRpcConnection } from "@/utils/rpc-switcher";
-import { getAgentServiceConfig } from "@/config/agent-config";
-import { getContractSecondsPerDay } from "./contract-timing-service";
+import { fetchUserAgentActivations, type BackendAgentActivation } from "./agent-backend";
+import { calculateNextWithdrawalTime } from "./contract-timing-service";
 
-// Agent data formatted for frontend consumption
+type TierName = "NOVA" | "VEGA" | "ORION" | "PRIME" | string;
+
 export interface AgentData {
   activationId: number;
-  tier: AgentTier;
+  tier: TierName;
   tierConfig: {
     name: string;
     emoji: string;
@@ -23,29 +14,28 @@ export interface AgentData {
     dailyRange: string;
     yieldCapPct: number;
   };
-  activationAmount: number; // In USDT (converted from smallest unit)
+  activationAmount: number;
   activatedAt: Date;
   lastRoiWithdrawal: Date | null;
-  totalRoiWithdrawn: number; // In USDT (converted from smallest unit)
+  totalRoiWithdrawn: number;
   yieldCapReached: boolean;
-  yieldCapProgress: number; // Percentage (0-100)
+  yieldCapProgress: number;
   canWithdraw: boolean;
   nextWithdrawalAt: Date | null;
   withdrawalStatus: {
     canWithdraw: boolean;
     reason?: string;
-    nextWithdrawalAt?: Date;
+    nextWithdrawalAt?: Date | null;
   };
-  // Raw PDA and account data for transactions
-  pda: PublicKey;
-  accountData: UserAgentActivation;
+  pda: PublicKey | null;
+  accountData: Record<string, unknown> | null;
 }
 
 export interface GetUserAgentsOptions {
   limit?: number;
   offset?: number;
-  sortBy?: 'activatedAt' | 'tier' | 'activationAmount';
-  sortOrder?: 'asc' | 'desc';
+  sortBy?: "activatedAt" | "tier" | "activationAmount";
+  sortOrder?: "asc" | "desc";
 }
 
 export interface GetUserAgentsResult {
@@ -54,258 +44,191 @@ export interface GetUserAgentsResult {
   hasMore: boolean;
 }
 
-/**
- * Query all UserAgentActivation PDAs for a specific user
- * Uses memcmp filter on user field for efficient querying
- */
+const UI_TIER_CONFIGS: Record<string, AgentData["tierConfig"]> = {
+  NOVA: {
+    name: "NOVA",
+    emoji: "🪶",
+    description: "Entry tier with stable daily yields",
+    dailyRange: "1.25% - 1.75%",
+    yieldCapPct: 200,
+  },
+  VEGA: {
+    name: "VEGA",
+    emoji: "🔮",
+    description: "Balanced risk and return",
+    dailyRange: "1.75% - 2.15%",
+    yieldCapPct: 200,
+  },
+  ORION: {
+    name: "ORION",
+    emoji: "⚡",
+    description: "Higher yields with moderate risk",
+    dailyRange: "2.15% - 2.75%",
+    yieldCapPct: 200,
+  },
+  PRIME: {
+    name: "PRIME",
+    emoji: "🧠",
+    description: "Elite tier with top yields",
+    dailyRange: "2.75% - 3.25%",
+    yieldCapPct: 200,
+  },
+};
+
+function resolveTierConfig(tierName: string | null | undefined): AgentData["tierConfig"] {
+  if (!tierName) return UI_TIER_CONFIGS.NOVA;
+  return UI_TIER_CONFIGS[tierName.toUpperCase()] ?? { ...UI_TIER_CONFIGS.NOVA, name: tierName.toUpperCase() };
+}
+
+function resolveConnection(connection: Connection | { connection?: Connection } | null | undefined): Connection | null {
+  if (!connection) return null;
+  if (connection instanceof Connection) return connection;
+  if ("connection" in connection && connection.connection instanceof Connection) {
+    return connection.connection;
+  }
+  return null;
+}
+
+async function mapBackendAgentToAgentData(
+  row: BackendAgentActivation,
+  connection: Connection | null
+): Promise<AgentData> {
+  const rawTierName = row.metadata?.tier_name;
+  const tierName = typeof rawTierName === "string" ? rawTierName : undefined;
+  const tierConfig = resolveTierConfig(tierName);
+  const activationAmount = typeof row.amount === "number" ? row.amount : Number(row.amount ?? 0);
+  const totalRoiWithdrawn = typeof row.total_earned === "number" ? row.total_earned : Number(row.total_earned ?? 0);
+  const capBp = row.reward_cap_bp ?? 20000;
+  const capPct = capBp / 100;
+
+  const rawProgress = activationAmount > 0 ? (totalRoiWithdrawn / activationAmount) * 100 : 0;
+  const yieldCapProgress = Math.min(row.yield_cap_progress_pct ?? rawProgress, capPct);
+  const yieldCapReached = row.yield_cap_reached ?? yieldCapProgress >= capPct;
+
+  const activatedAtIso = row.activated_at ?? row.created_at;
+  const activatedAt = activatedAtIso ? new Date(activatedAtIso) : new Date();
+
+  const nextWithdrawalAt =
+    connection && activationAmount > 0
+      ? await calculateNextWithdrawalTime(connection, activatedAt, undefined)
+      : null;
+
+  const canWithdraw = !yieldCapReached && !nextWithdrawalAt && activationAmount > 0;
+
+  return {
+    activationId: row.id,
+    tier: tierConfig.name,
+    tierConfig: {
+      ...tierConfig,
+      yieldCapPct: capPct || tierConfig.yieldCapPct,
+    },
+    activationAmount,
+    activatedAt,
+    lastRoiWithdrawal: null,
+    totalRoiWithdrawn,
+    yieldCapReached,
+    yieldCapProgress,
+    canWithdraw,
+    nextWithdrawalAt: nextWithdrawalAt ?? null,
+    withdrawalStatus: {
+      canWithdraw,
+      nextWithdrawalAt: nextWithdrawalAt ?? null,
+      reason: canWithdraw ? undefined : yieldCapReached ? "Yield cap reached" : undefined,
+    },
+    pda: null,
+    accountData: {
+      id: row.id,
+      tier: tierConfig.name,
+      metadata: row.metadata,
+    },
+  };
+}
+
 export async function getUserAgents(
-  connection: Connection,
+  connection: Connection | { connection?: Connection },
   userPublicKey: PublicKey,
   options: GetUserAgentsOptions = {}
 ): Promise<GetUserAgentsResult> {
-  try {
-    console.log('🔍 Querying agents for user:', userPublicKey.toString());
-    
-    const serviceConfig = getAgentServiceConfig();
-    const {
-      limit = serviceConfig.defaultPageSize,
-      offset = 0,
-      sortBy = 'activatedAt',
-      sortOrder = 'desc'
-    } = options;
+  const { limit = 1000, offset = 0, sortBy = "activatedAt", sortOrder = "desc" } = options;
 
-    // Query all UserAgentActivation PDAs for the user using memcmp filter
-    // If this RPC fails, the error will bubble up and the UI can handle it
-    const agentAccounts = await connection.getProgramAccounts(PROGRAM_ID, {
-      filters: [
-        {
-          // Filter by account size (8 bytes discriminator + UserAgentActivation::SIZE)
-          dataSize: 8 + 76 // 8 + UserAgentActivation::SIZE from contract
-        },
-        {
-          // memcmp filter on user field (first field after discriminator)
-          memcmp: {
-            offset: 8, // Skip 8-byte discriminator
-            bytes: userPublicKey.toBase58()
-          }
-        }
-      ]
-    });
+  const backendRows = await fetchUserAgentActivations(userPublicKey.toBase58());
+  const resolvedConnection = resolveConnection(connection);
 
-    console.log(`✅ Found ${agentAccounts.length} agent accounts for user`);
+  const mappedAgents = await Promise.all(
+    backendRows.map((row) => mapBackendAgentToAgentData(row, resolvedConnection))
+  );
 
-    // Get contract timing once for all agents (performance optimization)
-    const secondsPerDay = await getContractSecondsPerDay(connection);
-    console.log(`🕒 Using contract timing: ${secondsPerDay} seconds per day`);
-
-    // Parse and format agent data
-    const agents: AgentData[] = [];
-    
-    for (const accountInfo of agentAccounts) {
-      try {
-        // Deserialize the account data
-        const accountData = parseUserAgentActivation(accountInfo.account.data);
-        
-        // Get tier configuration
-        const tierConfig = getAgentTierConfig(accountData.tier as AgentTier);
-        
-        // Calculate yield cap progress
-        const yieldCapProgress = calculateYieldCapProgress(
-          accountData.tier,
-          accountData.amountUsdt,
-          accountData.totalRoiWithdrawn
-        );
-
-        // Check withdrawal status with contract timing
-        const withdrawalStatus = canWithdrawRoi(accountData, Math.floor(Date.now() / 1000), secondsPerDay);
-
-        // Format agent data for frontend
-        const agentData: AgentData = {
-          activationId: accountData.activationId.toNumber(),
-          tier: accountData.tier as AgentTier,
-          tierConfig: {
-            name: tierConfig.name,
-            emoji: tierConfig.emoji,
-            description: tierConfig.description,
-            dailyRange: tierConfig.dailyRange,
-            yieldCapPct: tierConfig.yieldCapPct
-          },
-          activationAmount: accountData.amountUsdt.toNumber() / 1_000_000, // Convert from smallest unit to USDT
-          activatedAt: new Date(accountData.startedAt.toNumber() * 1000),
-          lastRoiWithdrawal: accountData.lastRoiWithdrawAt.eq(new anchor.BN(0)) 
-            ? null 
-            : new Date(accountData.lastRoiWithdrawAt.toNumber() * 1000),
-          totalRoiWithdrawn: accountData.totalRoiWithdrawn.toNumber() / 1_000_000, // Convert from smallest unit to USDT
-          yieldCapReached: accountData.yieldCapReached,
-          yieldCapProgress,
-          canWithdraw: withdrawalStatus.canWithdraw,
-          nextWithdrawalAt: withdrawalStatus.nextWithdrawalAt || null,
-          withdrawalStatus,
-          pda: accountInfo.pubkey,
-          accountData
-        };
-
-        agents.push(agentData);
-      } catch (error) {
-        console.warn('⚠️ Failed to parse agent account:', accountInfo.pubkey.toString(), error);
-        // Continue processing other accounts
-      }
-    }
-
-    // Sort agents based on options
-    agents.sort((a, b) => {
+  mappedAgents.sort((a, b) => {
       let comparison = 0;
-      
       switch (sortBy) {
-        case 'activatedAt':
+      case "activatedAt":
           comparison = a.activatedAt.getTime() - b.activatedAt.getTime();
           break;
-        case 'tier':
-          comparison = a.tier - b.tier;
+      case "tier":
+        comparison = String(a.tier).localeCompare(String(b.tier));
           break;
-        case 'activationAmount':
+      case "activationAmount":
           comparison = a.activationAmount - b.activationAmount;
           break;
         default:
           comparison = a.activatedAt.getTime() - b.activatedAt.getTime();
       }
-      
-      return sortOrder === 'desc' ? -comparison : comparison;
+    return sortOrder === "desc" ? -comparison : comparison;
     });
 
-    // Apply pagination
-    const totalCount = agents.length;
-    const paginatedAgents = agents.slice(offset, offset + limit);
+  const totalCount = mappedAgents.length;
+  const sliced = mappedAgents.slice(offset, offset + limit);
     const hasMore = offset + limit < totalCount;
 
-    console.log(`✅ Returning ${paginatedAgents.length} agents (${offset}-${offset + limit} of ${totalCount})`);
-
     return {
-      agents: paginatedAgents,
+    agents: sliced,
       totalCount,
-      hasMore
-    };
-
-  } catch (error) {
-    console.error('❌ Error querying user agents:', error);
-    throw new Error(`Failed to query user agents: ${error instanceof Error ? error.message : String(error)}`);
-  }
+    hasMore,
+  };
 }
 
-/**
- * Parse UserAgentActivation account data from raw bytes
- */
-function parseUserAgentActivation(data: Buffer): UserAgentActivation {
-  try {
-    // Skip 8-byte discriminator
-    let offset = 8;
-    
-    // Parse fields according to UserAgentActivation struct layout
-    const user = new PublicKey(data.slice(offset, offset + 32));
-    offset += 32;
-    
-    const activationId = new anchor.BN(data.slice(offset, offset + 8), 'le');
-    offset += 8;
-    
-    const tier = data.readUInt8(offset);
-    offset += 1;
-    
-    const usingUsdt = data.readUInt8(offset) !== 0;
-    offset += 1;
-    
-    const amountUsdt = new anchor.BN(data.slice(offset, offset + 8), 'le');
-    offset += 8;
-    
-    const startedAt = new anchor.BN(data.slice(offset, offset + 8), 'le');
-    offset += 8;
-    
-    const lastRoiWithdrawAt = new anchor.BN(data.slice(offset, offset + 8), 'le');
-    offset += 8;
-    
-    const totalRoiWithdrawn = new anchor.BN(data.slice(offset, offset + 8), 'le');
-    offset += 8;
-    
-    const yieldCapReached = data.readUInt8(offset) !== 0;
-    offset += 1;
-    
-    const bump = data.readUInt8(offset);
-    
-    return {
-      user,
-      activationId,
-      tier,
-      usingUsdt,
-      amountUsdt,
-      startedAt,
-      lastRoiWithdrawAt,
-      totalRoiWithdrawn,
-      yieldCapReached,
-      bump
-    };
-  } catch (error) {
-    throw new Error(`Failed to parse UserAgentActivation data: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-/**
- * Get a single agent by activation ID
- */
 export async function getUserAgent(
-  connection: Connection,
+  connection: Connection | { connection?: Connection },
   userPublicKey: PublicKey,
   activationId: number
 ): Promise<AgentData | null> {
-  try {
-    const result = await getUserAgents(connection, userPublicKey);
-    return result.agents.find(agent => agent.activationId === activationId) || null;
-  } catch (error) {
-    console.error('❌ Error getting user agent:', error);
-    return null;
-  }
+  const result = await getUserAgents(connection, userPublicKey, { limit: 1000, offset: 0 });
+  return result.agents.find((agent) => agent.activationId === activationId) ?? null;
 }
 
-/**
- * Get agent statistics for a user
- */
 export interface AgentStatistics {
   totalAgents: number;
   activeAgents: number;
   retiredAgents: number;
-  totalInvested: number; // In USDT
-  totalWithdrawn: number; // In USDT
-  averageYieldProgress: number; // Percentage
-  agentsByTier: Record<AgentTier, number>;
+  totalInvested: number;
+  totalWithdrawn: number;
+  averageYieldProgress: number;
+  agentsByTier: Record<TierName, number>;
 }
 
 export async function getUserAgentStatistics(
-  connection: Connection,
+  connection: Connection | { connection?: Connection },
   userPublicKey: PublicKey
 ): Promise<AgentStatistics> {
-  try {
-    const result = await getUserAgents(connection, userPublicKey);
-    const agents = result.agents;
-    
+  const { agents } = await getUserAgents(connection, userPublicKey);
     const totalAgents = agents.length;
-    const activeAgents = agents.filter(agent => !agent.yieldCapReached).length;
-    const retiredAgents = agents.filter(agent => agent.yieldCapReached).length;
+  const activeAgents = agents.filter((agent) => !agent.yieldCapReached).length;
+  const retiredAgents = totalAgents - activeAgents;
     
     const totalInvested = agents.reduce((sum, agent) => sum + agent.activationAmount, 0);
     const totalWithdrawn = agents.reduce((sum, agent) => sum + agent.totalRoiWithdrawn, 0);
-    
-    const averageYieldProgress = totalAgents > 0 
-      ? agents.reduce((sum, agent) => sum + agent.yieldCapProgress, 0) / totalAgents 
-      : 0;
-    
-    const agentsByTier: Record<AgentTier, number> = {
-      [AgentTier.NOVA]: 0,
-      [AgentTier.VEGA]: 0,
-      [AgentTier.ORION]: 0,
-      [AgentTier.PRIME]: 0
-    };
-    
-    agents.forEach(agent => {
-      agentsByTier[agent.tier]++;
-    });
+  const averageYieldProgress = totalAgents > 0 ? agents.reduce((sum, agent) => sum + agent.yieldCapProgress, 0) / totalAgents : 0;
+
+  const baseTiers: Record<TierName, number> = {
+    NOVA: 0,
+    VEGA: 0,
+    ORION: 0,
+    PRIME: 0,
+  };
+  const agentsByTier = agents.reduce<Record<TierName, number>>((acc, agent) => {
+    acc[agent.tier] = (acc[agent.tier] ?? 0) + 1;
+    return acc;
+  }, { ...baseTiers });
     
     return {
       totalAgents,
@@ -314,10 +237,6 @@ export async function getUserAgentStatistics(
       totalInvested,
       totalWithdrawn,
       averageYieldProgress,
-      agentsByTier
+    agentsByTier,
     };
-  } catch (error) {
-    console.error('❌ Error getting agent statistics:', error);
-    throw error;
-  }
 }

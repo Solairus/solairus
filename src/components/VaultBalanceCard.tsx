@@ -5,12 +5,9 @@ import { useWallet } from "@/contexts/wallet-context";
 import { useAuth } from "@/contexts/auth-context";
 import { useLicense } from "@/contexts/license-context";
 import { getUserAgents } from "@/services/agent/agent-service";
-import { getLiveRoi } from "@/services/agent/live-roi-service";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { getProgram, derivePdas, UserProfile } from "@/lib/solairus-removed";
-import { PublicKey } from "@solana/web3.js";
-import * as anchor from "@coral-xyz/anchor";
 import Swal from "sweetalert2";
+import { fetchGlobalPnlSummary } from "@/services/agent/pnl-backend";
 
 type VaultBalanceCardProps = {
   walletTag?: string;
@@ -61,14 +58,6 @@ export default function VaultBalanceCard({
     return networkLabel === "Mainnet" ? "text-green-400" : networkLabel === "Testnet" ? "text-orange-400" : "text-cyan-400";
   }, [networkLabel]);
 
-  // Helper function to format USDT amounts safely
-  const formatUsdt = (amount: anchor.BN) => {
-    const amountStr = amount.toString();
-    const wholePart = amountStr.slice(0, -6) || '0';
-    const decimalPart = amountStr.slice(-6).padStart(6, '0');
-    return parseFloat(`${wholePart}.${decimalPart.slice(0, 2)}`);
-  };
-
   // Read bonus balance from auth user (micro-USDT -> display USD)
   const bonusBalance = useMemo(() => {
     const micro = user?.bonus_balance_micro ? Number(user.bonus_balance_micro) : 0;
@@ -77,7 +66,7 @@ export default function VaultBalanceCard({
 
   // Fetch total claimable amount from all active agents + affiliate commission
   const fetchTotalClaimable = useCallback(async () => {
-    if (!publicKey || !provider) {
+    if (!publicKey) {
       setTotalClaimable(0);
       setAffiliateCommission(0);
       setHasActiveAgents(false);
@@ -86,60 +75,21 @@ export default function VaultBalanceCard({
 
     setIsRefreshing(true);
     try {
-      // Get all user agents
-      const result = await getUserAgents(provider, publicKey);
-      const activeAgents = result.agents.filter(agent => !agent.yieldCapReached);
-      
-      setHasActiveAgents(activeAgents.length > 0);
-      
-      // Calculate total claimable from all active agents
-      let totalClaimableAmount = 0;
-      
-      console.log('🔍 Calculating claimable for', activeAgents.length, 'active agents');
-      
-      for (const agent of activeAgents) {
-        try {
-          console.log('📊 Processing agent:', agent.activationId, 'canWithdraw:', agent.canWithdraw);
-          
-          if (agent.canWithdraw) {
-            // Use the getLiveRoi service to get current withdrawable amount
-            const liveRoiData = await getLiveRoi(provider, publicKey, agent.activationId);
-            
-            if (liveRoiData && liveRoiData.isWithdrawable) {
-              console.log('💰 Agent', agent.activationId, 'claimable:', liveRoiData.currentWithdrawableAmount);
-              totalClaimableAmount += liveRoiData.currentWithdrawableAmount;
-            } else {
-              console.log('⏳ Agent', agent.activationId, 'not ready for withdrawal');
-            }
-          } else {
-            console.log('🚫 Agent', agent.activationId, 'cannot withdraw (cooldown active)');
-          }
-        } catch (error) {
-          console.warn('❌ Error calculating claimable for agent:', agent.activationId, error);
-        }
-      }
-      
-      // Get affiliate commission
-      let affiliateAmount = 0;
-      try {
-        const program = getProgram(provider);
-        const { profile } = derivePdas(publicKey);
-        
-        const profileData = await program.account["userProfile"].fetch(profile) as UserProfile;
-        const availableCommission = profileData.totalAffiliateEarnings.sub(profileData.totalAffiliateWithdrawn);
-        affiliateAmount = formatUsdt(availableCommission);
-        
-        console.log('💼 Available affiliate commission:', affiliateAmount);
-      } catch (error) {
-        console.warn('❌ Error fetching affiliate commission:', error);
-        affiliateAmount = 0;
-      }
-      
-      console.log('💵 Total claimable amount calculated:', totalClaimableAmount);
-      console.log('💼 Total affiliate commission:', affiliateAmount);
-      
-      setTotalClaimable(totalClaimableAmount);
-      setAffiliateCommission(affiliateAmount);
+      const [agentsResult, pnlSummary] = await Promise.all([
+        getUserAgents(provider ?? { connection: provider?.connection }, publicKey),
+        fetchGlobalPnlSummary(),
+      ]);
+
+      setHasActiveAgents(agentsResult.totalCount > 0);
+
+      const remaining = typeof pnlSummary.remainingWithdrawable === 'string'
+        ? Number(pnlSummary.remainingWithdrawable.replace(/[^0-9.-]+/g, ''))
+        : Number(pnlSummary.remainingWithdrawable ?? 0);
+
+      const safeRemaining = Number.isFinite(remaining) ? remaining : 0;
+
+      setTotalClaimable(safeRemaining);
+      setAffiliateCommission(0);
     } catch (error) {
       console.error('Error fetching total claimable:', error);
       setTotalClaimable(0);

@@ -81,60 +81,76 @@ export default function LicenseActivationPage() {
     }
   };
 
+  type RecoveryOutcome =
+    | { success: true; record: Record<string, unknown> }
+    | { success: false; code: 'NO_RECORD' | 'NOT_CONFIRMED' | 'ERROR'; reason: string };
+
+  const ensureBackendSession = async () => {
+    if (!account) return;
+    const token = localStorage.getItem('solairus.jwt');
+    if (!token) {
+      await AuthService.authenticateWallet(account);
+    }
+  };
+
+  const performRecovery = async (): Promise<RecoveryOutcome> => {
+    if (!account) {
+      return { success: false, code: 'ERROR', reason: 'Wallet not connected' };
+    }
+
+    try {
+      await ensureBackendSession();
+
+      const lastUrl = `${API_CONFIG.getBaseUrl()}/transactions/last-confirmed?initiatorWallet=${encodeURIComponent(account)}`;
+      const lastRes = await ApiClient.get(lastUrl);
+      const lastData = await lastRes.json();
+      const record = lastData?.record as Record<string, unknown> | undefined | null;
+
+      if (!record || !record['order_id']) {
+        return { success: false, code: 'NO_RECORD', reason: 'No pending transaction found. Please activate your license first.' };
+      }
+
+      const orderId = record['order_id'] as string;
+      const reapplyUrl = `${API_CONFIG.getBaseUrl()}/transactions/reapply-license`;
+      const reapplyBody = { initiatorWallet: account, orderId };
+      const reappliedRes = await ApiClient.post(reapplyUrl, reapplyBody);
+      const reappliedData = await reappliedRes.json();
+
+      if (reappliedRes.ok && reappliedData?.reapplied) {
+        await refreshSession();
+        return { success: true, record: reappliedData.record as Record<string, unknown> };
+      }
+
+      const reason = reappliedData?.error || 'No matching on-chain payment found. Please try activating normally.';
+      return { success: false, code: 'NOT_CONFIRMED', reason };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'Failed to check payment status';
+      return { success: false, code: 'ERROR', reason };
+    }
+  };
+
   // Manual payment recovery function (can be triggered by user)
   const checkPaymentStatus = async () => {
     if (!account) return;
-    
+
     try {
       setIsCheckingPayment(true);
       setRecoveryMessage('Checking for pending payments...');
       setError(null);
 
-      // Ensure JWT present
-      const token = localStorage.getItem('solairus.jwt');
-      if (!token) {
-        await AuthService.authenticateWallet(account);
+      const result = await performRecovery();
+      if (result.success) {
+        setRecoveryMessage('Payment verified! Activating your license...');
+        setAttemptedRecovery(true);
+
+        setTimeout(() => {
+          navigate(returnPath, { replace: true });
+        }, 1500);
+        return;
       }
 
-      const lastUrl = `${API_CONFIG.getBaseUrl()}/transactions/last-confirmed?initiatorWallet=${encodeURIComponent(account)}`;
-      const lastRes = await ApiClient.get(lastUrl);
-      const lastData = await lastRes.json();
-      const record = lastData?.record;
-
-      if (record && record.order_id) {
-        setRecoveryMessage('Found pending transaction. Verifying on-chain payment...');
-        
-        // Reapply activation using UUID order_id
-        const reapplyUrl = `${API_CONFIG.getBaseUrl()}/transactions/reapply-license`;
-        const reapplyBody = { initiatorWallet: account, orderId: record.order_id };
-        const reappliedRes = await ApiClient.post(reapplyUrl, reapplyBody);
-        const reappliedData = await reappliedRes.json();
-
-        if (reappliedData?.reapplied) {
-          setRecoveryMessage('Payment verified! Activating your license...');
-          
-          // Refresh auth session (license context will auto-update from user state)
-          await refreshSession();
-          
-          setAttemptedRecovery(true);
-          
-          // Navigate to return path after a brief delay to ensure context is updated
-          setTimeout(() => {
-            navigate(returnPath, { replace: true });
-          }, 1500);
-        } else {
-          setRecoveryMessage('');
-          setError('No matching on-chain payment found. Please try activating normally.');
-        }
-      } else {
-        setRecoveryMessage('');
-        setError('No pending transaction found. Please activate your license first.');
-      }
-    } catch (err) {
-      console.error('Payment recovery check failed:', err);
       setRecoveryMessage('');
-      const errorMsg = err instanceof Error ? err.message : 'Failed to check payment status';
-      setError(errorMsg);
+      setError(result.reason);
     } finally {
       setIsCheckingPayment(false);
     }
@@ -173,39 +189,15 @@ export default function LicenseActivationPage() {
         // 3) Refresh session and hard redirect to bypass guard
         if (!attemptedRecovery) {
           try {
-            // Ensure JWT present; if missing, authenticate silently
-            const token = localStorage.getItem('solairus.jwt');
-            if (!token) {
-              await AuthService.authenticateWallet(account);
-            }
-
-            const lastUrl = `${API_CONFIG.getBaseUrl()}/transactions/last-confirmed?initiatorWallet=${encodeURIComponent(account)}`;
-            const lastRes = await ApiClient.get(lastUrl);
-            const lastData = await lastRes.json();
-            const record = lastData?.record;
-
-            if (record && record.order_id && !isActiveStatus(backendStatusComputed)) {
-              // Reapply activation using UUID order_id
-              const reapplyUrl = `${API_CONFIG.getBaseUrl()}/transactions/reapply-license`;
-              const reapplyBody = { initiatorWallet: account, orderId: record.order_id };
-              const reappliedRes = await ApiClient.post(reapplyUrl, reapplyBody);
-              const reappliedData = await reappliedRes.json();
-
-              if (reappliedData?.reapplied) {
-                // Refresh auth session (license context will auto-update from user state)
-                await refreshSession();
-                
-                // Prevent repeat attempts on the next render
-                setAttemptedRecovery(true);
-                
-                // Use router navigation instead of full reload to avoid SPA MIME issues
-                navigate(returnPath, { replace: true });
-                return;
-              }
+            const result = await performRecovery();
+            if (result.success && !isActiveStatus(backendStatusComputed)) {
+              setAttemptedRecovery(true);
+              navigate(returnPath, { replace: true });
+              return;
             }
           } catch (recErr) {
             console.warn('Silent recovery attempt failed:', recErr);
-            // Non-fatal: continue showing activation UI
+          } finally {
             setAttemptedRecovery(true);
           }
         }
@@ -294,42 +286,39 @@ export default function LicenseActivationPage() {
       setTransactionHash(txSig);
 
       // 3) Create transaction record with signature and request verification (user-interactive, no auto-activation)
-      const createUrl = `${API_CONFIG.getBaseUrl()}/payments/license-activation`;
-      const createBody = {
+      const recordUrl = `${API_CONFIG.getBaseUrl()}/payments/license-activation`;
+      const recordBody = {
+        orderId,
         signature: txSig,
-        initiatorWallet: account,
-        amount: licenseFeeMicro,
-        mintAddress: usdtMintStr,
-        decimals: 6,
-        programId: payService.programId.toBase58(),
-        metadata: { order_id: orderId, flow: 'license_activation' }
       };
-      const createRes = await ApiClient.post(createUrl, createBody);
-      const createData = await createRes.json();
-
-      // Explicit verification by signature (backend will match against the record)
-      const verifyUrl = `${API_CONFIG.getBaseUrl()}/transactions/verify`;
-      const verifyRes = await ApiClient.post(verifyUrl, { signature: txSig });
-      const verifyData = await verifyRes.json();
-      const verified = !!verifyData?.verified;
-      if (!verified) {
-        const reason = verifyData?.reason || 'Verification failed';
+      const recordRes = await ApiClient.post(recordUrl, recordBody);
+      const recordData = await recordRes.json();
+      if (!recordRes.ok) {
+        const reason = recordData?.error || 'Failed to store transaction signature';
         throw new Error(reason);
       }
 
-      // 4) Only now, after verification, activate license in backend (pass signature)
-      const result = await LicenseBackendService.activate({ signature: txSig });
-      
-      // Refresh auth session (license context will auto-update from user state)
-      await refreshSession();
+      const recorded = recordData?.record ?? null;
+      const status = recorded?.status ?? null;
+      const verified =
+        Boolean(recordData?.verified) ||
+        Boolean(recordData?.autoverified) ||
+        status === 'confirmed';
 
-      const exp = new Date(result.license_expiration);
-      setSuccessInfo({ status: 'active', expirationDate: exp, isValid: true });
-      setActivationSuccess(true);
+      if (verified && status === 'confirmed') {
+        await refreshSession();
 
-      setTimeout(() => {
-        navigate(returnPath, { replace: true });
-      }, 3000);
+        setSuccessInfo({ status: 'active', expirationDate: undefined, isValid: true });
+        setActivationSuccess(true);
+
+        setTimeout(() => {
+          navigate(returnPath, { replace: true });
+        }, 3000);
+        return;
+      }
+
+      setRecoveryMessage('Payment submitted. Waiting for backend confirmation. You can use "Check Payment Status" after a short delay.');
+      setError('Payment captured and pending confirmation. Please check status shortly.');
     } catch (err) {
       console.error('License activation failed (verification flow):', err);
       setRetryCount(prev => prev + 1);
