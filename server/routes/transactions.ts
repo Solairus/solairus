@@ -464,87 +464,71 @@ type ParsedPaymentEvent = {
 async function findSignatureByPaymentEvent(
   connection: Connection,
   orderId: string,
+  payerPublicKey: PublicKey,
   solairusPayProgramId: string
 ): Promise<ParsedPaymentEvent | null> {
   const coder = new BorshCoder(solairusPayIdl as Idl)
-  const programKey = new PublicKey(solairusPayProgramId)
+  const parser = new EventParser(new PublicKey(solairusPayProgramId), coder)
 
-  try {
-    // Anchor currently emits events via program log entry.
-    // Scan recent transactions for the Solairus Pay program and match by memo (orderId).
-    const sigs = await connection.getSignaturesForAddress(programKey, { limit: 200 })
+  const signatures = await connection.getSignaturesForAddress(payerPublicKey, { limit: 200 })
 
-    for (const s of sigs) {
-      try {
-        const tx = await connection.getParsedTransaction(s.signature, {
-          commitment: 'confirmed',
-          maxSupportedTransactionVersion: 0,
-        })
+  for (const sig of signatures) {
+    try {
+      const tx = await connection.getParsedTransaction(sig.signature, {
+        commitment: 'confirmed',
+        maxSupportedTransactionVersion: 0,
+      })
 
-        if (!tx || !tx.meta) continue
+      if (!tx || !tx.meta) continue
 
-        const logs = tx.meta.logMessages || []
-
-        // Look for program data in logs - Anchor events are emitted as base64 in logs
-        // Format: "Program data: <base64>"
-        const parser = new EventParser(programKey, coder)
-        for (const event of parser.parseLogs(logs)) {
-          if (event.name !== 'PaymentMade') continue
-          const memoField = event.data?.memo
-          let memo: string | undefined
-          if (typeof memoField === 'string') {
-            memo = memoField
-          } else if (memoField instanceof Uint8Array) {
-            memo = Buffer.from(memoField).toString('utf8')
-          } else if (memoField && typeof memoField === 'object' && 'toString' in memoField) {
-            try {
-              const maybeBuf = Buffer.from(memoField as unknown as Uint8Array)
-              memo = maybeBuf.toString('utf8')
-            } catch {
-              memo = String(memoField)
-            }
+      const normalizeKey = (value: unknown): PublicKey | undefined => {
+        try {
+          if (value instanceof PublicKey) return value
+          if (value instanceof Uint8Array) return new PublicKey(value)
+          if (typeof value === 'string') return new PublicKey(value)
+          if (value && typeof value === 'object' && 'toString' in value) {
+            return new PublicKey((value as { toString(): string }).toString())
           }
+        } catch {
+          return undefined
+        }
+        return undefined
+      }
 
-          if (memo === orderId) {
-            const normalizeKey = (value: unknown): PublicKey | undefined => {
-              try {
-                if (value instanceof PublicKey) return value
-                if (value instanceof Uint8Array) return new PublicKey(value)
-                if (typeof value === 'string') return new PublicKey(value)
-                if (value && typeof value === 'object' && 'toString' in value) {
-                  return new PublicKey((value as { toString(): string }).toString())
-                }
-              } catch {
-                return undefined
-              }
-              return undefined
-            }
-            return {
-              signature: s.signature,
-              slot: tx.slot,
-              event: {
-                payer: normalizeKey(event.data?.payer),
-                recipient: normalizeKey(event.data?.recipient),
-                mint: normalizeKey(event.data?.mint),
-                amount: event.data?.amount ? BigInt(event.data.amount.toString()) : undefined,
-                decimals: typeof event.data?.decimals === 'number' ? event.data.decimals : undefined,
-                reference: normalizeKey(event.data?.reference),
-                memo,
-              },
-            }
+      for (const event of parser.parseLogs(tx.meta.logMessages || [])) {
+        if (event.name !== 'PaymentMade') continue
+        const memoField = event.data?.memo
+        const memo =
+          typeof memoField === 'string'
+            ? memoField
+            : memoField instanceof Uint8Array
+            ? Buffer.from(memoField).toString('utf8')
+            : memoField && typeof memoField === 'object' && 'toString' in memoField
+            ? (memoField as { toString(): string }).toString()
+            : undefined
+
+        if (memo === orderId) {
+          return {
+            signature: sig.signature,
+            slot: tx.slot,
+            event: {
+              payer: normalizeKey(event.data?.payer),
+              recipient: normalizeKey(event.data?.recipient),
+              mint: normalizeKey(event.data?.mint),
+              amount: event.data?.amount ? BigInt(event.data.amount.toString()) : undefined,
+              decimals: typeof event.data?.decimals === 'number' ? event.data.decimals : undefined,
+              reference: normalizeKey(event.data?.reference),
+              memo,
+            },
           }
         }
-      } catch (txErr) {
-        // Continue to next signature
-        continue
       }
+    } catch (err) {
+      console.warn(`Failed to parse transaction ${sig.signature}:`, err)
     }
-    
-    return null
-  } catch (err) {
-    console.error('Error finding signature by payment event:', err)
-    return null
   }
+
+  return null
 }
 
 /**
@@ -590,22 +574,19 @@ async function reapplyLicenseHandler(req: Request, res: Response) {
   // If signature is missing but we have orderId, try to find it via PaymentMade events
   if (!record.signature && orderId) {
     try {
-      const found = await findSignatureByPaymentEvent(connection, orderId, solairusPayProgramId)
+      const found = await findSignatureByPaymentEvent(connection, orderId, new PublicKey(initiatorWallet), solairusPayProgramId)
 
       if (found) {
+        const metaPatch = {
+          recoveredVia: 'order_id',
+          eventSlot: found.slot,
+          payer: found.event.payer?.toBase58(),
+          recipient: found.event.recipient?.toBase58(),
+          memo: found.event.memo,
+        }
         const upd = await query<Transaction>(
-          'UPDATE transactions SET signature = $1, metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
-          [
-            found.signature,
-            JSON.stringify({
-              recoveredVia: 'order_id',
-              eventSlot: found.slot,
-              payer: found.event.payer?.toBase58(),
-              recipient: found.event.recipient?.toBase58(),
-              memo: found.event.memo,
-            }),
-            record.id,
-          ]
+          'UPDATE transactions SET signature = COALESCE(signature, $1), metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
+          [found.signature, JSON.stringify(metaPatch), record.id]
         )
         record = upd.rows[0] ?? record
       } else {
