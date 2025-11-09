@@ -109,7 +109,7 @@ export class SolairusPayService {
       memo,
     };
 
-    const txSig = await this.program.methods
+    const method = this.program.methods
       .makePayment(args)
       .accounts({
         payer,
@@ -121,10 +121,22 @@ export class SolairusPayService {
         tokenProgram: TOKEN_PROGRAM_ID,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
-      })
-      .rpc();
+      });
 
-    return txSig;
+    const tx = await method.transaction();
+    const { blockhash, lastValidBlockHeight } = await provider.connection.getLatestBlockhash('confirmed');
+    tx.recentBlockhash = blockhash;
+    tx.lastValidBlockHeight = lastValidBlockHeight;
+    tx.feePayer = payer;
+
+    const signedTx = await provider.wallet.signTransaction(tx);
+    const signature = await provider.connection.sendRawTransaction(signedTx.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed',
+      maxRetries: 0,
+    });
+
+    return signature;
   }
 
   /**
