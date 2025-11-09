@@ -10,6 +10,8 @@ import { query } from '../db'
 import { Transaction, TransactionStatus, TransactionType } from '../types'
 import { z } from 'zod'
 import { Connection, PublicKey, ParsedInstruction, PartiallyDecodedInstruction } from '@solana/web3.js'
+import { BorshCoder, EventParser, Idl } from '@coral-xyz/anchor'
+import solairusPayIdl from '../../idl/solairus_pay.json'
 import { getConnection } from '../lib/rpc-manager'
 import { attemptExpiredWithdrawalRefund } from '../services/withdrawal_refund'
 
@@ -376,6 +378,9 @@ async function findSignatureByPaymentEvent(
   orderId: string,
   solairusPayProgramId: string
 ): Promise<string | null> {
+  const coder = new BorshCoder(solairusPayIdl as Idl)
+  const parser = new EventParser(new PublicKey(solairusPayProgramId), coder)
+
   try {
     // Get recent signatures for the user's wallet
     const sigs = await connection.getSignaturesForAddress(userPublicKey, { limit: 50 })
@@ -401,40 +406,15 @@ async function findSignatureByPaymentEvent(
         
         // Look for program data in logs - Anchor events are emitted as base64 in logs
         // Format: "Program data: <base64>"
-        for (const log of logs) {
-          if (log.includes('Program data:')) {
-            try {
-              const dataStr = log.split('Program data: ')[1]?.trim()
-              if (!dataStr) continue
-              
-              const eventData = Buffer.from(dataStr, 'base64')
-              
-              // Check if this is a PaymentMade event by discriminator
-              const discriminator = eventData.slice(0, 8)
-              const expectedDiscriminator = Buffer.from([227, 251, 123, 16, 133, 220, 83, 242])
-              
-              if (!discriminator.equals(expectedDiscriminator)) continue
-              
-              // Decode the event data - memo is the last field as a string
-              // Event structure: payer(32) + recipient(32) + mint(32) + amount(8) + decimals(1) + reference(32) + memo(length-prefixed string)
-              const memoOffset = 32 + 32 + 32 + 8 + 1 + 32 // 137 bytes before memo
-              if (eventData.length <= memoOffset + 4) continue
-              
-              const memoLength = eventData.readUInt32LE(memoOffset)
-              const memoStart = memoOffset + 4
-              
-              if (eventData.length < memoStart + memoLength) continue
-              
-              const memo = eventData.slice(memoStart, memoStart + memoLength).toString('utf8')
-              
-              if (memo === orderId) {
-                return s.signature
-              }
-            } catch (parseErr) {
-              // Continue to next log
-              continue
-            }
+        let found = false
+        parser.parseLogs(logs, (event) => {
+          if (event.name === 'PaymentMade' && event.data?.memo === orderId) {
+            found = true
           }
+        })
+
+        if (found) {
+          return s.signature
         }
       } catch (txErr) {
         // Continue to next signature
