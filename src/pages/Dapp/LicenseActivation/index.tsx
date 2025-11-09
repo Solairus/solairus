@@ -150,7 +150,11 @@ export default function LicenseActivationPage() {
       }
 
       setRecoveryMessage('');
-      setError(result.reason);
+      if (result.success) {
+        setError('');
+      } else {
+        setError('reason' in result ? result.reason : 'Recovery failed');
+      }
     } finally {
       setIsCheckingPayment(false);
     }
@@ -286,7 +290,7 @@ export default function LicenseActivationPage() {
       setTransactionHash(txSig);
 
       // 3) Create transaction record with signature and request verification (user-interactive, no auto-activation)
-      const recordUrl = `${API_CONFIG.getBaseUrl()}/payments/license-activation`;
+      const recordUrl = `${API_CONFIG.getBaseUrl()}/transactions/license-activation/signature`;
       const recordBody = {
         orderId,
         signature: txSig,

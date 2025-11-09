@@ -139,9 +139,63 @@ function metadataToObject(meta: unknown): Record<string, unknown> {
   return meta as Record<string, unknown>
 }
 
+async function fetchPaymentEventForSignature(
+  connection: Connection,
+  signature: string,
+  solairusPayProgramId: string
+): Promise<ParsedPaymentEvent | null> {
+  const coder = new BorshCoder(solairusPayIdl as Idl)
+  const programKey = new PublicKey(solairusPayProgramId)
+  const tx = await connection.getParsedTransaction(signature, {
+    commitment: 'confirmed',
+    maxSupportedTransactionVersion: 0,
+  })
+  if (!tx || !tx.meta) return null
+  const parser = new EventParser(programKey, coder)
+  const logs = tx.meta.logMessages ?? []
+  for (const event of parser.parseLogs(logs)) {
+    if (event.name !== 'PaymentMade') continue
+    const memoField = event.data?.memo
+    let memo: string | undefined
+    if (typeof memoField === 'string') memo = memoField
+    else if (memoField instanceof Uint8Array) memo = Buffer.from(memoField).toString('utf8')
+    else if (memoField && typeof memoField === 'object' && 'toString' in memoField) {
+      memo = (memoField as { toString(): string }).toString()
+    }
+    const normalizeKey = (value: unknown): PublicKey | undefined => {
+      try {
+        if (value instanceof PublicKey) return value
+        if (value instanceof Uint8Array) return new PublicKey(value)
+        if (typeof value === 'string') return new PublicKey(value)
+        if (value && typeof value === 'object' && 'toString' in value) {
+          return new PublicKey((value as { toString(): string }).toString())
+        }
+      } catch {
+        return undefined
+      }
+      return undefined
+    }
+    return {
+      signature,
+      slot: tx.slot,
+      event: {
+        payer: normalizeKey(event.data?.payer),
+        recipient: normalizeKey(event.data?.recipient),
+        mint: normalizeKey(event.data?.mint),
+        amount: event.data?.amount ? BigInt(event.data.amount.toString()) : undefined,
+        decimals: typeof event.data?.decimals === 'number' ? event.data.decimals : undefined,
+        reference: normalizeKey(event.data?.reference),
+        memo,
+      },
+    }
+  }
+  return null
+}
+
 async function verifyAndApplyLicenseRecord(
   connection: Connection,
-  record: Transaction
+  record: Transaction,
+  options?: { requireOrderIdMatch?: boolean }
 ): Promise<{ record: Transaction; verified: boolean; reason?: string }> {
   if (!record.signature) {
     return { record, verified: false, reason: 'Signature missing' }
@@ -160,10 +214,30 @@ async function verifyAndApplyLicenseRecord(
   }
 
   const match = await verifyOnChainMatchesRecord(connection, record)
-  const dbStatus: TransactionStatus = match.ok ? 'confirmed' : 'failed'
-  const metaUpdate = match.ok
+  let verified = match.ok
+  let failureReason = match.reason
+
+  if (verified && options?.requireOrderIdMatch) {
+    const solairusPayProgramId =
+      process.env.SOLAIRUS_PAY_PROGRAM_ID ?? (solairusPayIdl as { address?: string }).address ?? ''
+    if (solairusPayProgramId) {
+      const paymentEvent = await fetchPaymentEventForSignature(connection, record.signature, solairusPayProgramId)
+      const memo = paymentEvent?.event.memo
+      if (!paymentEvent || !memo || (record.order_id && memo !== record.order_id)) {
+        verified = false
+        failureReason = 'Order ID mismatch'
+      }
+    }
+  }
+
+  const dbStatus: TransactionStatus = verified ? 'confirmed' : 'failed'
+  const metaUpdate = verified
     ? { phase: 'verifying_complete', verified: true, failureReason: null }
-    : { phase: 'verification_failed', verified: false, failureReason: match.reason ?? 'Verification mismatch' }
+    : {
+        phase: 'verification_failed',
+        verified: false,
+        failureReason: failureReason ?? 'Verification mismatch',
+      }
   const update = await query<Transaction>(
     'UPDATE transactions SET status = $1, metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
     [dbStatus, JSON.stringify(metaUpdate), record.id]
@@ -176,7 +250,7 @@ async function verifyAndApplyLicenseRecord(
     record = refreshed.rows[0] ?? record
   }
 
-  return { record, verified: match.ok, reason: match.reason }
+  return { record, verified, reason: failureReason }
 }
 
 /**
@@ -373,40 +447,47 @@ async function lastConfirmedHandler(req: Request, res: Response) {
  * Helper: Find transaction signature by searching for PaymentMade events from solairus_pay program
  * that contain the orderId in the memo field.
  */
+type ParsedPaymentEvent = {
+  signature: string
+  slot: number
+  event: {
+    payer?: PublicKey
+    recipient?: PublicKey
+    mint?: PublicKey
+    amount?: bigint
+    decimals?: number
+    reference?: PublicKey
+    memo?: string
+  }
+}
+
 async function findSignatureByPaymentEvent(
   connection: Connection,
-  userPublicKey: PublicKey,
   orderId: string,
   solairusPayProgramId: string
-): Promise<string | null> {
+): Promise<ParsedPaymentEvent | null> {
   const coder = new BorshCoder(solairusPayIdl as Idl)
+  const programKey = new PublicKey(solairusPayProgramId)
 
   try {
-    // Get recent signatures for the user's wallet
-    const sigs = await connection.getSignaturesForAddress(userPublicKey, { limit: 50 })
-    
+    // Anchor currently emits events via program log entry.
+    // Scan recent transactions for the Solairus Pay program and match by memo (orderId).
+    const sigs = await connection.getSignaturesForAddress(programKey, { limit: 200 })
+
     for (const s of sigs) {
       try {
         const tx = await connection.getParsedTransaction(s.signature, {
           commitment: 'confirmed',
           maxSupportedTransactionVersion: 0,
         })
-        
+
         if (!tx || !tx.meta) continue
-        
-        // Check if solairus_pay program is involved
-        const accountKeys = tx.transaction.message.accountKeys
-        const involvesSolairusPay = accountKeys.some((k) => k?.pubkey?.toBase58() === solairusPayProgramId)
-        
-        if (!involvesSolairusPay) continue
-        
-        // Parse transaction logs for PaymentMade event
-        // PaymentMade event discriminator: [227, 251, 123, 16, 133, 220, 83, 242]
+
         const logs = tx.meta.logMessages || []
-        
+
         // Look for program data in logs - Anchor events are emitted as base64 in logs
         // Format: "Program data: <base64>"
-        const parser = new EventParser(new PublicKey(solairusPayProgramId), coder)
+        const parser = new EventParser(programKey, coder)
         for (const event of parser.parseLogs(logs)) {
           if (event.name !== 'PaymentMade') continue
           const memoField = event.data?.memo
@@ -425,7 +506,32 @@ async function findSignatureByPaymentEvent(
           }
 
           if (memo === orderId) {
-            return s.signature
+            const normalizeKey = (value: unknown): PublicKey | undefined => {
+              try {
+                if (value instanceof PublicKey) return value
+                if (value instanceof Uint8Array) return new PublicKey(value)
+                if (typeof value === 'string') return new PublicKey(value)
+                if (value && typeof value === 'object' && 'toString' in value) {
+                  return new PublicKey((value as { toString(): string }).toString())
+                }
+              } catch {
+                return undefined
+              }
+              return undefined
+            }
+            return {
+              signature: s.signature,
+              slot: tx.slot,
+              event: {
+                payer: normalizeKey(event.data?.payer),
+                recipient: normalizeKey(event.data?.recipient),
+                mint: normalizeKey(event.data?.mint),
+                amount: event.data?.amount ? BigInt(event.data.amount.toString()) : undefined,
+                decimals: typeof event.data?.decimals === 'number' ? event.data.decimals : undefined,
+                reference: normalizeKey(event.data?.reference),
+                memo,
+              },
+            }
           }
         }
       } catch (txErr) {
@@ -484,11 +590,23 @@ async function reapplyLicenseHandler(req: Request, res: Response) {
   // If signature is missing but we have orderId, try to find it via PaymentMade events
   if (!record.signature && orderId) {
     try {
-      const pub = new PublicKey(initiatorWallet)
-      const foundSig = await findSignatureByPaymentEvent(connection, pub, orderId, solairusPayProgramId)
+      const found = await findSignatureByPaymentEvent(connection, orderId, solairusPayProgramId)
 
-      if (foundSig) {
-        const upd = await query<Transaction>('UPDATE transactions SET signature = $1 WHERE id = $2 RETURNING *', [foundSig, record.id])
+      if (found) {
+        const upd = await query<Transaction>(
+          'UPDATE transactions SET signature = $1, metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
+          [
+            found.signature,
+            JSON.stringify({
+              recoveredVia: 'order_id',
+              eventSlot: found.slot,
+              payer: found.event.payer?.toBase58(),
+              recipient: found.event.recipient?.toBase58(),
+              memo: found.event.memo,
+            }),
+            record.id,
+          ]
+        )
         record = upd.rows[0] ?? record
       } else {
         return res.status(404).json({ error: 'On-chain payment not found for this order' })
@@ -505,20 +623,14 @@ async function reapplyLicenseHandler(req: Request, res: Response) {
     const status = statusResp.value[0]
     const isConfirmed = status && !status.err && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')
 
-    if (isConfirmed) {
-      const match = await verifyOnChainMatchesRecord(connection, record)
-      const dbStatus: TransactionStatus = match.ok ? 'confirmed' : 'failed'
-      const update = await query<Transaction>(
-        'UPDATE transactions SET status = $1, metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
-        [dbStatus, match.ok ? {} : { failureReason: match.reason ?? 'Verification mismatch' }, record.id]
-      )
-      record = update.rows[0]
-      
-      if (record.status !== 'confirmed') {
-        return res.status(400).json({ error: `Payment verification failed: ${match.reason}` })
-      }
-    } else {
+    if (!isConfirmed) {
       return res.status(400).json({ error: 'Transaction signature not confirmed on-chain' })
+    }
+
+    const result = await verifyAndApplyLicenseRecord(connection, record, { requireOrderIdMatch: true })
+    record = result.record
+    if (!result.verified) {
+      return res.status(400).json({ error: `Payment verification failed: ${result.reason ?? 'Unknown mismatch'}` })
     }
   }
 
@@ -543,12 +655,53 @@ const setType = (type: TransactionType) => (req: Request, _res: Response, next: 
 
 // POST /api/transactions - use shared handler
 router.post('/transactions', createTransactionHandler)
-router.post('/payments/license-activation', setType('license_activation'), createOrResumeLicenseActivationHandler)
+// Only the first call (without signature) should hit createOrResumeLicenseActivationHandler
+router.post(
+  '/payments/license-activation',
+  (req, res, next) => {
+    if (typeof req.body?.signature === 'string') {
+      return res.status(405).json({ error: 'Signature updates must use /transactions/license-activation/signature' })
+    }
+    setType('license_activation')(req, res, next)
+  },
+  createOrResumeLicenseActivationHandler
+)
 router.post('/payments/agent-activation', setType('agent_activation'), createTransactionHandler)
 router.post('/withdrawals/user', setType('user_withdrawal'), createTransactionHandler)
 router.post('/withdrawals/role', setType('role_withdrawal'), createTransactionHandler)
 router.get('/transactions/last-confirmed', lastConfirmedHandler)
 router.post('/transactions/reapply-license', reapplyLicenseHandler)
+router.post('/transactions/license-activation/signature', async (req: Request, res: Response) => {
+  const parsed = LicenseActivationSignatureSchema.safeParse({ ...req.body, type: 'license_activation' })
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
+  const { orderId, signature, metadata } = parsed.data
+
+  const { rows } = await query<Transaction>('SELECT * FROM transactions WHERE order_id = $1 LIMIT 1', [orderId])
+  if (!rows.length) return res.status(404).json({ error: 'Activation order not found' })
+  let record = rows[0]
+  if (record.type !== 'license_activation') return res.status(400).json({ error: 'Invalid transaction type' })
+
+  const connection = getConnection()
+  const metaBase = metadataToObject(record.metadata)
+  const metaPayload = JSON.stringify({ ...metaBase, ...(metadata ?? {}), phase: 'signature_recorded' })
+
+  if (record.signature !== signature) {
+    const update = await query<Transaction>(
+      'UPDATE transactions SET signature = $1, metadata = $2::jsonb WHERE id = $3 RETURNING *',
+      [signature, metaPayload, record.id]
+    )
+    record = update.rows[0] ?? record
+  } else if (metadata) {
+    const updateMeta = await query<Transaction>(
+      'UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2 RETURNING *',
+      [JSON.stringify(metadata), record.id]
+    )
+    record = updateMeta.rows[0] ?? record
+  }
+
+  const result = await verifyAndApplyLicenseRecord(connection, record, { requireOrderIdMatch: true })
+  return res.status(200).json({ updated: true, verified: result.verified, reason: result.reason, record: result.record })
+})
 
 /**
  * GET /api/transactions/:orderId
@@ -691,7 +844,7 @@ async function createOrResumeLicenseActivationHandler(req: Request, res: Respons
       record = updateMeta.rows[0] ?? record
     }
 
-    const result = await verifyAndApplyLicenseRecord(connection, record)
+    const result = await verifyAndApplyLicenseRecord(connection, record, { requireOrderIdMatch: true })
     return res.status(200).json({ resumed: true, updated: true, verified: result.verified, reason: result.reason, record: result.record })
   }
 
@@ -759,7 +912,7 @@ async function createOrResumeLicenseActivationHandler(req: Request, res: Respons
 
     // If we have a signature, try to auto-verify and activate
     if (record.signature) {
-      const result = await verifyAndApplyLicenseRecord(connection, record)
+      const result = await verifyAndApplyLicenseRecord(connection, record, { requireOrderIdMatch: true })
       if (result.verified) {
         return res.status(200).json({ resumed: true, autoverified: true, record: result.record })
       }
@@ -802,14 +955,14 @@ async function createOrResumeLicenseActivationHandler(req: Request, res: Respons
     finalMeta,
     orderId,
   ])
-  let record = rows[0]
+  const record = rows[0]
 
   if (record.signature) {
     await query<Transaction>('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
       { phase: 'verifying' },
       record.id,
     ])
-    const result = await verifyAndApplyLicenseRecord(connection, record)
+    const result = await verifyAndApplyLicenseRecord(connection, record, { requireOrderIdMatch: true })
     const statusCode = result.verified ? 201 : 202
     return res.status(statusCode).json({ autoverified: result.verified, reason: result.reason, record: result.record })
   }
