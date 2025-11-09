@@ -72,8 +72,8 @@ const TransactionCreateSchema = z.object({
 })
 
 const TransactionVerifySchema = z.object({ signature: z.string().min(32).max(128) })
-const LicenseActivationSignatureSchema = z.object({
-  type: z.literal('license_activation'),
+const ActivationSignatureSchema = z.object({
+  type: z.enum(['license_activation', 'agent_activation']),
   orderId: z.string().uuid(),
   signature: z.string().min(32).max(128),
   metadata: z.record(z.string(), z.any()).optional(),
@@ -525,14 +525,6 @@ async function lastConfirmedHandler(req: Request, res: Response) {
   return lastConfirmedHandlerGeneric('license_activation', req, res)
 }
 
-/**
- * GET /api/transactions/last-confirmed-agent
- * Return the latest confirmed agent_activation transaction for a wallet.
- * Falls back to most recent pending transaction if no confirmed transaction exists.
- */
-async function lastConfirmedAgentHandler(req: Request, res: Response) {
-  return lastConfirmedHandlerGeneric('agent_activation', req, res)
-}
 
 /**
  * Helper: Find transaction signature by searching for PaymentMade events from solairus_pay program
@@ -647,9 +639,7 @@ router.post('/payments/agent-activation', setType('agent_activation'), createTra
 router.post('/withdrawals/user', setType('user_withdrawal'), createTransactionHandler)
 router.post('/withdrawals/role', setType('role_withdrawal'), createTransactionHandler)
 router.get('/transactions/last-confirmed', lastConfirmedHandler)
-router.get('/transactions/last-confirmed-agent', lastConfirmedAgentHandler)
 router.post('/transactions/reapply-license', reapplyLicenseHandler)
-router.post('/transactions/reapply-agent', reapplyAgentHandler)
 
 /**
  * Generic reapply handler for any transaction type
@@ -754,24 +744,17 @@ async function reapplyLicenseHandler(req: Request, res: Response) {
   return reapplyHandlerGeneric('license_activation', req, res)
 }
 
-/**
- * POST /api/transactions/reapply-agent
- * Re-apply agent activation for a transaction (confirmed or pending with on-chain payment).
- */
-async function reapplyAgentHandler(req: Request, res: Response) {
-  return reapplyHandlerGeneric('agent_activation', req, res)
-}
-router.post('/transactions/license-activation/signature', async (req: Request, res: Response) => {
-  const parsed = LicenseActivationSignatureSchema.safeParse({ ...req.body, type: 'license_activation' })
+router.post('/transactions/activation/signature', async (req: Request, res: Response) => {
+  const parsed = ActivationSignatureSchema.safeParse(req.body)
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
-  const { orderId, signature, metadata } = parsed.data
+  const { type, orderId, signature, metadata } = parsed.data
 
   const { rows } = await query<Transaction>('SELECT * FROM transactions WHERE order_id = $1 LIMIT 1', [orderId])
   if (!rows.length) return res.status(404).json({ error: 'Activation order not found' })
   let record = rows[0]
-  if (record.type !== 'license_activation') return res.status(400).json({ error: 'Invalid transaction type' })
+  if (record.type !== type) return res.status(400).json({ error: 'Invalid transaction type' })
 
-  const connection = getConnection()
+  const connection = new Connection(resolveMainnetRpcUrl(), 'confirmed')
   const metaBase = metadataToObject(record.metadata)
   const metaPayload = JSON.stringify({ ...metaBase, ...(metadata ?? {}), phase: 'signature_recorded' })
 
@@ -907,16 +890,16 @@ router.get('/transactions/:orderId([0-9a-fA-F-]{36})', async (req: Request, res:
 async function createOrResumeLicenseActivationHandler(req: Request, res: Response) {
   const isSignatureUpdate = typeof req.body.orderId === 'string'
   if (isSignatureUpdate) {
-    const signatureParsed = LicenseActivationSignatureSchema.safeParse(req.body)
+    const signatureParsed = ActivationSignatureSchema.safeParse(req.body)
     if (!signatureParsed.success) return res.status(400).json({ error: signatureParsed.error.flatten() })
-    const { orderId, signature, metadata } = signatureParsed.data
+    const { type, orderId, signature, metadata } = signatureParsed.data
 
     const { rows } = await query<Transaction>('SELECT * FROM transactions WHERE order_id = $1 LIMIT 1', [orderId])
     if (!rows.length) return res.status(404).json({ error: 'Activation order not found' })
     let record = rows[0]
-    if (record.type !== 'license_activation') return res.status(400).json({ error: 'Invalid transaction type' })
+    if (record.type !== type) return res.status(400).json({ error: 'Invalid transaction type' })
 
-    const connection = getConnection()
+    const connection = new Connection(resolveMainnetRpcUrl(), 'confirmed')
     const metaBase = metadataToObject(record.metadata)
     const metaPayload = JSON.stringify({ ...metaBase, ...(metadata ?? {}), phase: 'signature_recorded' })
 
