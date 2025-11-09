@@ -6,6 +6,7 @@ type ClusterName = 'mainnet-beta' | 'devnet' | 'testnet'
 interface RpcEndpoint {
   url: string
   name: string
+  headers?: Record<string, string>
   isWorking?: boolean
   lastChecked?: number
   responseTime?: number
@@ -92,10 +93,7 @@ class RpcSwitcher {
       .split(',')
       .map(url => url.trim())
       .filter(url => url.length > 0)
-      .map(url => ({
-        url,
-        name: this.extractProviderName(url)
-      }))
+      .map((raw) => this.parseEndpoint(raw))
   }
 
   private parseRpcUrlsFromMultipleVars(cluster: ClusterName): RpcEndpoint[] {
@@ -137,10 +135,24 @@ class RpcSwitcher {
       urls.push(...testnetVars)
     }
     
-    return urls.map(url => ({
-      url: url.trim(),
-      name: this.extractProviderName(url)
-    }))
+    return urls.map((raw) => this.parseEndpoint(raw))
+  }
+
+  private parseEndpoint(raw: string): RpcEndpoint {
+    const [urlPart, ...headerParts] = raw.split('|').map((segment) => segment.trim()).filter(Boolean)
+    const sanitizedUrl = urlPart.endsWith('/') ? urlPart : `${urlPart}/`
+    const headers: Record<string, string> = {}
+    for (const segment of headerParts) {
+      const [key, value] = segment.split('=')
+      if (key && value) {
+        headers[key.trim()] = value.trim()
+      }
+    }
+    return {
+      url: sanitizedUrl,
+      name: this.extractProviderName(sanitizedUrl),
+      headers: Object.keys(headers).length ? headers : undefined,
+    }
   }
 
   private extractProviderName(url: string): string {
@@ -228,7 +240,10 @@ class RpcSwitcher {
     for (const endpoint of endpoints) {
       try {
         console.log(`🔗 Connecting to ${cluster}: ${endpoint.name}`)
-        const connection = new Connection(endpoint.url, 'confirmed')
+        const connection = new Connection(endpoint.url, {
+          commitment: 'confirmed',
+          httpHeaders: endpoint.headers,
+        })
         this.activeConnections.set(cluster, connection)
         
         // this.showRpcNotification('success', `Connected to ${endpoint.name} (${cluster})`, cluster)
@@ -272,7 +287,10 @@ class RpcSwitcher {
       
       try {
         console.log(`🔄 Switching to: ${endpoint.name}`)
-        const connection = new Connection(endpoint.url, 'confirmed')
+        const connection = new Connection(endpoint.url, {
+          commitment: 'confirmed',
+          httpHeaders: endpoint.headers,
+        })
         this.activeConnections.set(cluster, connection)
         
         // this.showRpcNotification('info', `Switched to ${endpoint.name}`, cluster)
