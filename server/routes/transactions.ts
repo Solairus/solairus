@@ -10,7 +10,7 @@ import { query } from '../db'
 import { Transaction, TransactionStatus, TransactionType } from '../types'
 import { z } from 'zod'
 import { Connection, PublicKey, ParsedInstruction, PartiallyDecodedInstruction } from '@solana/web3.js'
-import { BorshCoder, EventParser, Idl } from '@coral-xyz/anchor'
+import { BorshCoder, EventParser, Idl, utils } from '@coral-xyz/anchor'
 import solairusPayIdl from '../../idl/solairus_pay.json'
 import { getConnection } from '../lib/rpc-manager'
 import { attemptExpiredWithdrawalRefund } from '../services/withdrawal_refund'
@@ -378,8 +378,7 @@ async function findSignatureByPaymentEvent(
   orderId: string,
   solairusPayProgramId: string
 ): Promise<string | null> {
-  const coder = new BorshCoder(solairusPayIdl as Idl)
-  const parser = new EventParser(new PublicKey(solairusPayProgramId), coder)
+const coder = new BorshCoder(solairusPayIdl as Idl)
 
   try {
     // Get recent signatures for the user's wallet
@@ -406,15 +405,11 @@ async function findSignatureByPaymentEvent(
         
         // Look for program data in logs - Anchor events are emitted as base64 in logs
         // Format: "Program data: <base64>"
-        let found = false
-        parser.parseLogs(logs, (event) => {
+        const parser = new EventParser(new PublicKey(solairusPayProgramId), coder)
+        for (const event of parser.parseLogs(logs)) {
           if (event.name === 'PaymentMade' && event.data?.memo === orderId) {
-            found = true
+            return s.signature
           }
-        })
-
-        if (found) {
-          return s.signature
         }
       } catch (txErr) {
         // Continue to next signature
