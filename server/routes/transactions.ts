@@ -43,6 +43,19 @@ function resolveMainnetRpcUrl(): string {
   throw new Error('No mainnet RPC endpoint provided. Set SOLANA_RPC_URL_MAINNET or similar environment variable.');
 }
 
+/**
+ * Reusable function to find transaction signature by PaymentMade events
+ * Uses mainnet RPC and standard search parameters for consistency
+ */
+async function findTransactionSignature(
+  orderId: string,
+  payerPublicKey: PublicKey,
+  solairusPayProgramId: string
+): Promise<ParsedPaymentEvent | null> {
+  const connection = new Connection(resolveMainnetRpcUrl(), 'confirmed')
+  return findSignatureByPaymentEvent(connection, orderId, payerPublicKey, solairusPayProgramId)
+}
+
 const router = Router()
 
 // Zod schemas for input validation
@@ -481,7 +494,7 @@ async function lastConfirmedHandler(req: Request, res: Response) {
   ) {
     try {
       const payerKey = new PublicKey(initiatorWallet)
-      const found = await findSignatureByPaymentEvent(connection, record.order_id, payerKey, solairusPayProgramId)
+      const found = await findTransactionSignature(record.order_id, payerKey, solairusPayProgramId)
       if (found) {
         const metaPatch = {
           recoveredVia: 'order_id',
@@ -498,6 +511,65 @@ async function lastConfirmedHandler(req: Request, res: Response) {
       }
     } catch (err) {
       console.warn('Failed to resolve signature during last-confirmed lookup:', err)
+    }
+  }
+
+  return res.json({ record })
+}
+
+/**
+ * GET /api/transactions/last-confirmed-agent
+ * Return the latest confirmed agent_activation transaction for a wallet.
+ * Falls back to most recent pending transaction if no confirmed transaction exists.
+ */
+async function lastConfirmedAgentHandler(req: Request, res: Response) {
+  const schema = z.object({ initiatorWallet: z.string().min(32).max(64) })
+  const parsed = schema.safeParse(req.query)
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
+
+  const { initiatorWallet } = parsed.data
+  const connection = new Connection(resolveMainnetRpcUrl(), 'confirmed')
+  const solairusPayProgramId =
+    process.env.SOLAIRUS_PAY_PROGRAM_ID ?? (solairusPayIdl as { address?: string }).address ?? ''
+
+  const sql = `
+    SELECT * FROM transactions
+    WHERE type = $1 AND initiator_wallet = $2
+      AND (status = $3 OR status = $4)
+    ORDER BY
+      CASE WHEN status = $3 THEN 0 ELSE 1 END,
+      id DESC
+    LIMIT 1
+  `
+  const { rows } = await query<Transaction>(sql, ['agent_activation', initiatorWallet, 'confirmed', 'pending'])
+  let record = rows[0] ?? null
+
+  if (
+    record &&
+    record.type === 'agent_activation' &&
+    record.order_id &&
+    !record.signature &&
+    solairusPayProgramId
+  ) {
+    try {
+      const payerKey = new PublicKey(initiatorWallet)
+      const found = await findTransactionSignature(record.order_id, payerKey, solairusPayProgramId)
+      if (found) {
+        const metaPatch = {
+          recoveredVia: 'order_id',
+          eventSlot: found.slot,
+          payer: found.event.payer?.toBase58(),
+          recipient: found.event.recipient?.toBase58(),
+          memo: found.event.memo,
+        }
+        const upd = await query<Transaction>(
+          'UPDATE transactions SET signature = COALESCE(signature, $1), metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
+          [found.signature, JSON.stringify(metaPatch), record.id]
+        )
+        record = upd.rows[0] ?? record
+      }
+    } catch (err) {
+      console.warn('Failed to resolve signature during last-confirmed-agent lookup:', err)
     }
   }
 
@@ -635,7 +707,7 @@ async function reapplyLicenseHandler(req: Request, res: Response) {
   // If signature is missing but we have orderId, try to find it via PaymentMade events
   if (!record.signature && orderId) {
     try {
-      const found = await findSignatureByPaymentEvent(connection, orderId, new PublicKey(initiatorWallet), solairusPayProgramId)
+      const found = await findTransactionSignature(orderId, new PublicKey(initiatorWallet), solairusPayProgramId)
 
       if (found) {
         const metaPatch = {
@@ -712,7 +784,105 @@ router.post('/payments/agent-activation', setType('agent_activation'), createTra
 router.post('/withdrawals/user', setType('user_withdrawal'), createTransactionHandler)
 router.post('/withdrawals/role', setType('role_withdrawal'), createTransactionHandler)
 router.get('/transactions/last-confirmed', lastConfirmedHandler)
+router.get('/transactions/last-confirmed-agent', lastConfirmedAgentHandler)
 router.post('/transactions/reapply-license', reapplyLicenseHandler)
+router.post('/transactions/reapply-agent', reapplyAgentHandler)
+
+/**
+ * POST /api/transactions/reapply-agent
+ * Re-apply agent activation for a transaction (confirmed or pending with on-chain payment).
+ */
+async function reapplyAgentHandler(req: Request, res: Response) {
+  const bodySchema = z
+    .object({
+      initiatorWallet: z.string().min(32).max(64),
+      orderId: z.string().uuid().optional(),
+      signature: z.string().min(32).max(128).optional(),
+    })
+    .refine((d) => !!(d.orderId || d.signature), { message: 'orderId or signature required' })
+
+  const parsed = bodySchema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
+  const { initiatorWallet, orderId, signature } = parsed.data
+
+  // Resolve base record by orderId or signature
+  let record: Transaction | null = null
+  if (orderId) {
+    const r1 = await query<Transaction>('SELECT * FROM transactions WHERE order_id = $1 LIMIT 1', [orderId])
+    record = r1.rows[0] ?? null
+  } else if (signature) {
+    const r2 = await query<Transaction>('SELECT * FROM transactions WHERE signature = $1 LIMIT 1', [signature])
+    record = r2.rows[0] ?? null
+  }
+
+  if (!record) return res.status(404).json({ error: 'Transaction not found' })
+  if (record.type !== 'agent_activation') return res.status(400).json({ error: 'Invalid transaction type' })
+
+  // Allow both confirmed and pending transactions (pending may have been paid on-chain)
+  const connection = new Connection(resolveMainnetRpcUrl(), 'confirmed')
+  const solairusPayProgramId =
+    process.env.SOLAIRUS_PAY_PROGRAM_ID ??
+    (solairusPayIdl as { address?: string }).address ??
+    ''
+  if (!solairusPayProgramId) {
+    return res.status(500).json({ error: 'Solairus pay program id not configured' })
+  }
+
+  // If signature is missing but we have orderId, try to find it via PaymentMade events
+  if (!record.signature && orderId) {
+    try {
+      const found = await findTransactionSignature(orderId, new PublicKey(initiatorWallet), solairusPayProgramId)
+
+      if (found) {
+        const metaPatch = {
+          recoveredVia: 'order_id',
+          eventSlot: found.slot,
+          payer: found.event.payer?.toBase58(),
+          recipient: found.event.recipient?.toBase58(),
+          memo: found.event.memo,
+        }
+        const upd = await query<Transaction>(
+          'UPDATE transactions SET signature = COALESCE(signature, $1), metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
+          [found.signature, JSON.stringify(metaPatch), record.id]
+        )
+        record = upd.rows[0] ?? record
+      } else {
+        return res.status(404).json({ error: 'On-chain payment not found for this order' })
+      }
+    } catch (e) {
+      console.error('Error finding payment signature:', e)
+      return res.status(500).json({ error: 'Failed to search for on-chain payment' })
+    }
+  }
+
+  // If transaction is pending with signature, verify it on-chain and update status
+  if (record.status === 'pending' && record.signature) {
+    const statusResp = await connection.getSignatureStatuses([record.signature], { searchTransactionHistory: true })
+    const status = statusResp.value[0]
+    const isConfirmed = status && !status.err && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')
+
+    if (!isConfirmed) {
+      return res.status(400).json({ error: 'Transaction signature not confirmed on-chain' })
+    }
+
+    const result = await verifyAndApplyLicenseRecord(connection, record, { requireOrderIdMatch: true })
+    record = result.record
+    if (!result.verified) {
+      return res.status(400).json({ error: `Payment verification failed: ${result.reason ?? 'Unknown mismatch'}` })
+    }
+  }
+
+  // If still not confirmed after all attempts, reject
+  if (record.status !== 'confirmed') {
+    return res.status(400).json({ error: 'Transaction is not confirmed. Please ensure payment was completed on-chain.' })
+  }
+
+  await applyPostConfirmation(record)
+
+  const refreshed = await query<Transaction>('SELECT * FROM transactions WHERE id = $1', [record.id])
+  const finalRecord = refreshed.rows[0] ?? record
+  return res.json({ reapplied: true, record: finalRecord })
+}
 router.post('/transactions/license-activation/signature', async (req: Request, res: Response) => {
   const parsed = LicenseActivationSignatureSchema.safeParse({ ...req.body, type: 'license_activation' })
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
