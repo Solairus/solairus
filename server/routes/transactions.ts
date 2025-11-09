@@ -6,6 +6,7 @@
  */
 import { Router, Request, Response, NextFunction } from 'express'
 import { randomUUID } from 'crypto'
+import { Buffer } from 'buffer'
 import { query } from '../db'
 import { Transaction, TransactionStatus, TransactionType } from '../types'
 import { z } from 'zod'
@@ -378,7 +379,7 @@ async function findSignatureByPaymentEvent(
   orderId: string,
   solairusPayProgramId: string
 ): Promise<string | null> {
-const coder = new BorshCoder(solairusPayIdl as Idl)
+  const coder = new BorshCoder(solairusPayIdl as Idl)
 
   try {
     // Get recent signatures for the user's wallet
@@ -407,7 +408,23 @@ const coder = new BorshCoder(solairusPayIdl as Idl)
         // Format: "Program data: <base64>"
         const parser = new EventParser(new PublicKey(solairusPayProgramId), coder)
         for (const event of parser.parseLogs(logs)) {
-          if (event.name === 'PaymentMade' && event.data?.memo === orderId) {
+          if (event.name !== 'PaymentMade') continue
+          const memoField = event.data?.memo
+          let memo: string | undefined
+          if (typeof memoField === 'string') {
+            memo = memoField
+          } else if (memoField instanceof Uint8Array) {
+            memo = Buffer.from(memoField).toString('utf8')
+          } else if (memoField && typeof memoField === 'object' && 'toString' in memoField) {
+            try {
+              const maybeBuf = Buffer.from(memoField as unknown as Uint8Array)
+              memo = maybeBuf.toString('utf8')
+            } catch {
+              memo = String(memoField)
+            }
+          }
+
+          if (memo === orderId) {
             return s.signature
           }
         }
@@ -456,7 +473,13 @@ async function reapplyLicenseHandler(req: Request, res: Response) {
   
   // Allow both confirmed and pending transactions (pending may have been paid on-chain)
   const connection = getConnection()
-  const solairusPayProgramId = 'CMvEEAXnNKZs7brTjVp4dqtPzkdRqSjnFNG9zpBjUP3g'
+  const solairusPayProgramId =
+    process.env.SOLAIRUS_PAY_PROGRAM_ID ??
+    (solairusPayIdl as { address?: string }).address ??
+    ''
+  if (!solairusPayProgramId) {
+    return res.status(500).json({ error: 'Solairus pay program id not configured' })
+  }
 
   // If signature is missing but we have orderId, try to find it via PaymentMade events
   if (!record.signature && orderId) {

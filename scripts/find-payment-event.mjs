@@ -11,6 +11,8 @@
  */
 
 import { Connection, PublicKey } from '@solana/web3.js';
+import { BorshCoder, EventParser } from '@coral-xyz/anchor';
+import solairusPayIdl from '../server/idl/solairus_pay.json' assert { type: 'json' };
 import process from 'node:process';
 import { Buffer } from 'node:buffer';
 
@@ -49,23 +51,15 @@ function resolveRpcUrl() {
 
 const rpcUrl = resolveRpcUrl();
 const connection = new Connection(rpcUrl, 'confirmed');
-
-const PAYMENT_MADE_DISCRIMINATOR = Buffer.from([227, 251, 123, 16, 133, 220, 83, 242]);
-const MEMO_OFFSET = 32 + 32 + 32 + 8 + 1 + 32; // 137
-
-function extractMemoFromLog(log) {
-  if (!log.includes('Program data:')) return null;
-  const base64 = log.split('Program data: ')[1]?.trim();
-  if (!base64) return null;
-  const buf = Buffer.from(base64, 'base64');
-  if (buf.length < MEMO_OFFSET + 4) return null;
-  const discriminator = buf.subarray(0, 8);
-  if (!discriminator.equals(PAYMENT_MADE_DISCRIMINATOR)) return null;
-  const memoLen = buf.readUInt32LE(MEMO_OFFSET);
-  const start = MEMO_OFFSET + 4;
-  if (buf.length < start + memoLen) return null;
-  return buf.subarray(start, start + memoLen).toString('utf8');
+const programId =
+  process.env.SOLAIRUS_PAY_PROGRAM_ID ??
+  (solairusPayIdl.address || process.env.VITE_SOLAIRUS_MAIN_PROGRAM_ID);
+if (!programId) {
+  console.error('Missing SOLAIRUS_PAY_PROGRAM_ID or IDL address. Unable to parse events.');
+  process.exit(1);
 }
+const coder = new BorshCoder(solairusPayIdl);
+const parser = new EventParser(new PublicKey(programId), coder);
 
 async function run() {
   console.log(`Searching payments for payer ${payerAddress.toBase58()} on ${rpcUrl}`);
@@ -78,9 +72,16 @@ async function run() {
       maxSupportedTransactionVersion: 0,
     });
     if (!parsed || !parsed.meta?.logMessages) continue;
-    for (const log of parsed.meta.logMessages) {
-      const memo = extractMemoFromLog(log);
-      if (memo && memo === targetOrderId) {
+    for (const event of parser.parseLogs(parsed.meta.logMessages)) {
+      if (event.name !== 'PaymentMade') continue;
+      const memoField = event.data?.memo;
+      const memo =
+        typeof memoField === 'string'
+          ? memoField
+          : memoField instanceof Uint8Array
+          ? Buffer.from(memoField).toString('utf8')
+          : String(memoField ?? '');
+      if (memo === targetOrderId) {
         console.log('\n✅ Found matching transaction!');
         console.log(`Signature: ${sig.signature}`);
         console.log(`Slot: ${parsed.slot}`);

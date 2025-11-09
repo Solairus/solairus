@@ -8,7 +8,12 @@ import { PublicKey } from '@solana/web3.js'
 import { retryOperation } from './rpc-manager'
 
 /** Default program ID for solairus_pay (from IDL). Can be overridden by env. */
-const DEFAULT_SOLAIRUS_PAY_PROGRAM_ID = new PublicKey('6hvnwbkJqbFAWBKbrj22giH33hVUTLuLcPAvtCkkpSZ4')
+import solairusPayIdl from '../idl/solairus_pay.json'
+
+const idlAddress = (solairusPayIdl as { address?: string }).address
+const DEFAULT_SOLAIRUS_PAY_PROGRAM_ID = new PublicKey(
+  process.env.SOLAIRUS_PAY_PROGRAM_ID ?? idlAddress ?? '11111111111111111111111111111111'
+)
 
 /** Derive the config PDA for solairus_pay */
 export function deriveSolairusPayConfigPda(programId?: PublicKey): PublicKey {
