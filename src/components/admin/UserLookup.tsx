@@ -6,22 +6,21 @@ import { Badge } from '@/components/ui/badge';
 import { Search, User, Calendar, Wallet, AlertCircle, CheckCircle, Clock } from 'lucide-react';
 import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '@/contexts/wallet-context';
-import { getProgram, derivePdas, UserProfile, getLicenseInfo, getAffiliateEarnings } from '@/lib/solairus-removed';
 import { toast } from 'sonner';
-import * as anchor from '@coral-xyz/anchor';
+import { ApiClient } from '@/config/service-endpoints';
 
 export interface UserInfo {
   address: string;
   exists: boolean;
-  profile?: UserProfile;
-  balance?: anchor.BN; // Credit balance (managed by admin)
-  principalBalance?: anchor.BN; // Principal balance (from license activations)
-  sponsor?: PublicKey;
+  profile?: any; // Simplified for backend data
+  balance?: number; // Credit balance in USDT (not micro)
+  principalBalance?: number; // Principal balance in USDT
+  sponsor?: string; // Public key as string
   licenseStatus?: 'active' | 'expired' | 'near-expiry' | 'none';
-  licenseExpiresAt?: Date;
+  licenseExpiresAt?: string; // ISO date string
   daysRemaining?: number;
-  totalAffiliateEarnings?: anchor.BN;
-  availableAffiliateEarnings?: anchor.BN;
+  totalAffiliateEarnings?: number; // In USDT
+  availableAffiliateEarnings?: number; // In USDT
 }
 
 interface UserLookupProps {
@@ -47,11 +46,6 @@ export function UserLookup({ onUserFound, showCreateOption = false, className }:
   };
 
   const lookupUser = async () => {
-    if (!anchorProvider) {
-      toast.error('Wallet not connected');
-      return;
-    }
-
     if (!userAddress.trim()) {
       setError('Please enter a user address');
       return;
@@ -67,60 +61,46 @@ export function UserLookup({ onUserFound, showCreateOption = false, className }:
     setUserInfo(null);
 
     try {
-      const userPubkey = new PublicKey(userAddress);
-      const program = getProgram(anchorProvider);
-      const { profile } = derivePdas(userPubkey);
-
-      if (!profile) {
-        throw new Error('Could not derive user profile PDA');
-      }
-
-      let userProfile: UserProfile | undefined;
-      let exists = false;
-
-      try {
-        userProfile = await program.account["userProfile"].fetch(profile) as UserProfile;
-        exists = true;
-      } catch (fetchError) {
-        // User doesn't exist, which is fine
-        exists = false;
-      }
+      // Use backend API instead of blockchain calls
+      const response = await ApiClient.get(`/admin/users/${userAddress}`);
+      const userData = response.data;
 
       const info: UserInfo = {
         address: userAddress,
-        exists,
-        profile: userProfile,
+        exists: !!userData,
+        profile: userData,
+        balance: userData?.credit_balance || 0,
+        principalBalance: userData?.principal_balance || 0,
+        sponsor: userData?.ref_by,
+        licenseStatus: userData?.license_status,
+        licenseExpiresAt: userData?.license_expiration,
+        daysRemaining: userData?.days_remaining,
+        totalAffiliateEarnings: userData?.total_affiliate_earnings || 0,
+        availableAffiliateEarnings: userData?.available_affiliate_earnings || 0,
       };
-
-      if (userProfile) {
-        // Get license information
-        const licenseInfo = getLicenseInfo(userProfile);
-        info.licenseStatus = licenseInfo.status;
-        info.licenseExpiresAt = licenseInfo.expirationDate;
-        info.daysRemaining = licenseInfo.daysRemaining;
-
-        // Get sponsor information
-        info.sponsor = userProfile.sponsor;
-
-        // Get balances
-        info.balance = userProfile.creditBalance; // Credit balance (managed by admin)
-        info.principalBalance = userProfile.activePrincipalUsdt; // Principal balance (from license activations)
-
-        // Get affiliate earnings
-        const affiliateEarnings = getAffiliateEarnings(userProfile);
-        info.totalAffiliateEarnings = affiliateEarnings.totalEarnings;
-        info.availableAffiliateEarnings = affiliateEarnings.availableToWithdraw;
-      }
 
       setUserInfo(info);
       onUserFound?.(info);
 
-    } catch (lookupError) {
+    } catch (lookupError: unknown) {
       console.error('User lookup error:', lookupError);
-      setError(lookupError instanceof Error ? lookupError.message : 'Failed to lookup user');
-      toast.error('Failed to lookup user', {
-        description: lookupError instanceof Error ? lookupError.message : 'Unknown error occurred',
-      });
+
+      const error = lookupError as any;
+      if (error?.response?.status === 404) {
+        // User not found - this is expected
+        const info: UserInfo = {
+          address: userAddress,
+          exists: false,
+        };
+        setUserInfo(info);
+        onUserFound?.(info);
+      } else {
+        const errorMessage = error?.response?.data?.error || error?.message || 'Failed to lookup user';
+        setError(errorMessage);
+        toast.error('Failed to lookup user', {
+          description: errorMessage,
+        });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -130,11 +110,10 @@ export function UserLookup({ onUserFound, showCreateOption = false, className }:
     const value = e.target.value;
     setUserAddress(value);
     setError(null);
-    
+
     // Clear user info when address changes
     if (userInfo && userInfo.address !== value) {
       setUserInfo(null);
-      onUserFound?.(null as unknown);
     }
   };
 
@@ -144,29 +123,10 @@ export function UserLookup({ onUserFound, showCreateOption = false, className }:
     }
   };
 
-  const formatBalance = (balance: anchor.BN): string => {
+  const formatBalance = (balance: number): string => {
     try {
-      // Convert from smallest unit (6 decimals for USDT) to display format
-      const divisor = new anchor.BN(1000000); // 10^6
-      const wholePart = balance.div(divisor);
-      const fractionalPart = balance.mod(divisor);
-      
-      if (fractionalPart.eq(new anchor.BN(0))) {
-        return wholePart.toString();
-      }
-      
-      const fractionalStr = fractionalPart.toString().padStart(6, '0').replace(/0+$/, '');
-      return `${wholePart.toString()}.${fractionalStr}`;
-    } catch {
-      return '0';
-    }
-  };
-
-  const formatCreditBalance = (balance: anchor.BN): string => {
-    try {
-      // Credit balance is stored as whole USDT amounts, not micro-USDT
-      const amount = balance.toNumber();
-      return amount.toLocaleString('en-US', {
+      // Balance is already in USDT (not micro-USDT)
+      return balance.toLocaleString('en-US', {
         minimumFractionDigits: 0,
         maximumFractionDigits: 6
       });
@@ -272,12 +232,12 @@ export function UserLookup({ onUserFound, showCreateOption = false, className }:
                     <span className="text-sm">Credit Balance:</span>
                   </div>
                   <span className="text-white font-semibold">
-                    {formatBalance(userInfo.balance || new anchor.BN(0))} USDT
+                    {formatBalance(userInfo.balance || 0)} USDT
                   </span>
                 </div>
 
                 {/* Principal Balance (from license activations) */}
-                {userInfo.principalBalance && !userInfo.principalBalance.eq(new anchor.BN(0)) && (
+                {userInfo.principalBalance && userInfo.principalBalance > 0 && (
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-gray-400">
                       <Wallet className="h-4 w-4" />
@@ -308,12 +268,12 @@ export function UserLookup({ onUserFound, showCreateOption = false, className }:
                 {/* License Expiration Details */}
                 {userInfo.licenseStatus === 'active' || userInfo.licenseStatus === 'near-expiry' ? (
                   <div className="text-xs text-gray-500">
-                    Expires: {userInfo.licenseExpiresAt?.toLocaleDateString()} 
+                    Expires: {userInfo.licenseExpiresAt ? new Date(userInfo.licenseExpiresAt).toLocaleDateString() : 'Unknown'}
                     ({userInfo.daysRemaining} days remaining)
                   </div>
                 ) : userInfo.licenseStatus === 'expired' && userInfo.licenseExpiresAt ? (
                   <div className="text-xs text-red-400">
-                    Expired: {userInfo.licenseExpiresAt.toLocaleDateString()}
+                    Expired: {new Date(userInfo.licenseExpiresAt).toLocaleDateString()}
                   </div>
                 ) : null}
 
@@ -328,7 +288,7 @@ export function UserLookup({ onUserFound, showCreateOption = false, className }:
                 )}
 
                 {/* Affiliate Earnings */}
-                {userInfo.totalAffiliateEarnings && !userInfo.totalAffiliateEarnings.eq(new anchor.BN(0)) && (
+                {userInfo.totalAffiliateEarnings && userInfo.totalAffiliateEarnings > 0 && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-gray-400 text-sm">Total Affiliate Earnings:</span>
@@ -339,7 +299,7 @@ export function UserLookup({ onUserFound, showCreateOption = false, className }:
                     <div className="flex items-center justify-between">
                       <span className="text-gray-400 text-sm">Available to Withdraw:</span>
                       <span className="text-blue-400 font-semibold">
-                        {formatBalance(userInfo.availableAffiliateEarnings || new anchor.BN(0))} USDT
+                        {formatBalance(userInfo.availableAffiliateEarnings || 0)} USDT
                       </span>
                     </div>
                   </div>

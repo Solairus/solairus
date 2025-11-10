@@ -1,17 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useWallet } from '@/contexts/wallet-context';
-import { getProgram, derivePdas, Config } from "@/lib/solairus-removed";
-import * as anchor from '@coral-xyz/anchor';
+import { ApiClient } from '@/config/service-endpoints';
 
-export type BucketType = 'admin' | 'dev' | 'marketer1' | 'marketer2' | 'trader' | 'systemreserve';
+export type BucketType = 'admin' | 'dev' | 'marketer_1' | 'marketer_2' | 'trader' | 'reserve';
 
 export interface BucketBalances {
-  admin: anchor.BN;
-  dev: anchor.BN;
-  marketer1: anchor.BN;
-  marketer2: anchor.BN;
-  trader: anchor.BN;
-  systemreserve: anchor.BN;
+  admin: number;
+  dev: number;
+  marketer_1: number;
+  marketer_2: number;
+  trader: number;
+  reserve: number;
 }
 
 export interface UseBucketBalancesReturn {
@@ -22,34 +20,25 @@ export interface UseBucketBalancesReturn {
 }
 
 export function useBucketBalances(): UseBucketBalancesReturn {
-  const { anchorProvider } = useWallet();
   const [balances, setBalances] = useState<BucketBalances | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchBalances = useCallback(async () => {
-    if (!anchorProvider) {
-      setError('Wallet not connected');
-      setLoading(false);
-      return;
-    }
-
     try {
       setLoading(true);
       setError(null);
 
-      const program = getProgram(anchorProvider);
-      const { config } = derivePdas();
-      
-      const configData = await program.account["config"].fetch(config) as Config;
-      
+      const response = await ApiClient.get('/admin/buckets');
+      const bucketData = response.data;
+
       const bucketBalances: BucketBalances = {
-        admin: configData.bucketAdminUsdt,
-        dev: configData.bucketDevUsdt,
-        marketer1: configData.bucketMarketer1Usdt,
-        marketer2: configData.bucketMarketer2Usdt,
-        trader: configData.bucketTraderUsdt,
-        systemreserve: configData.bucketSystemreserveUsdt,
+        admin: bucketData.admin || 0,
+        dev: bucketData.dev || 0,
+        marketer_1: bucketData.marketer_1 || 0,
+        marketer_2: bucketData.marketer_2 || 0,
+        trader: bucketData.trader || 0,
+        reserve: bucketData.reserve || 0,
       };
 
       setBalances(bucketBalances);
@@ -59,7 +48,7 @@ export function useBucketBalances(): UseBucketBalancesReturn {
     } finally {
       setLoading(false);
     }
-  }, [anchorProvider]);
+  }, []);
 
   useEffect(() => {
     fetchBalances();
