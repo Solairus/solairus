@@ -1,43 +1,220 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, Wallet, AlertCircle } from 'lucide-react';
-import { BucketCard } from './BucketCard';
-import { useBucketBalances, BucketType } from '@/hooks/useBucketBalances';
-import { useAdminRole } from '@/hooks/useAdminRole';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { RefreshCw, Wallet, AlertCircle, ArrowDownToLine, DollarSign } from 'lucide-react';
 import { useWallet } from '@/contexts/wallet-context';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useAdminErrorHandler } from '@/utils/admin-error-handler';
+import { useTransactionStatus } from '@/hooks/useTransactionStatus';
+import { LoadingCard } from './LoadingStates';
+import { ConfirmationDialog } from './ConfirmationDialog';
+import { FormValidation, useFormValidation, validators } from './FormValidation';
+import { ApiClient, API_CONFIG } from '@/config/service-endpoints';
+import { useToast } from '@/hooks/use-toast';
+import { PublicKey } from '@solana/web3.js';
+import { Transaction } from '@solana/web3.js';
+import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
+import * as anchor from '@coral-xyz/anchor';
+
+type BucketType = 'admin' | 'dev' | 'marketer1' | 'marketer2' | 'trader' | 'reserve';
+
+interface BucketBalances {
+  id: number;
+  admin: string;
+  dev: string;
+  marketer1: string;
+  marketer2: string;
+  trader: string;
+  reserve: string;
+}
 
 export function BucketManagement() {
-  const { publicKey } = useWallet();
-  const { context: adminContext, hasAccess } = useAdminRole();
-  const { balances, loading, error, refresh } = useBucketBalances();
+  const { publicKey, anchorProvider, signTransaction } = useWallet();
+  const { toast } = useToast();
+  const { showError } = useAdminErrorHandler();
 
-  if (!hasAccess) {
+  const [balances, setBalances] = useState<BucketBalances | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [showWithdrawForm, setShowWithdrawForm] = useState(false);
+  const [selectedBucket, setSelectedBucket] = useState<BucketType | null>(null);
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+
+  const validation = useFormValidation();
+
+  // Get user role from wallet address
+  const getUserRole = (walletAddress: string): 'admin' | 'dev' | 'marketer1' | 'marketer2' | 'none' => {
+    const ADMIN_PUBKEY = process.env.VITE_ADMIN_ADDRESS || '';
+    const MARKETER_1_PUBKEY = process.env.VITE_MARKETER1_ADDRESS || '';
+    const MARKETER_2_PUBKEY = process.env.VITE_MARKETER2_ADDRESS || '';
+
+    if (walletAddress === ADMIN_PUBKEY) return 'admin';
+    if (walletAddress === MARKETER_1_PUBKEY) return 'marketer1';
+    if (walletAddress === MARKETER_2_PUBKEY) return 'marketer2';
+    // TODO: Check if deployer (dev role)
+    return 'none';
+  };
+
+  // Get accessible buckets for role
+  const getAccessibleBuckets = (role: string): BucketType[] => {
+    switch (role) {
+      case 'admin': return ['admin', 'trader', 'reserve'];
+      case 'dev': return ['admin', 'dev', 'trader', 'reserve', 'marketer1', 'marketer2'];
+      case 'marketer1': return ['marketer1'];
+      case 'marketer2': return ['marketer2'];
+      default: return [];
+    }
+  };
+
+  const userRole = publicKey ? getUserRole(publicKey.toBase58()) : 'none';
+  const accessibleBuckets = getAccessibleBuckets(userRole);
+
+  const loadBalances = async () => {
+    try {
+      setLoading(true);
+      const baseUrl = API_CONFIG.getBaseUrl();
+      const response = await ApiClient.get(`${baseUrl}/admin/buckets`);
+      const data = await response.json();
+      setBalances(data);
+    } catch (error) {
+      console.error('Error loading bucket balances:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load bucket balances',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (userRole !== 'none') {
+      loadBalances();
+    }
+  }, [userRole]);
+
+  if (userRole === 'none') {
     return (
-      <Alert className="bg-red-900/20 border-red-800">
-        <AlertCircle className="h-4 w-4" />
-        <AlertDescription className="text-red-400">
-          Access denied. Admin privileges required.
-        </AlertDescription>
-      </Alert>
+      <Card className="bg-red-900/20 border-red-800">
+        <CardContent className="p-6">
+          <AlertCircle className="h-8 w-8 text-red-400 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-red-400 text-center mb-2">Access Denied</h3>
+          <p className="text-red-300 text-center">
+            Admin privileges required to access bucket management.
+          </p>
+        </CardContent>
+      </Card>
     );
   }
 
-  const getAccessibleBuckets = (): BucketType[] => {
-    return adminContext.accessibleBuckets as BucketType[];
+  // Helper: resolve USDT mint based on cluster
+  const resolveUsdtMint = (): PublicKey => {
+    const override = localStorage.getItem('solana_cluster_override')?.toLowerCase();
+    const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? 'devnet').toLowerCase();
+    const effective = override || envCluster;
+    const normalized = effective.startsWith('mainnet') ? 'mainnet-beta' : 'devnet';
+
+    const mintStr = normalized === 'mainnet-beta'
+      ? (import.meta.env.VITE_USDT_MINT as string)
+      : (import.meta.env.VITE_USDT_MINT_DEVNET as string);
+
+    if (!mintStr) throw new Error('USDT mint not configured');
+    return new PublicKey(mintStr);
   };
 
-  const canWithdrawFromBucket = (bucketType: BucketType): boolean => {
-    const accessibleBuckets = getAccessibleBuckets();
-    return accessibleBuckets.includes(bucketType);
+  const handleWithdraw = async () => {
+    if (!selectedBucket || !publicKey || !anchorProvider || !signTransaction) {
+      showError('Wallet not connected', 'Bucket withdrawal', undefined, { showRetry: false });
+      return;
+    }
+
+    const amount = parseFloat(withdrawAmount);
+    if (!amount || amount <= 0) {
+      showError('Enter a valid amount', 'Bucket withdrawal', undefined, { showRetry: false });
+      return;
+    }
+
+    const amountMicro = Math.floor(amount * 1_000_000);
+    const currentBalance = balances ? parseFloat(balances[selectedBucket] || '0') : 0;
+
+    if (amountMicro > currentBalance) {
+      showError('Insufficient bucket balance', 'Bucket withdrawal', undefined, { showRetry: false });
+      return;
+    }
+
+    try {
+      setWithdrawing(true);
+
+      // Resolve USDT mint and recipient ATA
+      const mint = resolveUsdtMint();
+      const recipientAta = getAssociatedTokenAddressSync(
+        mint,
+        publicKey,
+        false,
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      );
+
+      // Call backend to init withdrawal
+      const baseUrl = API_CONFIG.getBaseUrl();
+      const initUrl = `${baseUrl}/admin/buckets/${selectedBucket}/withdraw/init`;
+      const initResp = await ApiClient.post(initUrl, {
+        amountMicro,
+        mintAddress: mint.toBase58(),
+        recipientAta: recipientAta.toBase58(),
+      });
+      const initJson = await initResp.json();
+      const { orderId, txBase64, ttlMs } = initJson;
+
+      if (!orderId || !txBase64) throw new Error('Invalid init response');
+
+      // Decode, sign and send transaction
+      const tx = Transaction.from(Buffer.from(txBase64, 'base64'));
+      const signed = await signTransaction(tx);
+      const signature = await anchorProvider.connection.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+
+      // Confirm on-chain
+      const conf = await anchorProvider.connection.confirmTransaction(signature, 'confirmed');
+      const ok = !conf?.value?.err;
+
+      // Poll order status
+      let finalized = false;
+      for (let i = 0; i < 5 && !finalized; i++) {
+        await new Promise(r => setTimeout(r, 1500));
+        try {
+          const sResp = await ApiClient.get(`${baseUrl}/transactions/${orderId}`);
+          const sJson = await sResp.json();
+          finalized = Boolean(sJson?.finalized);
+        } catch {}
+      }
+
+      if (ok) {
+        toast({
+          title: 'Success',
+          description: `Successfully withdrew ${amount} USDT from ${selectedBucket} bucket`,
+        });
+        setShowWithdrawForm(false);
+        setWithdrawAmount('');
+        setSelectedBucket(null);
+        await loadBalances();
+      } else {
+        throw new Error('Transaction failed');
+      }
+    } catch (error: any) {
+      const msg = error.message || 'Withdrawal failed';
+      showError(msg, 'Bucket withdrawal', undefined, { showRetry: true });
+    } finally {
+      setWithdrawing(false);
+    }
   };
 
-  const getAllBuckets = (): BucketType[] => {
-    return ['admin', 'dev', 'marketer1', 'marketer2', 'trader', 'systemreserve'];
+  const formatBalance = (balanceStr: string): string => {
+    const balance = parseFloat(balanceStr || '0') / 1_000_000;
+    return balance.toFixed(2);
   };
-
-  const bucketsToShow = adminContext.canViewAllBuckets ? getAllBuckets() : getAccessibleBuckets();
 
   if (loading) {
     return (
@@ -58,52 +235,6 @@ export function BucketManagement() {
     );
   }
 
-  if (error) {
-    return (
-      <Card className="bg-gray-900/50 border-gray-800">
-        <CardHeader>
-          <CardTitle className="text-xl font-bold text-white flex items-center gap-2">
-            <Wallet className="h-6 w-6" />
-            Bucket Management
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Alert className="bg-red-900/20 border-red-800">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription className="text-red-400">
-              Failed to load bucket balances: {error}
-            </AlertDescription>
-          </Alert>
-          <Button
-            onClick={refresh}
-            className="mt-4 bg-blue-600 hover:bg-blue-700 text-white"
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Retry
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!balances) {
-    return (
-      <Card className="bg-gray-900/50 border-gray-800">
-        <CardHeader>
-          <CardTitle className="text-xl font-bold text-white flex items-center gap-2">
-            <Wallet className="h-6 w-6" />
-            Bucket Management
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center text-gray-400 py-8">
-            No bucket data available
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
     <div className="space-y-6">
       <Card className="bg-gray-900/50 border-gray-800">
@@ -114,7 +245,7 @@ export function BucketManagement() {
               Bucket Management
             </CardTitle>
             <Button
-              onClick={refresh}
+              onClick={loadBalances}
               variant="outline"
               size="sm"
               className="border-gray-700 text-gray-300 hover:bg-gray-800"
@@ -124,32 +255,122 @@ export function BucketManagement() {
             </Button>
           </div>
           <p className="text-gray-400 text-sm">
-            Manage system bucket balances and withdrawals. 
-            {adminContext.canViewAllBuckets 
-              ? ' You can view all buckets and withdraw from accessible ones.'
-              : ' You can only access your authorized buckets.'
-            }
+            Manage system bucket balances and withdrawals.
+            You can withdraw from {accessibleBuckets.join(', ')} buckets.
           </p>
         </CardHeader>
       </Card>
 
+      {/* Bucket Balances Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {bucketsToShow.map((bucketType) => (
-          <BucketCard
-            key={bucketType}
-            bucketType={bucketType}
-            balance={balances[bucketType]}
-            canWithdraw={canWithdrawFromBucket(bucketType)}
-            onWithdrawSuccess={refresh}
-          />
-        ))}
+        {(['admin', 'dev', 'marketer1', 'marketer2', 'trader', 'reserve'] as BucketType[]).map((bucketType) => {
+          const canWithdraw = accessibleBuckets.includes(bucketType);
+          const balance = balances ? formatBalance(balances[bucketType]) : '0.00';
+
+          return (
+            <Card key={bucketType} className="bg-gray-900/50 border-gray-800">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-full bg-blue-500/10">
+                      <DollarSign className="h-5 w-5 text-blue-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-white capitalize">
+                        {bucketType} Bucket
+                      </h3>
+                      <Badge
+                        variant={canWithdraw ? "default" : "secondary"}
+                        className={canWithdraw ? "bg-green-500/10 text-green-400" : "bg-gray-500/10 text-gray-400"}
+                      >
+                        {canWithdraw ? 'Can Withdraw' : 'View Only'}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-white">${balance}</p>
+                    <p className="text-sm text-gray-400">USDT Balance</p>
+                  </div>
+
+                  {canWithdraw && (
+                    <Button
+                      onClick={() => {
+                        setSelectedBucket(bucketType);
+                        setShowWithdrawForm(true);
+                      }}
+                      disabled={parseFloat(balance) <= 0}
+                      className="w-full bg-blue-600 hover:bg-blue-700"
+                    >
+                      <ArrowDownToLine className="h-4 w-4 mr-2" />
+                      Withdraw
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
-      {bucketsToShow.length === 0 && (
-        <Card className="bg-gray-900/50 border-gray-800">
-          <CardContent className="py-8">
-            <div className="text-center text-gray-400">
-              No accessible buckets found for your role.
+      {/* Withdrawal Form Modal */}
+      {showWithdrawForm && selectedBucket && (
+        <Card className="bg-gray-900 border-gray-800">
+          <CardHeader>
+            <CardTitle className="text-white">Withdraw from {selectedBucket} Bucket</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="withdraw-amount" className="text-gray-300">
+                Amount (USDT)
+              </Label>
+              <Input
+                id="withdraw-amount"
+                type="number"
+                step="0.01"
+                value={withdrawAmount}
+                onChange={(e) => setWithdrawAmount(e.target.value)}
+                placeholder="Enter amount in USDT"
+                max={balances ? formatBalance(balances[selectedBucket]) : '0'}
+                className="bg-gray-800 border-gray-700 text-white"
+                disabled={withdrawing}
+              />
+              <p className="text-sm text-gray-400">
+                Available: ${balances ? formatBalance(balances[selectedBucket]) : '0.00'} USDT
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <Button
+                onClick={handleWithdraw}
+                disabled={withdrawing || !withdrawAmount}
+                className="flex-1 bg-blue-600 hover:bg-blue-700"
+              >
+                {withdrawing ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    Withdrawing...
+                  </>
+                ) : (
+                  <>
+                    <ArrowDownToLine className="h-4 w-4 mr-2" />
+                    Withdraw
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowWithdrawForm(false);
+                  setWithdrawAmount('');
+                  setSelectedBucket(null);
+                }}
+                variant="outline"
+                disabled={withdrawing}
+              >
+                Cancel
+              </Button>
             </div>
           </CardContent>
         </Card>

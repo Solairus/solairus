@@ -15,6 +15,9 @@ import { BorshCoder, EventParser, Idl, utils } from '@coral-xyz/anchor'
 import solairusPayIdl from '../idl/solairus_pay.json'
 import { getConnection } from '../lib/rpc-manager'
 import { attemptExpiredWithdrawalRefund } from '../services/withdrawal_refund'
+import { distributeAffiliateBonuses } from '../services/affiliate'
+import { applyBucketChange } from '../services/bucket'
+import { pool } from '../db'
 
 /**
  * Resolve mainnet RPC URL using the same logic as scripts/find-payment-event.mjs
@@ -1050,13 +1053,13 @@ export default router
 async function applyPostConfirmation(record: Transaction) {
   if (record.status !== 'confirmed') return
 
+  // Resolve user id from initiator wallet (needed for all distributions)
+  const ures = await query<{ id: number }>('SELECT id FROM users WHERE user_address = $1 LIMIT 1', [record.initiator_wallet])
+  const userId = ures.rows[0]?.id
+  if (!userId) return
+
   // A) License activation: mark user license active and set expiration
   if (record.type === 'license_activation') {
-    // Resolve user id from initiator wallet
-    const ures = await query<{ id: number }>('SELECT id FROM users WHERE user_address = $1 LIMIT 1', [record.initiator_wallet])
-    const userId = ures.rows[0]?.id
-    if (!userId) return
-
     // Load term days from settings (fallback to 365)
     const termSql = "SELECT value, type FROM settings WHERE key = 'license.term_days' LIMIT 1"
     const termRes = await query<{ value: unknown; type: string }>(termSql)
@@ -1087,49 +1090,154 @@ async function applyPostConfirmation(record: Transaction) {
       JSON.stringify({ phase: 'completed', completed: true }),
       record.id,
     ])
-
-    return
   }
 
   // B) Agent activation: existing behavior
-  if (record.type !== 'agent_activation') return
-  if (!record.signature) return
+  if (record.type === 'agent_activation') {
+    if (!record.signature) return
 
-  // Avoid duplicate agent creation for the same signature
-  const dup = await query<{ id: number }>('SELECT id FROM agents WHERE activation_signature = $1 LIMIT 1', [record.signature])
-  if (dup.rows.length) return
+    // Avoid duplicate agent creation for the same signature
+    const dup = await query<{ id: number }>('SELECT id FROM agents WHERE activation_signature = $1 LIMIT 1', [record.signature])
+    if (dup.rows.length) return
 
-  // Resolve user id from initiator wallet
-  const ures2 = await query<{ id: number }>('SELECT id FROM users WHERE user_address = $1 LIMIT 1', [record.initiator_wallet])
-  const userId2 = ures2.rows[0]?.id
-  if (!userId2) return
+    // Match tier by amount (micro-USDT)
+    const tres = await query<{ id: number; tier_name: string }>(
+      'SELECT id, tier_name FROM agent_tiers WHERE $1::bigint BETWEEN min_amount AND max_amount LIMIT 1',
+      [record.amount]
+    )
+    const tierId = tres.rows[0]?.id ?? null
+    const tierName = tres.rows[0]?.tier_name ?? null
 
-  // Match tier by amount (micro-USDT)
-  const tres = await query<{ id: number; tier_name: string }>(
-    'SELECT id, tier_name FROM agent_tiers WHERE $1::bigint BETWEEN min_amount AND max_amount LIMIT 1',
-    [record.amount]
-  )
-  const tierId = tres.rows[0]?.id ?? null
-  const tierName = tres.rows[0]?.tier_name ?? null
+    // Insert agent row
+    const agentLabel = tierName ? `Agent ${tierName}` : null
+    const meta = { transaction_id: record.id, tier_id: tierId, tier_name: tierName }
+    const ins = await query<{ id: number }>(
+      `INSERT INTO agents (user_id, agent_label, status, activation_signature, amount, tier_id, metadata)
+       VALUES ($1, $2, 'active', $3, $4, $5, $6::jsonb)
+       RETURNING id`,
+      [userId, agentLabel, record.signature, record.amount, tierId, JSON.stringify(meta)]
+    )
 
-  // Insert agent row
-  const agentLabel = tierName ? `Agent ${tierName}` : null
-  const meta = { transaction_id: record.id, tier_id: tierId, tier_name: tierName }
-  const ins = await query<{ id: number }>(
-    `INSERT INTO agents (user_id, agent_label, status, activation_signature, amount, tier_id, metadata)
-     VALUES ($1, $2, 'active', $3, $4, $5, $6::jsonb)
-     RETURNING id`,
-    [userId2, agentLabel, record.signature, record.amount, tierId, JSON.stringify(meta)]
-  )
+    // Backfill transaction metadata with agent linkage
+    const agentId = ins.rows[0]?.id ?? null
+    const tmeta = { agent_id: agentId, tier_id: tierId, tier_name: tierName }
+    await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [JSON.stringify(tmeta), record.id])
 
-  // Backfill transaction metadata with agent linkage
-  const agentId = ins.rows[0]?.id ?? null
-  const tmeta = { agent_id: agentId, tier_id: tierId, tier_name: tierName }
-  await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [JSON.stringify(tmeta), record.id])
+    // Mark transaction lifecycle completed for UI derivation
+    await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
+      JSON.stringify({ phase: 'completed', completed: true }),
+      record.id,
+    ])
+  }
 
-  // Mark transaction lifecycle completed for UI derivation
-  await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
-    JSON.stringify({ phase: 'completed', completed: true }),
-    record.id,
-  ])
+  // C) Distribution logic (only for USDT payments, not credit balance payments)
+  // Check if this was a real USDT payment (not credit balance activation)
+  const isUsdtPayment = record.signature && record.mint_address &&
+    (record.type === 'license_activation' || record.type === 'agent_activation')
+
+  if (isUsdtPayment) {
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+
+      // 1. Always distribute affiliate bonuses (same % for license and agent)
+      await distributeAffiliateBonuses(userId, record.amount, record.id)
+
+      // 2. Distribute payment to buckets based on transaction type
+      const amountUsdt = (record.amount / 1_000_000).toFixed(6)
+
+      if (record.type === 'license_activation') {
+        // Load license distribution settings
+        const settingsRes = await client.query(`
+          SELECT key, value FROM settings
+          WHERE key IN ('license.admin_pct', 'license.dev_pct', 'license.trader_pct', 'license.reserve_pct')
+        `)
+
+        let adminPct = 20, devPct = 30, traderPct = 30, reservePct = 20 // defaults
+
+        for (const row of settingsRes.rows) {
+          const parseVal = (v: unknown): number => {
+            if (typeof v === 'number') return v
+            if (typeof v === 'string') return Number(v)
+            if (typeof v === 'object' && v !== null) {
+              const inner = (v as Record<string, unknown>).value
+              return typeof inner === 'number' ? inner : Number(inner as string)
+            }
+            return 0
+          }
+
+          switch (row.key) {
+            case 'license.admin_pct': adminPct = parseVal(row.value) || 20; break
+            case 'license.dev_pct': devPct = parseVal(row.value) || 30; break
+            case 'license.trader_pct': traderPct = parseVal(row.value) || 30; break
+            case 'license.reserve_pct': reservePct = parseVal(row.value) || 20; break
+          }
+        }
+
+        // Distribute license payment to buckets
+        const totalPct = adminPct + devPct + traderPct + reservePct
+        if (totalPct > 0) {
+          const adminAmount = (parseFloat(amountUsdt) * adminPct / totalPct).toFixed(6)
+          const devAmount = (parseFloat(amountUsdt) * devPct / totalPct).toFixed(6)
+          const traderAmount = (parseFloat(amountUsdt) * traderPct / totalPct).toFixed(6)
+          const reserveAmount = (parseFloat(amountUsdt) * reservePct / totalPct).toFixed(6)
+
+          if (parseFloat(adminAmount) > 0) await applyBucketChange(client, 'admin', 'credit', adminAmount, record.id)
+          if (parseFloat(devAmount) > 0) await applyBucketChange(client, 'dev', 'credit', devAmount, record.id)
+          if (parseFloat(traderAmount) > 0) await applyBucketChange(client, 'trader', 'credit', traderAmount, record.id)
+          if (parseFloat(reserveAmount) > 0) await applyBucketChange(client, 'reserve', 'credit', reserveAmount, record.id)
+        }
+
+      } else if (record.type === 'agent_activation') {
+        // Load agent distribution settings
+        const settingsRes = await client.query(`
+          SELECT key, value FROM settings
+          WHERE key IN ('agent.admin_pct', 'agent.dev_pct', 'agent.trader_pct', 'agent.reserve_pct')
+        `)
+
+        let adminPct = 25, devPct = 25, traderPct = 25, reservePct = 25 // defaults
+
+        for (const row of settingsRes.rows) {
+          const parseVal = (v: unknown): number => {
+            if (typeof v === 'number') return v
+            if (typeof v === 'string') return Number(v)
+            if (typeof v === 'object' && v !== null) {
+              const inner = (v as Record<string, unknown>).value
+              return typeof inner === 'number' ? inner : Number(inner as string)
+            }
+            return 0
+          }
+
+          switch (row.key) {
+            case 'agent.admin_pct': adminPct = parseVal(row.value) || 25; break
+            case 'agent.dev_pct': devPct = parseVal(row.value) || 25; break
+            case 'agent.trader_pct': traderPct = parseVal(row.value) || 25; break
+            case 'agent.reserve_pct': reservePct = parseVal(row.value) || 25; break
+          }
+        }
+
+        // Distribute agent payment to buckets
+        const totalPct = adminPct + devPct + traderPct + reservePct
+        if (totalPct > 0) {
+          const adminAmount = (parseFloat(amountUsdt) * adminPct / totalPct).toFixed(6)
+          const devAmount = (parseFloat(amountUsdt) * devPct / totalPct).toFixed(6)
+          const traderAmount = (parseFloat(amountUsdt) * traderPct / totalPct).toFixed(6)
+          const reserveAmount = (parseFloat(amountUsdt) * reservePct / totalPct).toFixed(6)
+
+          if (parseFloat(adminAmount) > 0) await applyBucketChange(client, 'admin', 'credit', adminAmount, record.id)
+          if (parseFloat(devAmount) > 0) await applyBucketChange(client, 'dev', 'credit', devAmount, record.id)
+          if (parseFloat(traderAmount) > 0) await applyBucketChange(client, 'trader', 'credit', traderAmount, record.id)
+          if (parseFloat(reserveAmount) > 0) await applyBucketChange(client, 'reserve', 'credit', reserveAmount, record.id)
+        }
+      }
+
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      console.error('Error distributing payment:', error)
+      // Don't throw - distribution failure shouldn't block activation
+    } finally {
+      client.release()
+    }
+  }
 }
