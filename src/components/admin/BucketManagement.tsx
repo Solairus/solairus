@@ -127,13 +127,13 @@ export function BucketManagement() {
 
   const handleWithdraw = async () => {
     if (!selectedBucket || !publicKey || !anchorProvider || !signTransaction) {
-      showError('Wallet not connected', 'Bucket withdrawal', undefined, { showRetry: false });
+      showError('Wallet not connected', 'Bucket withdrawal', { showRetry: false });
       return;
     }
 
     const amount = parseFloat(withdrawAmount);
     if (!amount || amount <= 0) {
-      showError('Enter a valid amount', 'Bucket withdrawal', undefined, { showRetry: false });
+      showError('Enter a valid amount', 'Bucket withdrawal', { showRetry: false });
       return;
     }
 
@@ -141,7 +141,7 @@ export function BucketManagement() {
     const currentBalance = balances ? parseFloat(balances[selectedBucket] || '0') : 0;
 
     if (amountMicro > currentBalance) {
-      showError('Insufficient bucket balance', 'Bucket withdrawal', undefined, { showRetry: false });
+      showError('Insufficient bucket balance', 'Bucket withdrawal', { showRetry: false });
       return;
     }
 
@@ -188,7 +188,9 @@ export function BucketManagement() {
           const sResp = await ApiClient.get(`${baseUrl}/transactions/${orderId}`);
           const sJson = await sResp.json();
           finalized = Boolean(sJson?.finalized);
-        } catch {}
+        } catch (error) {
+          console.warn('Error polling transaction status:', error);
+        }
       }
 
       if (ok) {
@@ -203,9 +205,9 @@ export function BucketManagement() {
       } else {
         throw new Error('Transaction failed');
       }
-    } catch (error: any) {
-      const msg = error.message || 'Withdrawal failed';
-      showError(msg, 'Bucket withdrawal', undefined, { showRetry: true });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Withdrawal failed';
+      showError(msg, 'Bucket withdrawal', { showRetry: true });
     } finally {
       setWithdrawing(false);
     }

@@ -51,7 +51,7 @@ function getAccessibleBuckets(role: Role): BucketType[] {
 }
 
 // Middleware to check admin access
-function requireAdmin(req: Request, res: Response, next: (err?: any) => void) {
+function requireAdmin(req: Request, res: Response, next: (err?: Error) => void) {
   const auth = res.locals.auth as { sub: number; addr: string }
   if (!auth?.addr) return res.status(401).json({ error: 'Unauthorized' })
 

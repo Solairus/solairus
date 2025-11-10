@@ -9,10 +9,21 @@ import { useWallet } from '@/contexts/wallet-context';
 import { toast } from 'sonner';
 import { ApiClient } from '@/config/service-endpoints';
 
+export interface UserProfile {
+  credit_balance?: number;
+  principal_balance?: number;
+  ref_by?: string;
+  license_status?: 'active' | 'expired' | 'near-expiry' | 'none';
+  license_expiration?: string;
+  days_remaining?: number;
+  total_affiliate_earnings?: number;
+  available_affiliate_earnings?: number;
+}
+
 export interface UserInfo {
   address: string;
   exists: boolean;
-  profile?: any; // Simplified for backend data
+  profile?: UserProfile;
   balance?: number; // Credit balance in USDT (not micro)
   principalBalance?: number; // Principal balance in USDT
   sponsor?: string; // Public key as string
@@ -63,7 +74,7 @@ export function UserLookup({ onUserFound, showCreateOption = false, className }:
     try {
       // Use backend API instead of blockchain calls
       const response = await ApiClient.get(`/admin/users/${userAddress}`);
-      const userData = response.data;
+      const userData: UserProfile | null = response.ok ? await response.json() : null;
 
       const info: UserInfo = {
         address: userAddress,
@@ -85,7 +96,15 @@ export function UserLookup({ onUserFound, showCreateOption = false, className }:
     } catch (lookupError: unknown) {
       console.error('User lookup error:', lookupError);
 
-      const error = lookupError as any;
+      const error = lookupError as {
+        response?: {
+          status?: number;
+          data?: {
+            error?: string;
+          };
+        };
+        message?: string;
+      };
       if (error?.response?.status === 404) {
         // User not found - this is expected
         const info: UserInfo = {

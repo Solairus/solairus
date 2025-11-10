@@ -175,9 +175,9 @@ export function AgentTiersManagement() {
       setDialogOpen(false);
       resetForm();
       await loadTiers();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error saving agent tier:', error);
-      const message = error.message || 'Failed to save agent tier';
+      const message = error instanceof Error ? error.message : 'Failed to save agent tier';
       toast({
         title: 'Error',
         description: message,
@@ -201,11 +201,12 @@ export function AgentTiersManagement() {
         description: 'Agent tier deleted successfully',
       });
       await loadTiers();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error deleting agent tier:', error);
+      const message = error instanceof Error ? error.message : 'Failed to delete agent tier';
       toast({
         title: 'Error',
-        description: error.message || 'Failed to delete agent tier',
+        description: message,
         variant: 'destructive',
       });
     }

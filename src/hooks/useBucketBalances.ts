@@ -30,7 +30,7 @@ export function useBucketBalances(): UseBucketBalancesReturn {
       setError(null);
 
       const response = await ApiClient.get('/admin/buckets');
-      const bucketData = response.data;
+      const bucketData = await response.json();
 
       const bucketBalances: BucketBalances = {
         admin: bucketData.admin || 0,
