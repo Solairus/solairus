@@ -47,13 +47,14 @@ export function BucketManagement() {
   // Get user role from wallet address
   const getUserRole = (walletAddress: string): 'admin' | 'dev' | 'marketer1' | 'marketer2' | 'none' => {
     const ADMIN_PUBKEY = process.env.VITE_ADMIN_ADDRESS || '';
+    const DEV_PUBKEY = process.env.VITE_DEV_ADDRESS || '';
     const MARKETER_1_PUBKEY = process.env.VITE_MARKETER1_ADDRESS || '';
     const MARKETER_2_PUBKEY = process.env.VITE_MARKETER2_ADDRESS || '';
 
     if (walletAddress === ADMIN_PUBKEY) return 'admin';
+    if (walletAddress === DEV_PUBKEY) return 'dev';
     if (walletAddress === MARKETER_1_PUBKEY) return 'marketer1';
     if (walletAddress === MARKETER_2_PUBKEY) return 'marketer2';
-    // TODO: Check if deployer (dev role)
     return 'none';
   };
 
