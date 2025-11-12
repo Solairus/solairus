@@ -46,7 +46,7 @@ function getUserRole(walletAddress: string): Role {
 // Get accessible buckets for a role
 function getAccessibleBuckets(role: Role): BucketType[] {
   switch (role) {
-    case 'admin': return ['admin', 'trader', 'reserve']
+    case 'admin': return ['admin', 'trader', 'reserve', 'marketer1', 'marketer2']
     case 'dev': return ['admin', 'dev', 'trader', 'reserve', 'marketer1', 'marketer2']
     case 'marketer1': return ['marketer1']
     case 'marketer2': return ['marketer2']

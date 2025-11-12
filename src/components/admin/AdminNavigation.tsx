@@ -3,17 +3,18 @@ import { useAdmin } from './AdminProvider';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Separator } from '../ui/separator';
-import { 
-  Settings, 
-  Users, 
-  Wallet, 
-  Shield, 
+import {
+  Settings,
+  Users,
+  Wallet,
+  Shield,
   CreditCard,
   UserCheck,
   Key,
   Home,
   ArrowLeft,
-  LogOut
+  LogOut,
+  Bot
 } from 'lucide-react';
 
 interface AdminNavigationProps {
@@ -43,13 +44,22 @@ export const AdminNavigation: React.FC<AdminNavigationProps> = ({
   ];
 
   if (context.canAccessConfig) {
-    navigationItems.push({
-      id: 'config',
-      label: 'Configuration',
-      icon: Settings,
-      available: true,
-      description: 'System settings'
-    });
+    navigationItems.push(
+      {
+        id: 'agent-tiers',
+        label: 'Agent Tiers',
+        icon: Bot,
+        available: true,
+        description: 'Configure agent tiers'
+      },
+      {
+        id: 'config',
+        label: 'Configuration',
+        icon: Settings,
+        available: true,
+        description: 'System settings'
+      }
+    );
   }
 
   if (context.accessibleBuckets.length > 0) {

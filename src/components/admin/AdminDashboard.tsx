@@ -6,23 +6,25 @@ import { UserCreditManagement } from './UserCreditManagement';
 import { UserSponsorManagement } from './UserSponsorManagement';
 import { ManualLicenseActivation } from './ManualLicenseActivation';
 import { ConfigManagement } from './ConfigManagement';
+import { AgentTiersManagement } from './AgentTiersManagement';
 import { MarketerDashboard } from './MarketerDashboard';
 import { AdminErrorBoundary } from './AdminErrorBoundary';
 import { ResponsiveCard, InfoCard, ActionCard } from './ResponsiveCard';
 import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
-import { 
-  Settings, 
-  Users, 
-  Wallet, 
-  Shield, 
+import {
+  Settings,
+  Users,
+  Wallet,
+  Shield,
   CreditCard,
   UserCheck,
   Key,
   BarChart3,
   Activity,
   Zap,
-  TrendingUp
+  TrendingUp,
+  Bot
 } from 'lucide-react';
 
 /**
@@ -147,13 +149,23 @@ export const AdminDashboard: React.FC = () => {
           )}
 
           {context.canAccessConfig && (
-            <ActionCard
-              title="Configuration"
-              description="System settings"
-              icon={Settings}
-              onClick={() => setActiveTab('config')}
-              variant="secondary"
-            />
+            <>
+              <ActionCard
+                title="Agent Tiers"
+                description="Configure agent investment tiers"
+                icon={Bot}
+                onClick={() => setActiveTab('agent-tiers')}
+                variant="default"
+              />
+
+              <ActionCard
+                title="Configuration"
+                description="System settings"
+                icon={Settings}
+                onClick={() => setActiveTab('config')}
+                variant="secondary"
+              />
+            </>
           )}
         </div>
       </ResponsiveCard>
@@ -305,12 +317,20 @@ const renderCreditsContent = () => (
     </AdminErrorBoundary>
   );
 
+  const renderAgentTiersContent = () => (
+    <AdminErrorBoundary>
+      <AgentTiersManagement />
+    </AdminErrorBoundary>
+  );
+
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':
         return renderOverviewContent();
       case 'config':
         return renderConfigContent();
+      case 'agent-tiers':
+        return renderAgentTiersContent();
       case 'buckets':
         return renderBucketsContent();
       case 'users':
