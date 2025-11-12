@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useWallet } from '@/contexts/wallet-context';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -105,6 +105,7 @@ function DirectHireModal({
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const [loadingBalance, setLoadingBalance] = useState(false);
   const [txSig, setTxSig] = useState<string>('');
+  const [confirmationCountdown, setConfirmationCountdown] = useState<number | null>(null);
 
   // USDT on-chain balance via reusable hook (same as license activation page)
   const { balanceDisplay: usdtBalanceDisplay, isLoading: usdtLoading, error: usdtError, refresh: refreshUsdt } = useBalance();
@@ -145,6 +146,16 @@ function DirectHireModal({
     }
   }, [isOpen, userPublicKey, anchorProvider, fetchBalances]);
 
+  // Countdown timer for confirmation waiting
+  React.useEffect(() => {
+    if (confirmationCountdown !== null && confirmationCountdown > 0) {
+      const timer = setTimeout(() => {
+        setConfirmationCountdown(confirmationCountdown - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [confirmationCountdown]);
+
   // Reset state when modal opens/closes
   const handleClose = () => {
     setStep('input');
@@ -153,6 +164,7 @@ function DirectHireModal({
     setActivationResult(null);
     setError(null);
     setCreditBalance(null);
+    setConfirmationCountdown(null);
     onClose();
   };
 
@@ -260,8 +272,9 @@ function DirectHireModal({
       const initiatorWallet = userPublicKey.toBase58();
 
       // 1) Backend init: create transaction record to obtain order ID
-      const initUrl = `${API_CONFIG.getBaseUrl()}/payments/agent-activation`;
+      const initUrl = `${API_CONFIG.getBaseUrl()}/payments/activate`;
       const initBody = {
+        type: 'agent_activation',
         initiatorWallet,
         amount: amountMicro,
         mintAddress: usdtMintStr,
@@ -276,6 +289,10 @@ function DirectHireModal({
 
       // 2) On-chain payment via solairus_pay with memo containing order id
       const memo = orderId;
+
+      // Start countdown for user feedback
+      setConfirmationCountdown(30);
+
       const signature = await payService.makePayment({
         payer: userPublicKey,
         mint: usdtMint,
@@ -284,28 +301,59 @@ function DirectHireModal({
         memo,
       });
       setTxSig(signature);
+      setConfirmationCountdown(null); // Payment sent, stop countdown
 
-      // 3) Create transaction record and request verification
-      const createUrl = `${API_CONFIG.getBaseUrl()}/payments/agent-activation`;
-      const createBody = {
+      // 3) Record transaction signature - backend handles verification and status updates
+      const recordUrl = `${API_CONFIG.getBaseUrl()}/transactions/record/signature`;
+      const recordBody = {
+        orderId,
         signature,
-        initiatorWallet,
-        amount: amountMicro,
-        mintAddress: usdtMintStr,
-        decimals: 6,
-        programId: payService.programId.toBase58(),
-        metadata: { order_id: orderId, flow: 'agent_activation', tier: tierName }
       };
-      const createRes = await ApiClient.post(createUrl, createBody);
-      await createRes.json();
-
-      const verifyUrl = `${API_CONFIG.getBaseUrl()}/transactions/verify`;
-      const verifyRes = await ApiClient.post(verifyUrl, { signature });
-      const verifyData = await verifyRes.json();
-      const verified = !!verifyData?.verified;
-      if (!verified) {
-        const reason = verifyData?.reason || 'Verification failed';
+      const recordRes = await ApiClient.post(recordUrl, recordBody);
+      const recordData = await recordRes.json();
+      if (!recordRes.ok) {
+        const reason = recordData?.error || 'Failed to record signature';
         throw new Error(reason);
+      }
+
+      // Poll for backend verification result (backend handles on-chain checking)
+      let attempts = 0;
+      const maxAttempts = 12; // 12 attempts * 5 seconds = 60 seconds max wait
+      while (attempts < maxAttempts) {
+        try {
+          const statusUrl = `${API_CONFIG.getBaseUrl()}/transactions/${orderId}`;
+          const statusRes = await ApiClient.get(statusUrl);
+          const statusData = await statusRes.json();
+
+          if (statusData.status === 'confirmed') {
+            console.log('✅ Transaction confirmed by backend');
+            break; // Success!
+          } else if (statusData.status === 'failed') {
+            throw new Error(statusData.failureReason || statusData.metadata?.failureReason || 'Transaction verification failed');
+          } else if (statusData.status === 'pending') {
+            // Still processing, wait and try again
+            console.log(`⏳ Transaction still pending (attempt ${attempts + 1}/${maxAttempts})`);
+            await new Promise(resolve => setTimeout(resolve, 5000)); // 5 second intervals
+            attempts++;
+            continue;
+          } else {
+            console.warn('Unexpected transaction status:', statusData.status);
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            attempts++;
+            continue;
+          }
+        } catch (pollError) {
+          console.error('Error polling transaction status:', pollError);
+          attempts++;
+          if (attempts >= maxAttempts) {
+            throw pollError;
+          }
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+      }
+
+      if (attempts >= maxAttempts) {
+        throw new Error('Transaction verification timed out - please check your transaction status later');
       }
 
       // Success UI update and callback
@@ -331,6 +379,7 @@ function DirectHireModal({
     setStep('input');
     setError(null);
     setActivationResult(null);
+    setConfirmationCountdown(null);
   };
 
   const handleStartOver = () => {
@@ -339,6 +388,7 @@ function DirectHireModal({
     setPaymentMethod('usdt');
     setActivationResult(null);
     setError(null);
+    setConfirmationCountdown(null);
   };
 
   if (!tierMeta) return null;
@@ -547,8 +597,18 @@ function DirectHireModal({
           {step === 'processing' && (
             <div className="text-center py-8">
               <Loader2 className="h-10 w-10 animate-spin mx-auto text-primary" />
-              <p className="mt-4 text-sm">Processing your activation...</p>
-              <p className="text-xs text-muted-foreground">Please wait while we confirm your transaction.</p>
+              <p className="mt-4 text-sm">
+                {confirmationCountdown !== null
+                  ? `Awaiting blockchain confirmation - ${confirmationCountdown}s`
+                  : 'Processing your activation...'
+                }
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {confirmationCountdown !== null
+                  ? 'Please wait while we confirm your transaction on the blockchain.'
+                  : 'Please wait while we confirm your transaction.'
+                }
+              </p>
             </div>
           )}
 
@@ -639,8 +699,10 @@ export default function DappHire() {
   const navigate = useNavigate();
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
   const [tiersMap, setTiersMap] = useState<Record<string, AgentTierRow>>({});
+  const [pendingTransaction, setPendingTransaction] = useState<Record<string, unknown> | null>(null);
+  const [showPendingDialog, setShowPendingDialog] = useState(false);
 
-  // Fetch agent tiers from backend
+  // Fetch agent tiers from backend and check for pending transactions
   useEffect(() => {
     (async () => {
       try {
@@ -650,12 +712,57 @@ export default function DappHire() {
         console.warn('Failed to load agent tiers from backend:', error);
       }
     })();
-  }, []);
+
+    // Check for pending transactions when component mounts
+    if (publicKey) {
+      checkPendingTransaction();
+    }
+  }, [publicKey]);
 
   const handleActivationSuccess = () => {
     // Close modal and navigate to portfolio
     setSelectedTier(null);
+    setPendingTransaction(null);
+    setShowPendingDialog(false);
     navigate('/dapp/my-agents');
+  };
+
+  const checkPendingTransaction = async () => {
+    if (!publicKey) return;
+
+    try {
+      const lastUrl = `${API_CONFIG.getBaseUrl()}/transactions/last-confirmed?initiatorWallet=${encodeURIComponent(publicKey.toBase58())}`;
+      const lastRes = await ApiClient.get(lastUrl);
+      const lastData = await lastRes.json();
+      const record = lastData?.record as Record<string, unknown> | undefined | null;
+
+      if (record && record.type === 'agent_activation' && record.status === 'pending') {
+        setPendingTransaction(record);
+        setShowPendingDialog(true);
+      }
+    } catch (error) {
+      console.warn('Failed to check pending transactions:', error);
+    }
+  };
+
+  const handleProceedWithPending = () => {
+    if (pendingTransaction) {
+      // Navigate to transaction status page or show modal to complete payment
+      navigate(`/dapp/transactions/${pendingTransaction.order_id}`);
+    }
+  };
+
+  const handleCancelPending = async () => {
+    if (!pendingTransaction) return;
+
+    try {
+      // For now, just close the dialog and clear state
+      // In a full implementation, you'd call an API to mark as cancelled
+      setPendingTransaction(null);
+      setShowPendingDialog(false);
+    } catch (error) {
+      console.warn('Failed to cancel pending transaction:', error);
+    }
   };
 
   return (
@@ -892,6 +999,52 @@ export default function DappHire() {
               onSuccess={handleActivationSuccess}
             />
           )}
+
+          {/* Pending Transaction Dialog */}
+          <Dialog open={showPendingDialog} onOpenChange={setShowPendingDialog}>
+            <DialogContent className="max-w-sm mx-auto">
+              <DialogHeader>
+                <DialogTitle className="text-center">Pending Agent Activation</DialogTitle>
+                <DialogDescription className="text-center">
+                  You have a pending agent activation transaction that needs to be completed.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertCircle className="h-4 w-4 text-blue-600" />
+                    <span className="text-sm font-medium text-blue-800">Transaction Details</span>
+                  </div>
+                  <div className="text-xs text-blue-700 space-y-1">
+                    <p>Amount: ${(pendingTransaction?.amount ? (Number(pendingTransaction.amount) / 1_000_000).toFixed(2) : '0.00')} USDT</p>
+                    <p>Status: {String(pendingTransaction?.status || 'Unknown')}</p>
+                    <p>Created: {pendingTransaction?.created_at ? new Date(pendingTransaction.created_at as string).toLocaleDateString() : 'Unknown'}</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <Button
+                    onClick={handleProceedWithPending}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700"
+                  >
+                    Complete Payment
+                  </Button>
+                  <Button
+                    onClick={handleCancelPending}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    Cancel Transaction
+                  </Button>
+                </div>
+
+                <p className="text-xs text-muted-foreground text-center">
+                  Choose to complete your pending payment or cancel to start fresh.
+                </p>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </WalletGate>
     </LicenseGuard>

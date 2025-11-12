@@ -263,8 +263,9 @@ export default function LicenseActivationPage() {
       const payService = new SolairusPayService(anchorProvider);
 
       // 1) Backend init: create transaction record to obtain order ID (no activation here)
-      const initUrl = `${API_CONFIG.getBaseUrl()}/payments/license-activation`;
+      const initUrl = `${API_CONFIG.getBaseUrl()}/payments/activate`;
       const initBody = {
+        type: 'license_activation',
         initiatorWallet: account,
         amount: licenseFeeMicro,
         mintAddress: usdtMintStr,
@@ -290,7 +291,7 @@ export default function LicenseActivationPage() {
       setTransactionHash(txSig);
 
       // 3) Create transaction record with signature and request verification (user-interactive, no auto-activation)
-      const recordUrl = `${API_CONFIG.getBaseUrl()}/transactions/license-activation/signature`;
+      const recordUrl = `${API_CONFIG.getBaseUrl()}/transactions/record/signature`;
       const recordBody = {
         orderId,
         signature: txSig,

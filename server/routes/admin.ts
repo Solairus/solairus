@@ -23,9 +23,12 @@ declare module 'express' {
 const router = Router()
 
 // Role definitions based on .env pubkeys
+// Admin and marketers are explicitly configured for restricted access.
+// Dev role is recognized via DEV_ADDRESS or VITE_DEV_ADDRESS for local environments.
 const ADMIN_PUBKEY = process.env.ADMIN_PUBKEY || ''
 const MARKETER_1_PUBKEY = process.env.MARKETER_1_PUBKEY || ''
 const MARKETER_2_PUBKEY = process.env.MARKETER_2_PUBKEY || ''
+const DEV_ADDRESS = process.env.DEV_ADDRESS || process.env.VITE_DEV_ADDRESS || ''
 
 type Role = 'admin' | 'dev' | 'marketer1' | 'marketer2' | 'none'
 type BucketType = 'admin' | 'dev' | 'marketer1' | 'marketer2' | 'trader' | 'reserve'
@@ -33,6 +36,7 @@ type BucketType = 'admin' | 'dev' | 'marketer1' | 'marketer2' | 'trader' | 'rese
 // Get user role from wallet address
 function getUserRole(walletAddress: string): Role {
   if (walletAddress === ADMIN_PUBKEY) return 'admin'
+  if (DEV_ADDRESS && walletAddress === DEV_ADDRESS) return 'dev'
   if (walletAddress === MARKETER_1_PUBKEY) return 'marketer1'
   if (walletAddress === MARKETER_2_PUBKEY) return 'marketer2'
   // TODO: Check if wallet is the Solairus pay deployer (dev role)
@@ -198,14 +202,52 @@ router.get('/buckets', requireAdmin, async (req: Request, res: Response) => {
         VALUES (0, 0, 0, 0, 0, 0)
       `)
       const { rows: newRows } = await query('SELECT * FROM bucket_balances WHERE id = 1')
-      return res.json(newRows[0])
+      const filtered = filterBucketsByAccess(newRows[0], req.accessibleBuckets || [])
+      return res.json(filtered)
     }
-    res.json(rows[0])
+    const filtered = filterBucketsByAccess(rows[0], req.accessibleBuckets || [])
+    res.json(filtered)
   } catch (error) {
     console.error('Error fetching bucket balances:', error)
     res.status(500).json({ error: 'Failed to fetch bucket balances' })
   }
 })
+
+// Alias path to support frontend calls to /api/admin/buckets (GET)
+router.get('/admin/buckets', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { rows } = await query('SELECT * FROM bucket_balances WHERE id = 1')
+    if (rows.length === 0) {
+      // Initialize if not exists
+      await query(`
+        INSERT INTO bucket_balances (admin, dev, marketer1, marketer2, trader, reserve)
+        VALUES (0, 0, 0, 0, 0, 0)
+      `)
+      const { rows: newRows } = await query('SELECT * FROM bucket_balances WHERE id = 1')
+      const filtered = filterBucketsByAccess(newRows[0], req.accessibleBuckets || [])
+      return res.json(filtered)
+    }
+    const filtered = filterBucketsByAccess(rows[0], req.accessibleBuckets || [])
+    res.json(filtered)
+  } catch (error) {
+    console.error('Error fetching bucket balances (alias):', error)
+    res.status(500).json({ error: 'Failed to fetch bucket balances' })
+  }
+})
+
+// Helper to filter bucket object by accessible buckets
+function filterBucketsByAccess(row: Record<string, any>, accessible: BucketType[]) {
+  const base: Record<string, any> = {}
+  // Always include id if present
+  if (typeof row.id !== 'undefined') base.id = row.id
+
+  // Only include buckets the role can access
+  for (const key of accessible) {
+    base[key] = row[key] || '0'
+  }
+
+  return base
+}
 
 // Bucket withdrawal init (identical to affiliate withdrawal flow)
 router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Request, res: Response) => {
@@ -330,7 +372,45 @@ router.get('/settings', requireAdmin, async (req: Request, res: Response) => {
   }
 })
 
+// Alias path to support frontend calls to /api/admin/settings (GET)
+router.get('/admin/settings', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { rows } = await query('SELECT key, value, type, description FROM settings ORDER BY key')
+    res.json(rows)
+  } catch (error) {
+    console.error('Error fetching settings:', error)
+    res.status(500).json({ error: 'Failed to fetch settings' })
+  }
+})
+
 router.post('/settings', requireAdmin, async (req: Request, res: Response) => {
+  const parsed = z.array(SettingSchema).safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
+
+  try {
+    const results = []
+    for (const setting of parsed.data) {
+      const { rows } = await query(`
+        INSERT INTO settings (key, value, type, description)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (key) DO UPDATE SET
+          value = EXCLUDED.value,
+          type = EXCLUDED.type,
+          description = EXCLUDED.description,
+          updated_at = NOW()
+        RETURNING *
+      `, [setting.key, JSON.stringify(setting.value), setting.type, setting.description])
+      results.push(rows[0])
+    }
+    res.status(200).json(results)
+  } catch (error) {
+    console.error('Error saving settings:', error)
+    res.status(500).json({ error: 'Failed to save settings' })
+  }
+})
+
+// Alias path to support frontend calls to /api/admin/settings (POST)
+router.post('/admin/settings', requireAdmin, async (req: Request, res: Response) => {
   const parsed = z.array(SettingSchema).safeParse(req.body)
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
 

@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { RefreshCw, Wallet, AlertCircle, ArrowDownToLine, DollarSign } from 'lucide-react';
 import { useWallet } from '@/contexts/wallet-context';
+import { useAdmin } from './AdminProvider';
 import { useAdminErrorHandler } from '@/utils/admin-error-handler';
 import { useTransactionStatus } from '@/hooks/useTransactionStatus';
 import { LoadingCard } from './LoadingStates';
@@ -32,6 +33,7 @@ interface BucketBalances {
 
 export function BucketManagement() {
   const { publicKey, anchorProvider, signTransaction } = useWallet();
+  const { role, context } = useAdmin();
   const { toast } = useToast();
   const { showError } = useAdminErrorHandler();
 
@@ -44,33 +46,11 @@ export function BucketManagement() {
 
   const validation = useFormValidation();
 
-  // Get user role from wallet address
-  const getUserRole = (walletAddress: string): 'admin' | 'dev' | 'marketer1' | 'marketer2' | 'none' => {
-    const ADMIN_PUBKEY = process.env.VITE_ADMIN_ADDRESS || '';
-    const DEV_PUBKEY = process.env.VITE_DEV_ADDRESS || '';
-    const MARKETER_1_PUBKEY = process.env.VITE_MARKETER1_ADDRESS || '';
-    const MARKETER_2_PUBKEY = process.env.VITE_MARKETER2_ADDRESS || '';
-
-    if (walletAddress === ADMIN_PUBKEY) return 'admin';
-    if (walletAddress === DEV_PUBKEY) return 'dev';
-    if (walletAddress === MARKETER_1_PUBKEY) return 'marketer1';
-    if (walletAddress === MARKETER_2_PUBKEY) return 'marketer2';
-    return 'none';
-  };
-
-  // Get accessible buckets for role
-  const getAccessibleBuckets = (role: string): BucketType[] => {
-    switch (role) {
-      case 'admin': return ['admin', 'trader', 'reserve'];
-      case 'dev': return ['admin', 'dev', 'trader', 'reserve', 'marketer1', 'marketer2'];
-      case 'marketer1': return ['marketer1'];
-      case 'marketer2': return ['marketer2'];
-      default: return [];
-    }
-  };
-
-  const userRole = publicKey ? getUserRole(publicKey.toBase58()) : 'none';
-  const accessibleBuckets = getAccessibleBuckets(userRole);
+  // Use centralized role and context from AdminProvider
+  // Normalize accessible buckets: map `systemreserve` → `reserve` for backend compatibility
+  const accessibleBuckets = (context.accessibleBuckets || []).map((b) => (
+    b === 'systemreserve' ? 'reserve' : b
+  )) as BucketType[];
 
   const loadBalances = async () => {
     try {
@@ -92,12 +72,12 @@ export function BucketManagement() {
   };
 
   useEffect(() => {
-    if (userRole !== 'none') {
+    if (role !== null) {
       loadBalances();
     }
-  }, [userRole]);
+  }, [role]);
 
-  if (userRole === 'none') {
+  if (role === null) {
     return (
       <Card className="bg-red-900/20 border-red-800">
         <CardContent className="p-6">
@@ -215,8 +195,30 @@ export function BucketManagement() {
   };
 
   const formatBalance = (balanceStr: string): string => {
-    const balance = parseFloat(balanceStr || '0') / 1_000_000;
-    return balance.toFixed(2);
+    const raw = balanceStr ?? '0';
+    const hasDecimal = raw.includes('.');
+    let value: number;
+    if (hasDecimal) {
+      // Backend returns numeric(20,6) formatted USDT values like "0.400000"
+      value = parseFloat(raw);
+    } else {
+      // Fallback for micro amounts represented as integers (e.g., 400000)
+      value = parseFloat(raw) / 1_000_000;
+    }
+    if (!isFinite(value)) value = 0;
+    return value.toFixed(2);
+  };
+
+  const displayName = (bucket: BucketType): string => {
+    switch (bucket) {
+      case 'admin': return 'Admin';
+      case 'dev': return 'Developer';
+      case 'marketer1': return 'Marketer 1';
+      case 'marketer2': return 'Marketer 2';
+      case 'trader': return 'Trader';
+      case 'reserve': return 'System Reserve';
+      default: return bucket;
+    }
   };
 
   if (loading) {
@@ -259,14 +261,14 @@ export function BucketManagement() {
           </div>
           <p className="text-gray-400 text-sm">
             Manage system bucket balances and withdrawals.
-            You can withdraw from {accessibleBuckets.join(', ')} buckets.
+            You can withdraw from {accessibleBuckets.map((b) => displayName(b)).join(', ')} buckets.
           </p>
         </CardHeader>
       </Card>
 
       {/* Bucket Balances Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {(['admin', 'dev', 'marketer1', 'marketer2', 'trader', 'reserve'] as BucketType[]).map((bucketType) => {
+        {(accessibleBuckets as BucketType[]).map((bucketType) => {
           const canWithdraw = accessibleBuckets.includes(bucketType);
           const balance = balances ? formatBalance(balances[bucketType]) : '0.00';
 
@@ -280,7 +282,7 @@ export function BucketManagement() {
                     </div>
                     <div>
                       <h3 className="text-lg font-semibold text-white capitalize">
-                        {bucketType} Bucket
+                        {displayName(bucketType)}
                       </h3>
                       <Badge
                         variant={canWithdraw ? "default" : "secondary"}

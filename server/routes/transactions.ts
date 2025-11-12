@@ -13,7 +13,7 @@ import { z } from 'zod'
 import { Connection, PublicKey, ParsedInstruction, PartiallyDecodedInstruction } from '@solana/web3.js'
 import { BorshCoder, EventParser, Idl, utils } from '@coral-xyz/anchor'
 import solairusPayIdl from '../idl/solairus_pay.json'
-import { getConnection } from '../lib/rpc-manager'
+import { getConnection, getCurrentCluster } from '../lib/rpc-manager'
 import { attemptExpiredWithdrawalRefund } from '../services/withdrawal_refund'
 import { distributeAffiliateBonuses } from '../services/affiliate'
 import { applyBucketChange } from '../services/bucket'
@@ -235,20 +235,27 @@ async function fetchPaymentEventForSignature(
   return null
 }
 
-async function verifyAndApplyLicenseRecord(
+async function verifyAndProcessTransaction(
   connection: Connection,
   record: Transaction,
   options?: { requireOrderIdMatch?: boolean }
 ): Promise<{ record: Transaction; verified: boolean; reason?: string }> {
+  console.log(`[verifyAndProcessTransaction] Starting verification for record ${record.id}, type: ${record.type}, signature: ${record.signature?.slice(0, 8)}...`)
+
   if (!record.signature) {
+    console.log(`[verifyAndProcessTransaction] No signature found for record ${record.id}`)
     return { record, verified: false, reason: 'Signature missing' }
   }
 
+  console.log(`[verifyAndProcessTransaction] Checking signature status for ${record.signature}`)
   const statusResp = await connection.getSignatureStatuses([record.signature], { searchTransactionHistory: true })
   const status = statusResp.value[0]
   const isConfirmed = status && !status.err && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')
 
+  console.log(`[verifyAndProcessTransaction] Signature status: confirmed=${isConfirmed}, status=${status?.confirmationStatus}, err=${status?.err}`)
+
   if (!isConfirmed) {
+    console.log(`[verifyAndProcessTransaction] Signature not confirmed, updating metadata`)
     await query<Transaction>('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
       JSON.stringify({ phase: 'signature_recorded', verified: false }),
       record.id,
@@ -256,20 +263,32 @@ async function verifyAndApplyLicenseRecord(
     return { record, verified: false, reason: 'Signature not confirmed' }
   }
 
+  console.log(`[verifyAndProcessTransaction] Signature confirmed, checking on-chain match`)
   const match = await verifyOnChainMatchesRecord(connection, record)
   let verified = match.ok
   let failureReason = match.reason
 
+  console.log(`[verifyAndProcessTransaction] On-chain match result: ok=${match.ok}, reason=${match.reason}`)
+
   if (verified && options?.requireOrderIdMatch) {
+    console.log(`[verifyAndProcessTransaction] Checking order ID match (required)`)
     const solairusPayProgramId =
       process.env.SOLAIRUS_PAY_PROGRAM_ID ?? (solairusPayIdl as { address?: string }).address ?? ''
     if (solairusPayProgramId) {
+      console.log(`[verifyAndProcessTransaction] Fetching payment event for signature ${record.signature}`)
       const paymentEvent = await fetchPaymentEventForSignature(connection, record.signature, solairusPayProgramId)
       const memo = paymentEvent?.event.memo
+      console.log(`[verifyAndProcessTransaction] Payment event found: ${!!paymentEvent}, memo: "${memo}", expected order_id: "${record.order_id}"`)
+
       if (!paymentEvent || !memo || (record.order_id && memo !== record.order_id)) {
         verified = false
         failureReason = 'Order ID mismatch'
+        console.log(`[verifyAndProcessTransaction] Order ID mismatch - verification failed`)
+      } else {
+        console.log(`[verifyAndProcessTransaction] Order ID match successful`)
       }
+    } else {
+      console.log(`[verifyAndProcessTransaction] No SOLAIRUS_PAY_PROGRAM_ID configured`)
     }
   }
 
@@ -281,18 +300,24 @@ async function verifyAndApplyLicenseRecord(
         verified: false,
         failureReason: failureReason ?? 'Verification mismatch',
       }
+
+  console.log(`[verifyAndProcessTransaction] Updating database: status=${dbStatus}, verified=${verified}`)
   const update = await query<Transaction>(
     'UPDATE transactions SET status = $1, metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
     [dbStatus, JSON.stringify(metaUpdate), record.id]
   )
   record = update.rows[0]
+  console.log(`[verifyAndProcessTransaction] Database update successful, new status: ${record.status}`)
 
   if (record.status === 'confirmed') {
+    console.log(`[verifyAndProcessTransaction] Transaction confirmed, applying post-confirmation logic`)
     await applyPostConfirmation(record)
     const refreshed = await query<Transaction>('SELECT * FROM transactions WHERE id = $1', [record.id])
     record = refreshed.rows[0] ?? record
+    console.log(`[verifyAndProcessTransaction] Post-confirmation applied, final status: ${record.status}`)
   }
 
+  console.log(`[verifyAndProcessTransaction] Verification complete: verified=${verified}, final status=${record.status}`)
   return { record, verified, reason: failureReason }
 }
 
@@ -625,24 +650,46 @@ const setType = (type: TransactionType) => (req: Request, _res: Response, next: 
   next()
 }
 
-// POST /api/transactions - use shared handler
-router.post('/transactions', createTransactionHandler)
-// Only the first call (without signature) should hit createOrResumeLicenseActivationHandler
-router.post(
-  '/payments/license-activation',
-  (req, res, next) => {
-    if (typeof req.body?.signature === 'string') {
-      return res.status(405).json({ error: 'Signature updates must use /transactions/license-activation/signature' })
-    }
-    setType('license_activation')(req, res, next)
-  },
-  createOrResumeLicenseActivationHandler
-)
-router.post('/payments/agent-activation', setType('agent_activation'), createTransactionHandler)
-router.post('/withdrawals/user', setType('user_withdrawal'), createTransactionHandler)
-router.post('/withdrawals/role', setType('role_withdrawal'), createTransactionHandler)
+// Unified activation endpoint - replaces license and agent specific endpoints
+router.post('/payments/activate', createUnifiedActivationHandler)
+
+// Generic signature recording - replaces type-specific signature endpoints
+router.post('/transactions/record/signature', recordTransactionSignatureHandler)
+
+// Legacy endpoints for backward compatibility during transition
+router.post('/payments/license-activation', async (req, res) => {
+  req.body.type = 'license_activation'
+  return createUnifiedActivationHandler(req, res)
+})
+router.post('/payments/agent-activation', async (req, res) => {
+  req.body.type = 'agent_activation'
+  return createUnifiedActivationHandler(req, res)
+})
+router.post('/transactions/license-activation/signature', recordTransactionSignatureHandler)
 router.get('/transactions/last-confirmed', lastConfirmedHandler)
 router.post('/transactions/reapply-license', reapplyLicenseHandler)
+
+// Type-specific recovery endpoints
+router.get('/transactions/last-confirmed/license', (req, res) => lastConfirmedHandlerGeneric('license_activation', req, res))
+router.get('/transactions/last-confirmed/agent', (req, res) => lastConfirmedHandlerGeneric('agent_activation', req, res))
+
+// Legacy endpoints for backward compatibility during transition
+router.post('/payments/license-activation', async (req, res) => {
+  req.body.type = 'license_activation'
+  return createUnifiedActivationHandler(req, res)
+})
+router.post('/payments/agent-activation', async (req, res) => {
+  req.body.type = 'agent_activation'
+  return createUnifiedActivationHandler(req, res)
+})
+router.post('/transactions/license-activation/signature', recordTransactionSignatureHandler)
+router.get('/transactions/last-confirmed', lastConfirmedHandler)
+router.post('/transactions/reapply-license', reapplyLicenseHandler)
+
+// POST /api/transactions - use shared handler
+router.post('/transactions', createTransactionHandler)
+router.post('/withdrawals/user', setType('user_withdrawal'), createTransactionHandler)
+router.post('/withdrawals/role', setType('role_withdrawal'), createTransactionHandler)
 
 /**
  * Generic reapply handler for any transaction type
@@ -720,7 +767,7 @@ async function reapplyHandlerGeneric(transactionType: TransactionType, req: Requ
       return res.status(400).json({ error: 'Transaction signature not confirmed on-chain' })
     }
 
-    const result = await verifyAndApplyLicenseRecord(connection, record, { requireOrderIdMatch: true })
+    const result = await verifyAndProcessTransaction(connection, record, { requireOrderIdMatch: true })
     record = result.record
     if (!result.verified) {
       return res.status(400).json({ error: `Payment verification failed: ${result.reason ?? 'Unknown mismatch'}` })
@@ -775,7 +822,7 @@ router.post('/transactions/activation/signature', async (req: Request, res: Resp
     record = updateMeta.rows[0] ?? record
   }
 
-  const result = await verifyAndApplyLicenseRecord(connection, record, { requireOrderIdMatch: true })
+  const result = await verifyAndProcessTransaction(connection, record, { requireOrderIdMatch: true })
   return res.status(200).json({ updated: true, verified: result.verified, reason: result.reason, record: result.record })
 })
 
@@ -920,7 +967,7 @@ async function createOrResumeLicenseActivationHandler(req: Request, res: Respons
       record = updateMeta.rows[0] ?? record
     }
 
-    const result = await verifyAndApplyLicenseRecord(connection, record, { requireOrderIdMatch: true })
+    const result = await verifyAndProcessTransaction(connection, record, { requireOrderIdMatch: true })
     return res.status(200).json({ resumed: true, updated: true, verified: result.verified, reason: result.reason, record: result.record })
   }
 
@@ -933,6 +980,15 @@ async function createOrResumeLicenseActivationHandler(req: Request, res: Respons
   const initiator = parsed.data.initiatorWallet
   const connection = getConnection()
 
+  // Check for existing pending transactions (max 1 for license activation)
+  const pendingCheck = await checkExistingPendingTransactions('license_activation', initiator, 1)
+  if (!pendingCheck.canProceed) {
+    return res.status(409).json({
+      error: pendingCheck.reason,
+      existingRecord: pendingCheck.existingRecord
+    })
+  }
+
   // Check user license status to determine reactivation
   const userRes = await query<{ id: number; license_status: string; license_expiration: string | null }>(
     'SELECT id, license_status, license_expiration FROM users WHERE user_address = $1 LIMIT 1',
@@ -943,75 +999,85 @@ async function createOrResumeLicenseActivationHandler(req: Request, res: Respons
   const expAt = user?.license_expiration ? new Date(user.license_expiration) : null
   const licenseExpired = Boolean(user && user.license_status === 'expired' && expAt && expAt < now)
 
-  // 1) Try to resume existing pending/confirmed order for this wallet
-  const existing = await query<Transaction>(
-    `SELECT * FROM transactions
-     WHERE type = 'license_activation'
-       AND initiator_wallet = $1
-       AND status IN ('pending','confirmed')
-     ORDER BY created_at DESC
-     LIMIT 1`,
-    [initiator]
-  )
+  // Check if reactivation is needed (expired license >60 days old)
+  const needsReactivation = await checkLicenseReactivationNeeded(initiator)
 
-  // Resume existing activation only if not a reactivation scenario
-  if (existing.rows.length && !licenseExpired) {
-    let record = existing.rows[0]
-
-    // Backfill missing order_id on resumed pending order
-    if (!record.order_id) {
-      const newOrderId = randomUUID()
-      const upd = await query<Transaction>('UPDATE transactions SET order_id = $1 WHERE id = $2 RETURNING *', [newOrderId, record.id])
-      record = upd.rows[0]
-    }
-
-    // If client provided a new signature for a pending order, attach it to the record
-    if (!record.signature && parsed.data.signature) {
-      const updated = await query<Transaction>(
-        'UPDATE transactions SET signature = $1, metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
-        [
-          parsed.data.signature,
-          JSON.stringify({ phase: 'signature_recorded', ...(parsed.data.metadata ?? {}) }),
-          record.id,
-        ]
-      )
-      record = updated.rows[0]
-    }
-
-    // If already confirmed, apply activation and return immediately
-    if (record.status === 'confirmed') {
-      await applyPostConfirmation(record)
-      const { rows } = await query<Transaction>('SELECT * FROM transactions WHERE id = $1', [record.id])
-      record = rows[0]
-      return res.status(200).json({ resumed: true, record })
-    }
-
-    // If we have a signature, try to auto-verify and activate
-    if (record.signature) {
-      const result = await verifyAndApplyLicenseRecord(connection, record, { requireOrderIdMatch: true })
-      if (result.verified) {
-        return res.status(200).json({ resumed: true, autoverified: true, record: result.record })
-      }
-      if (result.reason) {
-        return res.status(200).json({ resumed: true, autoverified: false, reason: result.reason, record: result.record })
-      }
-    }
-
-    // Still pending or no signature — return existing order without creating a duplicate
-    return res.status(200).json({ resumed: true, record })
+  // If user has active license and doesn't need reactivation, don't create new transaction
+  if (user && user.license_status === 'active' && expAt && expAt >= now && !needsReactivation) {
+    return res.status(200).json({
+      resumed: false,
+      created: false,
+      active: true,
+      user: { license_status: user.license_status, license_expiration: user.license_expiration }
+    })
   }
 
-  // 2) No existing order — create new record and attempt immediate verification if signature provided
+  // 1) Try to resume existing pending/confirmed order for this wallet (only if not reactivation)
+  if (!needsReactivation) {
+    const existing = await query<Transaction>(
+      `SELECT * FROM transactions
+       WHERE type = 'license_activation'
+        AND initiator_wallet = $1
+        AND status IN ('pending','confirmed')
+      ORDER BY created_at DESC
+      LIMIT 1`,
+      [initiator]
+    )
+
+    if (existing.rows.length) {
+      let record = existing.rows[0]
+
+      // Backfill missing order_id on resumed pending order
+      if (!record.order_id) {
+        const newOrderId = randomUUID()
+        const upd = await query<Transaction>('UPDATE transactions SET order_id = $1 WHERE id = $2 RETURNING *', [newOrderId, record.id])
+        record = upd.rows[0]
+      }
+
+      // If client provided a new signature for a pending order, attach it to the record
+      if (!record.signature && parsed.data.signature) {
+        const updated = await query<Transaction>(
+          'UPDATE transactions SET signature = $1, metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
+          [
+            parsed.data.signature,
+            JSON.stringify({ phase: 'signature_recorded', ...(parsed.data.metadata ?? {}) }),
+            record.id,
+          ]
+        )
+        record = updated.rows[0]
+      }
+
+      // If already confirmed, apply activation and return immediately
+      if (record.status === 'confirmed') {
+        await applyPostConfirmation(record)
+        const { rows } = await query<Transaction>('SELECT * FROM transactions WHERE id = $1', [record.id])
+        record = rows[0]
+        return res.status(200).json({ resumed: true, record })
+      }
+
+      // If we have a signature, try to auto-verify and activate
+      if (record.signature) {
+        const result = await verifyAndProcessTransaction(connection, record, { requireOrderIdMatch: true })
+        if (result.verified) {
+          return res.status(200).json({ resumed: true, autoverified: true, record: result.record })
+        }
+        if (result.reason) {
+          return res.status(200).json({ resumed: true, autoverified: false, reason: result.reason, record: result.record })
+        }
+      }
+
+      // Still pending or no signature — return existing order without creating a duplicate
+      return res.status(200).json({ resumed: true, record })
+    }
+  }
+
+  // 2) No existing order or reactivation needed — create new record and attempt immediate verification if signature provided
   const dbRow = mapToDb({ ...parsed.data, type: 'license_activation' })
   // Initialize metadata lifecycle for license activation
   const baseMeta = parsed.data.metadata ?? {}
   const initialPhase = dbRow.signature ? 'signature_recorded' : 'created'
-  const finalMeta = { ...baseMeta, phase: initialPhase, completed: false, reactivation: licenseExpired }
+  const finalMeta = { ...baseMeta, phase: initialPhase, completed: false, reactivation: needsReactivation }
 
-  // If user is currently active and not expired, do NOT create a new activation
-  if (user && user.license_status === 'active' && expAt && expAt >= now) {
-    return res.status(200).json({ resumed: false, created: false, active: true, user: { license_status: user.license_status, license_expiration: user.license_expiration } })
-  }
   const orderId = randomUUID()
   const sql = `
     INSERT INTO transactions (type, status, signature, initiator_wallet, recipient_wallet, program_id, amount, mint_address, decimals, metadata, order_id)
@@ -1038,7 +1104,7 @@ async function createOrResumeLicenseActivationHandler(req: Request, res: Respons
       { phase: 'verifying' },
       record.id,
     ])
-    const result = await verifyAndApplyLicenseRecord(connection, record, { requireOrderIdMatch: true })
+    const result = await verifyAndProcessTransaction(connection, record, { requireOrderIdMatch: true })
     const statusCode = result.verified ? 201 : 202
     return res.status(statusCode).json({ autoverified: result.verified, reason: result.reason, record: result.record })
   }
@@ -1049,111 +1115,371 @@ async function createOrResumeLicenseActivationHandler(req: Request, res: Respons
 export default router
 
 
-// Apply post-confirmation side effects for specific transaction types
-async function applyPostConfirmation(record: Transaction) {
-  if (record.status !== 'confirmed') return
-
-  // Resolve user id from initiator wallet (needed for all distributions)
+/**
+ * Unified transaction processing system
+ * Handles post-confirmation logic for all transaction types
+ */
+async function processTransactionByType(record: Transaction): Promise<void> {
   const ures = await query<{ id: number }>('SELECT id FROM users WHERE user_address = $1 LIMIT 1', [record.initiator_wallet])
   const userId = ures.rows[0]?.id
   if (!userId) return
 
-  // A) License activation: mark user license active and set expiration
-  if (record.type === 'license_activation') {
-    // Load term days from settings (fallback to 365)
-    const termSql = "SELECT value, type FROM settings WHERE key = 'license.term_days' LIMIT 1"
-    const termRes = await query<{ value: unknown; type: string }>(termSql)
-    let termDays = 365
-    const termRow = termRes.rows[0]
-    if (termRow) {
-      if (typeof termRow.value === 'number') termDays = termRow.value
-      else if (typeof termRow.value === 'string') termDays = Number(termRow.value)
-      else if (typeof termRow.value === 'object' && termRow.value !== null) {
-        const v = termRow.value as Record<string, unknown>
-        const inner = typeof v.value === 'number' ? v.value : Number(v.value as string)
-        if (!Number.isNaN(inner)) termDays = inner
+  switch (record.type) {
+    case 'license_activation':
+      await processLicenseActivation(record, userId)
+      break
+    case 'agent_activation':
+      await processAgentActivation(record, userId)
+      break
+    default:
+      console.warn(`Unknown transaction type for processing: ${record.type}`)
+      return
+  }
+
+  // Mark transaction as processed in metadata (status remains 'confirmed')
+  // Only mark as completed if not already completed
+  const currentMeta = record.metadata as Record<string, unknown> | null
+  if (!currentMeta?.completed) {
+    await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
+      JSON.stringify({ phase: 'completed', completed: true, processed_at: new Date().toISOString() }),
+      record.id,
+    ])
+  }
+}
+
+async function processLicenseActivation(record: Transaction, userId: number): Promise<void> {
+  // Check if license activation was already processed
+  const existingUser = await query<{ license_status: string; license_expiration: string | null }>(
+    'SELECT license_status, license_expiration FROM users WHERE id = $1',
+    [userId]
+  )
+
+  if (existingUser.rows.length) {
+    const user = existingUser.rows[0]
+    // If license is already active and not expired, don't reprocess
+    if (user.license_status === 'active') {
+      const now = new Date()
+      const expAt = user.license_expiration ? new Date(user.license_expiration) : null
+      if (expAt && expAt > now) {
+        await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
+          JSON.stringify({ phase: 'completed', completed: true, processed_at: new Date().toISOString() }),
+          record.id,
+        ])
+        return
       }
     }
-
-    const now = Date.now()
-    const expiresAt = new Date(now + termDays * 24 * 60 * 60 * 1000)
-
-    // Activate user license
-    await query('UPDATE users SET license_status = $1, license_expiration = $2 WHERE id = $3', [
-      'active',
-      expiresAt.toISOString(),
-      userId,
-    ])
-
-    // Mark transaction lifecycle completed for UI derivation
-    await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
-      JSON.stringify({ phase: 'completed', completed: true }),
-      record.id,
-    ])
   }
 
-  // B) Agent activation: existing behavior
-  if (record.type === 'agent_activation') {
-    if (!record.signature) return
-
-    // Avoid duplicate agent creation for the same signature
-    const dup = await query<{ id: number }>('SELECT id FROM agents WHERE activation_signature = $1 LIMIT 1', [record.signature])
-    if (dup.rows.length) return
-
-    // Match tier by amount (micro-USDT)
-    const tres = await query<{ id: number; tier_name: string }>(
-      'SELECT id, tier_name FROM agent_tiers WHERE $1::bigint BETWEEN min_amount AND max_amount LIMIT 1',
-      [record.amount]
-    )
-    const tierId = tres.rows[0]?.id ?? null
-    const tierName = tres.rows[0]?.tier_name ?? null
-
-    // Insert agent row
-    const agentLabel = tierName ? `Agent ${tierName}` : null
-    const meta = { transaction_id: record.id, tier_id: tierId, tier_name: tierName }
-    const ins = await query<{ id: number }>(
-      `INSERT INTO agents (user_id, agent_label, status, activation_signature, amount, tier_id, metadata)
-       VALUES ($1, $2, 'active', $3, $4, $5, $6::jsonb)
-       RETURNING id`,
-      [userId, agentLabel, record.signature, record.amount, tierId, JSON.stringify(meta)]
-    )
-
-    // Backfill transaction metadata with agent linkage
-    const agentId = ins.rows[0]?.id ?? null
-    const tmeta = { agent_id: agentId, tier_id: tierId, tier_name: tierName }
-    await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [JSON.stringify(tmeta), record.id])
-
-    // Mark transaction lifecycle completed for UI derivation
-    await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
-      JSON.stringify({ phase: 'completed', completed: true }),
-      record.id,
-    ])
+  // Load term days from settings (fallback to 365)
+  const termSql = "SELECT value, type FROM settings WHERE key = 'license.term_days' LIMIT 1"
+  const termRes = await query<{ value: unknown; type: string }>(termSql)
+  let termDays = 365
+  const termRow = termRes.rows[0]
+  if (termRow) {
+    if (typeof termRow.value === 'number') termDays = termRow.value
+    else if (typeof termRow.value === 'string') termDays = Number(termRow.value)
+    else if (typeof termRow.value === 'object' && termRow.value !== null) {
+      const v = termRow.value as Record<string, unknown>
+      const inner = typeof v.value === 'number' ? v.value : Number(v.value as string)
+      if (!Number.isNaN(inner)) termDays = inner
+    }
   }
 
-  // C) Distribution logic (only for USDT payments, not credit balance payments)
-  // Check if this was a real USDT payment (not credit balance activation)
+  const now = Date.now()
+  const expiresAt = new Date(now + termDays * 24 * 60 * 60 * 1000)
+
+  // Activate user license
+  await query('UPDATE users SET license_status = $1, license_expiration = $2 WHERE id = $3', [
+    'active',
+    expiresAt.toISOString(),
+    userId,
+  ])
+}
+
+async function processAgentActivation(record: Transaction, userId: number): Promise<void> {
+  if (!record.signature) return
+
+  // Check if agent record already exists for this transaction
+  const existingAgent = await query<{ id: number }>(
+    'SELECT id FROM agents WHERE metadata->>\'transaction_id\' = $1 LIMIT 1',
+    [record.id.toString()]
+  )
+
+  if (existingAgent.rows.length) {
+    // Agent already created, just mark transaction as completed
+    await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
+      JSON.stringify({ phase: 'completed', completed: true, processed_at: new Date().toISOString() }),
+      record.id,
+    ])
+    return
+  }
+
+  // Avoid duplicate agent creation for the same signature (fallback check)
+  const dup = await query<{ id: number }>('SELECT id FROM agents WHERE activation_signature = $1 LIMIT 1', [record.signature])
+  if (dup.rows.length) return
+
+  // Match tier by amount (micro-USDT)
+  const tres = await query<{ id: number; tier_name: string }>(
+    'SELECT id, tier_name FROM agent_tiers WHERE $1::bigint BETWEEN min_amount AND max_amount LIMIT 1',
+    [record.amount]
+  )
+  const tierId = tres.rows[0]?.id ?? null
+  const tierName = tres.rows[0]?.tier_name ?? null
+
+  // Insert agent row
+  const agentLabel = tierName ? `Agent ${tierName}` : null
+  const meta = { transaction_id: record.id, tier_id: tierId, tier_name: tierName }
+  const ins = await query<{ id: number }>(
+    `INSERT INTO agents (user_id, agent_label, status, activation_signature, amount, tier_id, metadata)
+     VALUES ($1, $2, 'active', $3, $4, $5, $6::jsonb)
+     RETURNING id`,
+    [userId, agentLabel, record.signature, record.amount, tierId, JSON.stringify(meta)]
+  )
+
+  // Backfill transaction metadata with agent linkage
+  const agentId = ins.rows[0]?.id ?? null
+  const tmeta = { agent_id: agentId, tier_id: tierId, tier_name: tierName }
+  await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [JSON.stringify(tmeta), record.id])
+}
+
+
+
+/**
+ * Check for existing pending transactions to prevent duplicates
+ */
+async function checkExistingPendingTransactions(
+  type: TransactionType,
+  initiatorWallet: string,
+  maxPending: number = 1
+): Promise<{ canProceed: boolean; existingRecord?: Transaction; reason?: string }> {
+  const existing = await query<Transaction>(
+    `SELECT * FROM transactions
+     WHERE type = $1 AND initiator_wallet = $2 AND status = 'pending'
+     ORDER BY created_at DESC`,
+    [type, initiatorWallet]
+  )
+
+  if (existing.rows.length >= maxPending) {
+    return {
+      canProceed: false,
+      existingRecord: existing.rows[0],
+      reason: `Maximum ${maxPending} pending ${type} transaction(s) allowed`
+    }
+  }
+
+  return { canProceed: true }
+}
+
+/**
+ * Check if reactivation is needed for license activation
+ */
+async function checkLicenseReactivationNeeded(initiatorWallet: string): Promise<boolean> {
+  // Get user's current license status
+  const userRes = await query<{ license_status: string; license_expiration: string | null; created_at: string }>(
+    'SELECT license_status, license_expiration, created_at FROM users WHERE user_address = $1 LIMIT 1',
+    [initiatorWallet]
+  )
+
+  if (!userRes.rows.length) return false
+
+  const user = userRes.rows[0]
+  const now = new Date()
+  const expAt = user.license_expiration ? new Date(user.license_expiration) : null
+  const createdAt = new Date(user.created_at)
+
+  // If license is expired and it's been more than 60 days since creation, allow reactivation
+  const isExpired = user.license_status === 'expired' && expAt && expAt < now
+  const isOldEnough = (now.getTime() - createdAt.getTime()) > (60 * 24 * 60 * 60 * 1000) // 60 days
+
+  return Boolean(isExpired && isOldEnough)
+}
+
+/**
+ * Unified activation handler - replaces createOrResumeLicenseActivationHandler and createTransactionHandler for activations
+ */
+async function createUnifiedActivationHandler(req: Request, res: Response) {
+  const schema = z.object({
+    type: z.enum(['license_activation', 'agent_activation']),
+    initiatorWallet: z.string().min(32).max(64),
+    amount: z.number().int().nonnegative(),
+    mintAddress: z.string().min(32).max(64),
+    decimals: z.number().int().min(0).max(18).default(6),
+    programId: z.string().min(32).max(64).optional(),
+    metadata: z.record(z.string(), z.any()).optional(),
+  })
+
+  const parsed = schema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
+
+  const { type, ...body } = parsed.data
+
+  // Set max pending transactions based on type
+  const maxPending = 1 // Allow only 1 pending transaction per type per user
+
+  // Check for existing pending transactions
+  const pendingCheck = await checkExistingPendingTransactions(type, body.initiatorWallet, maxPending)
+  if (!pendingCheck.canProceed) {
+    return res.status(409).json({
+      error: pendingCheck.reason,
+      existingRecord: pendingCheck.existingRecord
+    })
+  }
+
+  // For license activation, check if reactivation is needed
+  if (type === 'license_activation') {
+    const needsReactivation = await checkLicenseReactivationNeeded(body.initiatorWallet)
+    if (!needsReactivation) {
+      // Check if user already has active license
+      const userRes = await query<{ license_status: string; license_expiration: string | null }>(
+        'SELECT license_status, license_expiration FROM users WHERE user_address = $1 LIMIT 1',
+        [body.initiatorWallet]
+      )
+      if (userRes.rows.length) {
+        const user = userRes.rows[0]
+        if (user.license_status === 'active') {
+          const now = new Date()
+          const expAt = user.license_expiration ? new Date(user.license_expiration) : null
+          if (expAt && expAt > now) {
+            return res.status(200).json({
+              error: 'License already active',
+              active: true
+            })
+          }
+        }
+      }
+    }
+  }
+
+  // Create new transaction record
+  const dbRow = {
+    type,
+    status: 'pending' as TransactionStatus,
+    signature: null,
+    initiator_wallet: body.initiatorWallet,
+    recipient_wallet: null, // Activations don't have recipients
+    program_id: body.programId ?? null,
+    amount: body.amount,
+    mint_address: body.mintAddress,
+    decimals: body.decimals,
+    metadata: body.metadata ?? {},
+  }
+
+  const orderId = randomUUID()
+  const sql = `
+    INSERT INTO transactions (type, status, signature, initiator_wallet, recipient_wallet, program_id, amount, mint_address, decimals, metadata, order_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    RETURNING *
+  `
+  const { rows } = await query<Transaction>(sql, [
+    dbRow.type,
+    dbRow.status,
+    dbRow.signature,
+    dbRow.initiator_wallet,
+    dbRow.recipient_wallet,
+    dbRow.program_id,
+    dbRow.amount,
+    dbRow.mint_address,
+    dbRow.decimals,
+    { ...dbRow.metadata, phase: 'created', completed: false },
+    orderId,
+  ])
+
+  return res.status(201).json({ record: rows[0] })
+}
+
+/**
+ * Generic signature recording handler - replaces type-specific signature endpoints
+ */
+async function recordTransactionSignatureHandler(req: Request, res: Response) {
+  const schema = z.object({
+    orderId: z.string().uuid(),
+    signature: z.string().min(32).max(128),
+    metadata: z.record(z.string(), z.any()).optional(),
+  })
+
+  const parsed = schema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
+
+  const { orderId, signature, metadata } = parsed.data
+
+  // Find transaction by orderId
+  const { rows } = await query<Transaction>('SELECT * FROM transactions WHERE order_id = $1 LIMIT 1', [orderId])
+  if (!rows.length) return res.status(404).json({ error: 'Transaction not found' })
+
+  let record = rows[0]
+
+  // Update signature and metadata
+  const metaBase = metadataToObject(record.metadata)
+  const metaPayload = JSON.stringify({ ...metaBase, ...(metadata ?? {}), phase: 'signature_recorded' })
+
+  if (record.signature !== signature) {
+    const update = await query<Transaction>(
+      'UPDATE transactions SET signature = $1, metadata = $2::jsonb WHERE id = $3 RETURNING *',
+      [signature, metaPayload, record.id]
+    )
+    record = update.rows[0] ?? record
+  } else if (metadata) {
+    const updateMeta = await query<Transaction>(
+      'UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2 RETURNING *',
+      [JSON.stringify(metadata), record.id]
+    )
+    record = updateMeta.rows[0] ?? record
+  }
+
+  // Verify and process the transaction - ALWAYS use mainnet for Solairus Pay transactions
+  const connection = new Connection(resolveMainnetRpcUrl(), 'confirmed')
+  console.log(`[recordTransactionSignatureHandler] Starting verification for orderId: ${orderId}, signature: ${signature}`)
+  console.log(`[recordTransactionSignatureHandler] Using mainnet RPC endpoint: ${connection.rpcEndpoint}`)
+  const result = await verifyAndProcessTransaction(connection, record, { requireOrderIdMatch: true })
+  console.log(`[recordTransactionSignatureHandler] Verification result: verified=${result.verified}, reason=${result.reason}, status=${result.record.status}`)
+
+  return res.status(200).json({
+    updated: true,
+    verified: result.verified,
+    reason: result.reason,
+    record: result.record
+  })
+}
+
+// Apply post-confirmation side effects for specific transaction types
+async function applyPostConfirmation(record: Transaction) {
+  if (record.status !== 'confirmed') return
+
+  // Use unified processing
+  await processTransactionByType(record)
+
+  // Handle distribution logic (only for USDT payments)
   const isUsdtPayment = record.signature && record.mint_address &&
     (record.type === 'license_activation' || record.type === 'agent_activation')
 
   if (isUsdtPayment) {
-    const client = await pool.connect()
-    try {
-      await client.query('BEGIN')
+    const ures = await query<{ id: number }>('SELECT id FROM users WHERE user_address = $1 LIMIT 1', [record.initiator_wallet])
+    const userId = ures.rows[0]?.id
 
-      // 1. Always distribute affiliate bonuses (same % for license and agent)
-      await distributeAffiliateBonuses(userId, record.amount, record.id)
+    if (userId) {
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
 
-      // 2. Distribute payment to buckets based on transaction type
-      const amountUsdt = (record.amount / 1_000_000).toFixed(6)
+        // Distribute affiliate bonuses
+        await distributeAffiliateBonuses(userId, record.amount, record.id)
 
-      if (record.type === 'license_activation') {
-        // Load license distribution settings
+        // Distribute payment to buckets based on transaction type
+        const amountUsdt = (record.amount / 1_000_000).toFixed(6)
+
+        const settingsKey = record.type === 'license_activation' ? 'license' : 'agent'
         const settingsRes = await client.query(`
           SELECT key, value FROM settings
-          WHERE key IN ('license.admin_pct', 'license.dev_pct', 'license.trader_pct', 'license.reserve_pct')
+          WHERE key LIKE '${settingsKey}.%_pct'
         `)
 
-        let adminPct = 20, devPct = 30, traderPct = 30, reservePct = 20 // defaults
+        // Default fallback percentages (should be overridden by settings)
+        let adminPct = record.type === 'license_activation' ? 30 : 10
+        let devPct = record.type === 'license_activation' ? 30 : 10
+        let traderPct = record.type === 'license_activation' ? 0 : 15
+        let reservePct = record.type === 'license_activation' ? 20 : 45
+        let marketer1Pct = 5 // 5% for marketer1 bucket
+        let marketer2Pct = 5 // 5% for marketer2 bucket
 
         for (const row of settingsRes.rows) {
           const parseVal = (v: unknown): number => {
@@ -1167,77 +1493,40 @@ async function applyPostConfirmation(record: Transaction) {
           }
 
           switch (row.key) {
-            case 'license.admin_pct': adminPct = parseVal(row.value) || 20; break
-            case 'license.dev_pct': devPct = parseVal(row.value) || 30; break
-            case 'license.trader_pct': traderPct = parseVal(row.value) || 30; break
-            case 'license.reserve_pct': reservePct = parseVal(row.value) || 20; break
+            case `${settingsKey}.admin_pct`: adminPct = parseVal(row.value) || adminPct; break
+            case `${settingsKey}.dev_pct`: devPct = parseVal(row.value) || devPct; break
+            case `${settingsKey}.trader_pct`: traderPct = parseVal(row.value) || traderPct; break
+            case `${settingsKey}.reserve_pct`: reservePct = parseVal(row.value) || reservePct; break
+            case `${settingsKey}.marketer1_pct`: marketer1Pct = parseVal(row.value) || marketer1Pct; break
+            case `${settingsKey}.marketer2_pct`: marketer2Pct = parseVal(row.value) || marketer2Pct; break
           }
         }
 
-        // Distribute license payment to buckets
-        const totalPct = adminPct + devPct + traderPct + reservePct
+        // Distribute payment to buckets
+        const totalPct = adminPct + devPct + traderPct + reservePct + marketer1Pct + marketer2Pct
         if (totalPct > 0) {
           const adminAmount = (parseFloat(amountUsdt) * adminPct / totalPct).toFixed(6)
           const devAmount = (parseFloat(amountUsdt) * devPct / totalPct).toFixed(6)
           const traderAmount = (parseFloat(amountUsdt) * traderPct / totalPct).toFixed(6)
           const reserveAmount = (parseFloat(amountUsdt) * reservePct / totalPct).toFixed(6)
+          const marketer1Amount = (parseFloat(amountUsdt) * marketer1Pct / totalPct).toFixed(6)
+          const marketer2Amount = (parseFloat(amountUsdt) * marketer2Pct / totalPct).toFixed(6)
 
           if (parseFloat(adminAmount) > 0) await applyBucketChange(client, 'admin', 'credit', adminAmount, record.id)
           if (parseFloat(devAmount) > 0) await applyBucketChange(client, 'dev', 'credit', devAmount, record.id)
           if (parseFloat(traderAmount) > 0) await applyBucketChange(client, 'trader', 'credit', traderAmount, record.id)
           if (parseFloat(reserveAmount) > 0) await applyBucketChange(client, 'reserve', 'credit', reserveAmount, record.id)
+          if (parseFloat(marketer1Amount) > 0) await applyBucketChange(client, 'marketer_1', 'credit', marketer1Amount, record.id)
+          if (parseFloat(marketer2Amount) > 0) await applyBucketChange(client, 'marketer_2', 'credit', marketer2Amount, record.id)
         }
 
-      } else if (record.type === 'agent_activation') {
-        // Load agent distribution settings
-        const settingsRes = await client.query(`
-          SELECT key, value FROM settings
-          WHERE key IN ('agent.admin_pct', 'agent.dev_pct', 'agent.trader_pct', 'agent.reserve_pct')
-        `)
-
-        let adminPct = 25, devPct = 25, traderPct = 25, reservePct = 25 // defaults
-
-        for (const row of settingsRes.rows) {
-          const parseVal = (v: unknown): number => {
-            if (typeof v === 'number') return v
-            if (typeof v === 'string') return Number(v)
-            if (typeof v === 'object' && v !== null) {
-              const inner = (v as Record<string, unknown>).value
-              return typeof inner === 'number' ? inner : Number(inner as string)
-            }
-            return 0
-          }
-
-          switch (row.key) {
-            case 'agent.admin_pct': adminPct = parseVal(row.value) || 25; break
-            case 'agent.dev_pct': devPct = parseVal(row.value) || 25; break
-            case 'agent.trader_pct': traderPct = parseVal(row.value) || 25; break
-            case 'agent.reserve_pct': reservePct = parseVal(row.value) || 25; break
-          }
-        }
-
-        // Distribute agent payment to buckets
-        const totalPct = adminPct + devPct + traderPct + reservePct
-        if (totalPct > 0) {
-          const adminAmount = (parseFloat(amountUsdt) * adminPct / totalPct).toFixed(6)
-          const devAmount = (parseFloat(amountUsdt) * devPct / totalPct).toFixed(6)
-          const traderAmount = (parseFloat(amountUsdt) * traderPct / totalPct).toFixed(6)
-          const reserveAmount = (parseFloat(amountUsdt) * reservePct / totalPct).toFixed(6)
-
-          if (parseFloat(adminAmount) > 0) await applyBucketChange(client, 'admin', 'credit', adminAmount, record.id)
-          if (parseFloat(devAmount) > 0) await applyBucketChange(client, 'dev', 'credit', devAmount, record.id)
-          if (parseFloat(traderAmount) > 0) await applyBucketChange(client, 'trader', 'credit', traderAmount, record.id)
-          if (parseFloat(reserveAmount) > 0) await applyBucketChange(client, 'reserve', 'credit', reserveAmount, record.id)
-        }
+        await client.query('COMMIT')
+      } catch (error) {
+        await client.query('ROLLBACK')
+        console.error('Error distributing payment:', error)
+      } finally {
+        client.release()
       }
-
-      await client.query('COMMIT')
-    } catch (error) {
-      await client.query('ROLLBACK')
-      console.error('Error distributing payment:', error)
-      // Don't throw - distribution failure shouldn't block activation
-    } finally {
-      client.release()
     }
   }
 }

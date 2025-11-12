@@ -19,16 +19,12 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { PublicKey } from '@solana/web3.js';
-import * as anchor from '@coral-xyz/anchor';
-import { type Config } from '@/lib/solairus-removed';
-import { createConfigService, type SetConfigArgs } from '@/services/config/config-service';
+import { SettingsService, type SettingsMap } from '@/services/settings/settings-service';
 
 interface RoleAddresses extends Record<string, string> {
   admin: string;
   marketer1: string;
   marketer2: string;
-  trader: string;
-  systemreserve: string;
 }
 
 interface LicensePercentages extends Record<string, number> {
@@ -64,20 +60,52 @@ interface SystemParameters {
  * Configuration management interface restricted to dev role
  */
 export const ConfigManagement: React.FC = () => {
-  const { publicKey, anchorProvider } = useWallet();
+  const { publicKey } = useWallet();
   const { toast } = useToast();
   
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [config, setConfig] = useState<Config | null>(null);
+  const [settingsMap, setSettingsMap] = useState<SettingsMap | null>(null);
+  
+  // Helper: determine effective cluster (localStorage override -> env fallback)
+  const getEffectiveCluster = (): 'mainnet-beta' | 'devnet' | 'testnet' => {
+    let override = '';
+    try {
+      const v = localStorage.getItem('solana_cluster_override');
+      override = (v ?? '').toLowerCase();
+    } catch (_err) {
+      // localStorage may be unavailable (SSR or privacy settings); fallback to env
+      override = '';
+    }
+    const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? 'devnet').toLowerCase();
+    const effective = override || envCluster;
+    if (effective.startsWith('mainnet')) return 'mainnet-beta';
+    if (effective === 'testnet') return 'testnet';
+    return 'devnet';
+  };
+
+  // Helper: resolve USDT mint from environment based on cluster
+  const resolveUsdtMintEnv = (): string => {
+    const cluster = getEffectiveCluster();
+    const mintStr = cluster === 'mainnet-beta'
+      ? (import.meta.env.VITE_USDT_MINT as string)
+      : (import.meta.env.VITE_USDT_MINT_DEVNET as string);
+    return mintStr || '';
+  };
+
+  // Addresses managed via .env (read-only in UI)
+  const envManagedAddresses: Partial<Record<keyof RoleAddresses | 'dev', string | undefined>> = {
+    admin: import.meta.env.VITE_ADMIN_ADDRESS as string | undefined,
+    dev: import.meta.env.VITE_DEV_ADDRESS as string | undefined,
+    marketer1: import.meta.env.VITE_MARKETER1_ADDRESS as string | undefined,
+    marketer2: import.meta.env.VITE_MARKETER2_ADDRESS as string | undefined,
+  };
   
   // Form state
   const [roleAddresses, setRoleAddresses] = useState<RoleAddresses>({
     admin: '',
     marketer1: '',
     marketer2: '',
-    trader: '',
-    systemreserve: '',
   });
   
   const [licensePercentages, setLicensePercentages] = useState<LicensePercentages>({
@@ -111,52 +139,50 @@ export const ConfigManagement: React.FC = () => {
 
   // Load current configuration
   const loadConfiguration = useCallback(async () => {
-    if (!anchorProvider) return;
-    
     setLoading(true);
     try {
-      const configService = createConfigService(anchorProvider);
-      const configData = await configService.getConfig();
-      setConfig(configData);
-      
-      // Populate form with current values
+      const map = await SettingsService.getSettingsMap();
+      setSettingsMap(map);
+
+      // Populate form with backend values where available
+      // Admin/marketer addresses are read-only from .env
       setRoleAddresses({
-        admin: configData.admin.toString(),
-        marketer1: configData.marketer1.toString(),
-        marketer2: configData.marketer2.toString(),
-        trader: configData.trader.toString(),
-        systemreserve: configData.systemreserve.toString(),
+        admin: (envManagedAddresses.admin as string) || '',
+        marketer1: (envManagedAddresses.marketer1 as string) || '',
+        marketer2: (envManagedAddresses.marketer2 as string) || '',
       });
-      
+
       setLicensePercentages({
-        admin: configData.licenseAdminPct,
-        dev: configData.licenseDevPct,
-        marketer1: configData.licenseMarketer1Pct,
-        marketer2: configData.licenseMarketer2Pct,
-        reserve: configData.licenseReservePct,
-        affL1: configData.licenseAffL1Pct,
-        affL2: configData.licenseAffL2Pct,
-        affL3: configData.licenseAffL3Pct,
+        admin: Number(map['license.admin_pct'] ?? 0),
+        dev: Number(map['license.dev_pct'] ?? 0),
+        marketer1: Number(map['license.marketer1_pct'] ?? 0),
+        marketer2: Number(map['license.marketer2_pct'] ?? 0),
+        reserve: Number(map['license.reserve_pct'] ?? 0),
+        // Map affiliate percentages (stored as decimals) to percentage inputs
+        affL1: Number(map['affiliate.l1_pct'] ?? 0) * 100,
+        affL2: Number(map['affiliate.l2_pct'] ?? 0) * 100,
+        affL3: Number(map['affiliate.l3_pct'] ?? 0) * 100,
       });
-      
+
       setAgentPercentages({
-        admin: configData.agentAdminPct,
-        dev: configData.agentDevPct,
-        marketer1: configData.agentMarketer1Pct,
-        marketer2: configData.agentMarketer2Pct,
-        trader: configData.agentTraderPct,
-        reserve: configData.agentReservePct,
-        affL1: configData.agentAffL1Pct,
-        affL2: configData.agentAffL2Pct,
-        affL3: configData.agentAffL3Pct,
+        admin: Number(map['agent.admin_pct'] ?? 0),
+        dev: Number(map['agent.dev_pct'] ?? 0),
+        marketer1: Number(map['agent.marketer1_pct'] ?? 0),
+        marketer2: Number(map['agent.marketer2_pct'] ?? 0),
+        trader: Number(map['agent.trader_pct'] ?? 0),
+        reserve: Number(map['agent.reserve_pct'] ?? 0),
+        // Mirror affiliate percentages to agent section for visibility
+        affL1: Number(map['affiliate.l1_pct'] ?? 0) * 100,
+        affL2: Number(map['affiliate.l2_pct'] ?? 0) * 100,
+        affL3: Number(map['affiliate.l3_pct'] ?? 0) * 100,
       });
-      
+
+      const feeMicro = Number(map['license.fee_usdt'] ?? 0);
       setSystemParameters({
-        activationFeeUsdt: configData.activationFeeUsdt.toString(),
-        roiDailyBps: configData.roiDailyBps,
-        licenseDurationDays: configData.licenseDurationDays,
+        activationFeeUsdt: (feeMicro > 0 ? feeMicro / 1_000_000 : 0).toString(),
+        roiDailyBps: Number(map['system.roi_daily_bps'] ?? 0),
+        licenseDurationDays: Number(map['license.term_days'] ?? 365),
       });
-      
     } catch (error) {
       console.error('Error loading configuration:', error);
       toast({
@@ -167,86 +193,75 @@ export const ConfigManagement: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [anchorProvider, toast]);
+  }, [toast]);
 
   // Save configuration changes
   const saveConfiguration = async () => {
-    if (!anchorProvider || !publicKey) return;
-    
-    const configService = createConfigService(anchorProvider);
-    
     // Validate percentages
-    const percentageValidation = configService.validatePercentages(licensePercentages, agentPercentages);
-    if (!percentageValidation.isValid) {
-      toast({
-        title: 'Validation Error',
-        description: percentageValidation.errors.join(', '),
-        variant: 'destructive',
-      });
+    const percentageErrors: string[] = [];
+    const licenseSum = Object.values(licensePercentages).reduce((sum, val) => sum + val, 0);
+    if (licenseSum !== 100) {
+      percentageErrors.push(`License percentages must sum to 100% (currently ${licenseSum}%)`);
+    }
+    const agentSum = Object.values(agentPercentages).reduce((sum, val) => sum + val, 0);
+    if (agentSum !== 100) {
+      percentageErrors.push(`Agent percentages must sum to 100% (currently ${agentSum}%)`);
+    }
+    const all = { ...licensePercentages, ...agentPercentages } as Record<string, number>;
+    Object.entries(all).forEach(([key, value]) => {
+      if (value < 0 || value > 100) {
+        percentageErrors.push(`${key} percentage must be between 0 and 100 (currently ${value}%)`);
+      }
+    });
+    if (percentageErrors.length) {
+      toast({ title: 'Validation Error', description: percentageErrors.join(', '), variant: 'destructive' });
       return;
     }
-    
+
     // Validate addresses
-    const addressValidation = configService.validateAddresses(roleAddresses);
-    if (!addressValidation.isValid) {
-      toast({
-        title: 'Validation Error',
-        description: addressValidation.errors.join(', '),
-        variant: 'destructive',
-      });
+    const addressErrors: string[] = [];
+    Object.entries(roleAddresses).forEach(([role, address]) => {
+      if (address) {
+        try { new PublicKey(address); } catch { addressErrors.push(`Invalid ${role} address format`); }
+      }
+    });
+    if (addressErrors.length) {
+      toast({ title: 'Validation Error', description: addressErrors.join(', '), variant: 'destructive' });
       return;
     }
-    
+
     setSaving(true);
     try {
-      const setConfigArgs: SetConfigArgs = {
-        activationFeeUsdt: new anchor.BN(systemParameters.activationFeeUsdt),
-        roiDailyBps: systemParameters.roiDailyBps,
-        licenseDurationDays: systemParameters.licenseDurationDays,
-        // Role addresses (use default if empty)
-        admin: roleAddresses.admin ? new PublicKey(roleAddresses.admin) : PublicKey.default,
-        marketer1: roleAddresses.marketer1 ? new PublicKey(roleAddresses.marketer1) : PublicKey.default,
-        marketer2: roleAddresses.marketer2 ? new PublicKey(roleAddresses.marketer2) : PublicKey.default,
-        trader: roleAddresses.trader ? new PublicKey(roleAddresses.trader) : PublicKey.default,
-        systemreserve: roleAddresses.systemreserve ? new PublicKey(roleAddresses.systemreserve) : PublicKey.default,
-        // License percentages
-        licenseAdminPct: licensePercentages.admin,
-        licenseDevPct: licensePercentages.dev,
-        licenseMarketer1Pct: licensePercentages.marketer1,
-        licenseMarketer2Pct: licensePercentages.marketer2,
-        licenseReservePct: licensePercentages.reserve,
-        licenseAffL1Pct: licensePercentages.affL1,
-        licenseAffL2Pct: licensePercentages.affL2,
-        licenseAffL3Pct: licensePercentages.affL3,
-        // Agent percentages
-        agentAdminPct: agentPercentages.admin,
-        agentDevPct: agentPercentages.dev,
-        agentMarketer1Pct: agentPercentages.marketer1,
-        agentMarketer2Pct: agentPercentages.marketer2,
-        agentTraderPct: agentPercentages.trader,
-        agentReservePct: agentPercentages.reserve,
-        agentAffL1Pct: agentPercentages.affL1,
-        agentAffL2Pct: agentPercentages.affL2,
-        agentAffL3Pct: agentPercentages.affL3,
-      };
-      
-      const txSignature = await configService.setConfig(publicKey, setConfigArgs);
-      
-      toast({
-        title: 'Success',
-        description: `Configuration updated successfully. Transaction: ${txSignature}`,
-      });
-      
-      // Reload configuration to reflect changes
+      const feeMicro = Math.round((Number(systemParameters.activationFeeUsdt) || 0) * 1_000_000);
+      const rows: Parameters<typeof SettingsService.saveSettings>[0] = [
+        { key: 'license.fee_usdt', value: feeMicro, type: 'number' as const, description: 'License activation fee in micro-USDT' },
+        { key: 'license.term_days', value: systemParameters.licenseDurationDays, type: 'number' as const, description: 'License duration in days' },
+        { key: 'system.roi_daily_bps', value: systemParameters.roiDailyBps, type: 'number' as const, description: 'Global ROI daily basis points' },
+        // Admin/marketer addresses are managed via .env and read-only in UI
+        { key: 'license.admin_pct', value: licensePercentages.admin, type: 'number' as const, description: 'License distribution - admin %' },
+        { key: 'license.dev_pct', value: licensePercentages.dev, type: 'number' as const, description: 'License distribution - dev %' },
+        { key: 'license.marketer1_pct', value: licensePercentages.marketer1, type: 'number' as const, description: 'License distribution - marketer1 %' },
+        { key: 'license.marketer2_pct', value: licensePercentages.marketer2, type: 'number' as const, description: 'License distribution - marketer2 %' },
+        { key: 'license.reserve_pct', value: licensePercentages.reserve, type: 'number' as const, description: 'License distribution - reserve %' },
+        { key: 'agent.admin_pct', value: agentPercentages.admin, type: 'number' as const, description: 'Agent distribution - admin %' },
+        { key: 'agent.dev_pct', value: agentPercentages.dev, type: 'number' as const, description: 'Agent distribution - dev %' },
+        { key: 'agent.marketer1_pct', value: agentPercentages.marketer1, type: 'number' as const, description: 'Agent distribution - marketer1 %' },
+        { key: 'agent.marketer2_pct', value: agentPercentages.marketer2, type: 'number' as const, description: 'Agent distribution - marketer2 %' },
+        { key: 'agent.trader_pct', value: agentPercentages.trader, type: 'number' as const, description: 'Agent distribution - trader %' },
+        { key: 'agent.reserve_pct', value: agentPercentages.reserve, type: 'number' as const, description: 'Agent distribution - reserve %' },
+        // Save affiliate percentages as decimals (0.05 => 5%)
+        { key: 'affiliate.l1_pct', value: (licensePercentages.affL1 || 0) / 100, type: 'number' as const, description: 'Affiliate level 1 percent (decimal)' },
+        { key: 'affiliate.l2_pct', value: (licensePercentages.affL2 || 0) / 100, type: 'number' as const, description: 'Affiliate level 2 percent (decimal)' },
+        { key: 'affiliate.l3_pct', value: (licensePercentages.affL3 || 0) / 100, type: 'number' as const, description: 'Affiliate level 3 percent (decimal)' },
+      ];
+
+      await SettingsService.saveSettings(rows);
+
+      toast({ title: 'Success', description: 'Configuration updated successfully.' });
       await loadConfiguration();
-      
     } catch (error) {
       console.error('Error saving configuration:', error);
-      toast({
-        title: 'Error',
-        description: `Failed to save configuration: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        variant: 'destructive',
-      });
+      toast({ title: 'Error', description: `Failed to save configuration: ${error instanceof Error ? error.message : 'Unknown error'}`, variant: 'destructive' });
     } finally {
       setSaving(false);
     }
@@ -260,6 +275,7 @@ export const ConfigManagement: React.FC = () => {
   // Calculate percentage sums for validation
   const licenseSum = Object.values(licensePercentages).reduce((sum, val) => sum + val, 0);
   const agentSum = Object.values(agentPercentages).reduce((sum, val) => sum + val, 0);
+  const isEnvManagedRole = (role: string) => ['admin', 'marketer1', 'marketer2'].includes(role);
 
   return (
     <div className="space-y-6">
@@ -305,7 +321,7 @@ export const ConfigManagement: React.FC = () => {
           {Object.entries(roleAddresses).map(([role, address]) => (
             <div key={role} className="space-y-2">
               <Label htmlFor={`role-${role}`} className="text-gray-300 capitalize">
-                {role} Address
+                {role} Address {isEnvManagedRole(role) && <span className="text-xs text-gray-400">(read-only)</span>}
               </Label>
               <Input
                 id={`role-${role}`}
@@ -316,7 +332,11 @@ export const ConfigManagement: React.FC = () => {
                 }))}
                 placeholder="Enter public key address"
                 className="bg-gray-700 border-gray-600 text-white"
+                disabled={isEnvManagedRole(role)}
               />
+              {isEnvManagedRole(role) && (
+                <p className="text-xs text-gray-400">Edit in .env only</p>
+              )}
             </div>
           ))}
         </div>
@@ -475,7 +495,7 @@ export const ConfigManagement: React.FC = () => {
       </Card>
 
       {/* Current Configuration Display */}
-      {config && (
+      {settingsMap && (
         <Card className="p-6 bg-gray-800 border-gray-700">
           <div className="flex items-center gap-3 mb-6">
             <Settings className="h-6 w-6 text-gray-400" />
@@ -485,15 +505,15 @@ export const ConfigManagement: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
             <div>
               <span className="text-gray-400">Dev Address:</span>
-              <p className="text-white font-mono text-xs break-all">{config.dev.toString()}</p>
+              <p className="text-white font-mono text-xs break-all">{String((import.meta.env.VITE_DEV_ADDRESS as string) ?? '')}</p>
             </div>
             <div>
               <span className="text-gray-400">USDT Mint:</span>
-              <p className="text-white font-mono text-xs break-all">{config.usdtMint.toString()}</p>
+              <p className="text-white font-mono text-xs break-all">{resolveUsdtMintEnv()}</p>
             </div>
             <div>
               <span className="text-gray-400">Current Fee:</span>
-              <p className="text-white">{config.activationFeeUsdt.toString()} USDT</p>
+              <p className="text-white">{(Number(settingsMap['license.fee_usdt'] ?? 0) / 1_000_000).toString()} USDT</p>
             </div>
           </div>
         </Card>

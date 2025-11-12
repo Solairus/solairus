@@ -52,4 +52,11 @@ export class SettingsService {
     }
     return 0
   }
+
+  /** Save settings in bulk (admin-only) */
+  static async saveSettings(rows: Array<{ key: string; value: unknown; type: 'string' | 'number' | 'boolean' | 'object'; description?: string }>): Promise<unknown> {
+    const base = API_CONFIG.getBaseUrl()
+    const res = await ApiClient.post(`${base}/admin/settings`, rows)
+    return res.json()
+  }
 }

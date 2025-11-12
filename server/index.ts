@@ -15,6 +15,7 @@ import affiliateRouter from './routes/affiliate'
 import withdrawalsRouter from './routes/withdrawals'
 import { getAuthorityPublicKeyBase58 } from './lib/authority'
 import agentsRouter from './routes/agents'
+import adminRouter from './routes/admin'
 
 const app = express()
 app.use(express.json())
@@ -65,6 +66,7 @@ app.use('/api', requireAuth, licenseRouter)
 app.use('/api', requireAuth, affiliateRouter)
 app.use('/api', requireAuth, withdrawalsRouter)
 app.use('/api', requireAuth, agentsRouter)
+app.use('/api', requireAuth, adminRouter)
 
 // Start server
 const port = Number(process.env.PORT || 4000)

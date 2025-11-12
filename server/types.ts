@@ -7,7 +7,7 @@ export type TransactionType =
   | 'user_withdrawal'
   | 'role_withdrawal'
 
-export type TransactionStatus = 'pending' | 'confirmed' | 'failed'
+export type TransactionStatus = 'pending' | 'confirmed' | 'completed' | 'failed'
 
 export interface Transaction {
   id: number
