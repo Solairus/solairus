@@ -274,7 +274,7 @@ export default function LicenseActivationPage() {
       if (!anchorProvider) throw new Error('Wallet provider is missing signing capabilities');
       const payService = new SolairusPayService(anchorProvider);
 
-      // 1) Backend init: create transaction record to obtain order ID (no activation here)
+      // 1) Backend init: create or resume transaction record to obtain order ID
       const initUrl = `${API_CONFIG.getBaseUrl()}/payments/activate`;
       const initBody = {
         type: 'license_activation',
@@ -287,32 +287,60 @@ export default function LicenseActivationPage() {
       };
       const initRes = await ApiClient.post(initUrl, initBody);
       const initData = await initRes.json();
-      const orderId: string = (initData?.record?.order_id ?? initData?.order_id) as string;
+
+      // Handle both new transaction (201) and resumed transaction (200)
+      let orderId: string;
+      if (initRes.status === 200 && initData.resumed && initData.record) {
+        // Resumed existing transaction
+        orderId = (initData.record.order_id) as string;
+        console.log('Resumed existing license activation transaction:', orderId);
+      } else if (initRes.status === 201 && initData.record) {
+        // Created new transaction
+        orderId = (initData.record.order_id) as string;
+        console.log('Created new license activation transaction:', orderId);
+      } else {
+        throw new Error('Failed to initialize payment order (missing order_id)');
+      }
+
       if (!orderId) throw new Error('Failed to initialize payment order (missing order_id)');
 
-      // 2) On-chain payment via solairus_pay with memo containing order id
-      // Use raw UUID as memo to align with backend recovery logic
-      const memo = orderId;
-      const txSig = await payService.makePayment({
-        payer: publicKey,
-        mint: usdtMint,
-        recipient: publicKey,
-        amount: licenseFeeMicro,
-        memo,
-      });
-      setTransactionHash(txSig);
+      // Check if this is a resumed transaction that already has a signature
+      let txSig: string;
+      const isResumedTransaction = initRes.status === 200 && initData.resumed;
 
-      // 3) Record transaction signature - backend handles verification and status updates
-      const recordUrl = `${API_CONFIG.getBaseUrl()}/transactions/record/signature`;
-      const recordBody = {
-        orderId,
-        signature: txSig,
-      };
-      const recordRes = await ApiClient.post(recordUrl, recordBody);
-      const recordData = await recordRes.json();
-      if (!recordRes.ok) {
-        const reason = recordData?.error || 'Failed to record signature';
-        throw new Error(reason);
+      if (isResumedTransaction && initData.record?.signature) {
+        // Resumed transaction already has a signature, use it
+        txSig = initData.record.signature as string;
+        setTransactionHash(txSig);
+        console.log('Using existing signature from resumed transaction:', txSig);
+      } else {
+        // New transaction or resumed without signature - make payment
+        const memo = orderId;
+        txSig = await payService.makePayment({
+          payer: publicKey,
+          mint: usdtMint,
+          recipient: publicKey,
+          amount: licenseFeeMicro,
+          memo,
+        });
+        setTransactionHash(txSig);
+      }
+
+      // 3) Record transaction signature (only if not already recorded for resumed transactions)
+      if (!isResumedTransaction || !initData.record?.signature) {
+        const recordUrl = `${API_CONFIG.getBaseUrl()}/transactions/record/signature`;
+        const recordBody = {
+          orderId,
+          signature: txSig,
+        };
+        const recordRes = await ApiClient.post(recordUrl, recordBody);
+        const recordData = await recordRes.json();
+        if (!recordRes.ok) {
+          const reason = recordData?.error || 'Failed to record signature';
+          throw new Error(reason);
+        }
+      } else {
+        console.log('Skipping signature recording for resumed transaction that already has signature');
       }
 
       // Start countdown for user feedback

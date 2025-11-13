@@ -1319,6 +1319,14 @@ async function createUnifiedActivationHandler(req: Request, res: Response) {
   // Check for existing pending transactions
   const pendingCheck = await checkExistingPendingTransactions(type, body.initiatorWallet, maxPending)
   if (!pendingCheck.canProceed) {
+    // For license activation, return existing orderId instead of blocking
+    if (type === 'license_activation' && pendingCheck.existingRecord) {
+      return res.status(200).json({
+        resumed: true,
+        record: pendingCheck.existingRecord
+      })
+    }
+    // For other types (agent activation), block with 409
     return res.status(409).json({
       error: pendingCheck.reason,
       existingRecord: pendingCheck.existingRecord
