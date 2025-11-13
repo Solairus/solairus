@@ -288,11 +288,24 @@ export default function LicenseActivationPage() {
       const initRes = await ApiClient.post(initUrl, initBody);
       const initData = await initRes.json();
 
-      // Handle both new transaction (201) and resumed transaction (200)
+      // Handle different response types
       let orderId: string;
-      if (initRes.status === 200 && initData.resumed && initData.record) {
-        // Resumed existing transaction
+      let isResumed = false;
+
+      if (initRes.status === 200 && initData.completed && initData.record) {
+        // Transaction already completed - no payment needed
+        console.log('License activation already completed:', initData.record.order_id);
+        // Redirect to success or show already active message
+        setActivationSuccess(true);
+        setSuccessInfo({ status: 'active', expirationDate: undefined, isValid: true });
+        setTimeout(() => {
+          navigate(returnPath, { replace: true });
+        }, 3000);
+        return; // Exit early, no payment needed
+      } else if (initRes.status === 200 && initData.resumed && initData.record) {
+        // Resumed existing transaction that needs payment
         orderId = (initData.record.order_id) as string;
+        isResumed = true;
         console.log('Resumed existing license activation transaction:', orderId);
       } else if (initRes.status === 201 && initData.record) {
         // Created new transaction

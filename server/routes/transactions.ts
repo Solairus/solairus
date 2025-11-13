@@ -686,10 +686,50 @@ router.post('/transactions/license-activation/signature', recordTransactionSigna
 router.get('/transactions/last-confirmed', lastConfirmedHandler)
 router.post('/transactions/reapply-license', reapplyLicenseHandler)
 
+/**
+ * POST /api/transactions/reapply-agent
+ * Re-apply agent activation for a transaction (confirmed or pending with on-chain payment).
+ */
+async function reapplyAgentHandler(req: Request, res: Response) {
+  return reapplyHandlerGeneric('agent_activation', req, res)
+}
+
+router.post('/transactions/reapply-agent', reapplyAgentHandler)
+
 // POST /api/transactions - use shared handler
 router.post('/transactions', createTransactionHandler)
 router.post('/withdrawals/user', setType('user_withdrawal'), createTransactionHandler)
 router.post('/withdrawals/role', setType('role_withdrawal'), createTransactionHandler)
+
+/**
+ * POST /api/transactions/:id/cancel
+ * Cancel a pending transaction
+ */
+router.post('/transactions/:id/cancel', async (req: Request, res: Response) => {
+  const id = Number(req.params.id)
+  if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid transaction id' })
+
+  try {
+    const { rows } = await query<Transaction>('SELECT * FROM transactions WHERE id = $1', [id])
+    if (!rows.length) return res.status(404).json({ error: 'Transaction not found' })
+
+    const record = rows[0]
+    if (record.status !== 'pending') {
+      return res.status(400).json({ error: 'Only pending transactions can be cancelled' })
+    }
+
+    // Update transaction status to cancelled
+    const update = await query<Transaction>(
+      'UPDATE transactions SET status = $1, metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
+      ['cancelled', JSON.stringify({ cancelled_at: new Date().toISOString() }), id]
+    )
+
+    return res.json({ cancelled: true, record: update.rows[0] })
+  } catch (error) {
+    console.error('Error cancelling transaction:', error)
+    return res.status(500).json({ error: 'Failed to cancel transaction' })
+  }
+})
 
 /**
  * Generic reapply handler for any transaction type
@@ -1319,18 +1359,34 @@ async function createUnifiedActivationHandler(req: Request, res: Response) {
   // Check for existing pending transactions
   const pendingCheck = await checkExistingPendingTransactions(type, body.initiatorWallet, maxPending)
   if (!pendingCheck.canProceed) {
-    // For license activation, return existing orderId instead of blocking
-    if (type === 'license_activation' && pendingCheck.existingRecord) {
-      return res.status(200).json({
-        resumed: true,
-        record: pendingCheck.existingRecord
-      })
+    if (pendingCheck.existingRecord) {
+      const existingMeta = pendingCheck.existingRecord.metadata as Record<string, unknown> | null
+      const isCompleted = Boolean(existingMeta?.completed === true || existingMeta?.phase === 'completed')
+
+      if (isCompleted) {
+        // Transaction already completed, no payment needed
+        return res.status(200).json({
+          completed: true,
+          record: pendingCheck.existingRecord,
+          message: `${type === 'license_activation' ? 'License' : 'Agent'} activation already completed`
+        })
+      } else {
+        // Transaction exists but not completed
+        if (type === 'license_activation') {
+          // License activation: resume existing transaction (fixed amount)
+          return res.status(200).json({
+            resumed: true,
+            record: pendingCheck.existingRecord
+          })
+        } else {
+          // Agent activation: show pending transaction management (variable amount)
+          return res.status(200).json({
+            pendingTransaction: true,
+            record: pendingCheck.existingRecord
+          })
+        }
+      }
     }
-    // For other types (agent activation), block with 409
-    return res.status(409).json({
-      error: pendingCheck.reason,
-      existingRecord: pendingCheck.existingRecord
-    })
   }
 
   // For license activation, check if reactivation is needed
