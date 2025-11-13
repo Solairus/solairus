@@ -60,9 +60,20 @@ export default function LicenseActivationPage() {
   const [attemptedRecovery, setAttemptedRecovery] = useState(false);
   const [isCheckingPayment, setIsCheckingPayment] = useState(false);
   const [recoveryMessage, setRecoveryMessage] = useState<string>('');
+  const [confirmationCountdown, setConfirmationCountdown] = useState<number | null>(null);
 
   // Helper to safely compare active status without literal union mismatch
   const isActiveStatus = (s: unknown): boolean => s === 'active';
+
+  // Countdown timer for confirmation waiting
+  useEffect(() => {
+    if (confirmationCountdown !== null && confirmationCountdown > 0) {
+      const timer = setTimeout(() => {
+        setConfirmationCountdown(confirmationCountdown - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [confirmationCountdown]);
 
   // Note: License guard check is now handled at the router level in App.tsx
 
@@ -234,6 +245,7 @@ export default function LicenseActivationPage() {
       setError(null);
       setShowOrderSummary(false);
       setIsActivating(true);
+      setConfirmationCountdown(null); // Reset countdown
 
       // Ensure backend JWT is present before calling protected endpoints
       try {
@@ -290,7 +302,7 @@ export default function LicenseActivationPage() {
       });
       setTransactionHash(txSig);
 
-      // 3) Create transaction record with signature and request verification (user-interactive, no auto-activation)
+      // 3) Record transaction signature - backend handles verification and status updates
       const recordUrl = `${API_CONFIG.getBaseUrl()}/transactions/record/signature`;
       const recordBody = {
         orderId,
@@ -299,27 +311,59 @@ export default function LicenseActivationPage() {
       const recordRes = await ApiClient.post(recordUrl, recordBody);
       const recordData = await recordRes.json();
       if (!recordRes.ok) {
-        const reason = recordData?.error || 'Failed to store transaction signature';
+        const reason = recordData?.error || 'Failed to record signature';
         throw new Error(reason);
       }
 
-      const recorded = recordData?.record ?? null;
-      const status = recorded?.status ?? null;
-      const verified =
-        Boolean(recordData?.verified) ||
-        Boolean(recordData?.autoverified) ||
-        status === 'confirmed';
+      // Start countdown for user feedback
+      setConfirmationCountdown(30);
 
-      if (verified && status === 'confirmed') {
-        await refreshSession();
+      // Poll for backend verification result (backend handles on-chain checking)
+      let attempts = 0;
+      const maxAttempts = 12; // 12 attempts * 5 seconds = 60 seconds max wait
+      while (attempts < maxAttempts) {
+        try {
+          const statusUrl = `${API_CONFIG.getBaseUrl()}/transactions/${orderId}`;
+          const statusRes = await ApiClient.get(statusUrl);
+          const statusData = await statusRes.json();
 
-        setSuccessInfo({ status: 'active', expirationDate: undefined, isValid: true });
-        setActivationSuccess(true);
+          if (statusData.status === 'confirmed') {
+            console.log('✅ Transaction confirmed by backend');
+            await refreshSession();
 
-        setTimeout(() => {
-          navigate(returnPath, { replace: true });
-        }, 3000);
-        return;
+            setSuccessInfo({ status: 'active', expirationDate: undefined, isValid: true });
+            setActivationSuccess(true);
+
+            setTimeout(() => {
+              navigate(returnPath, { replace: true });
+            }, 3000);
+            return; // Success!
+          } else if (statusData.status === 'failed') {
+            throw new Error(statusData.failureReason || statusData.metadata?.failureReason || 'Transaction verification failed');
+          } else if (statusData.status === 'pending') {
+            // Still processing, wait and try again
+            console.log(`⏳ Transaction still pending (attempt ${attempts + 1}/${maxAttempts})`);
+            await new Promise(resolve => setTimeout(resolve, 5000)); // 5 second intervals
+            attempts++;
+            continue;
+          } else {
+            console.warn('Unexpected transaction status:', statusData.status);
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            attempts++;
+            continue;
+          }
+        } catch (pollError) {
+          console.error('Error polling transaction status:', pollError);
+          attempts++;
+          if (attempts >= maxAttempts) {
+            throw pollError;
+          }
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+      }
+
+      if (attempts >= maxAttempts) {
+        throw new Error('Transaction verification timed out - please check your transaction status later');
       }
 
       setRecoveryMessage('Payment submitted. Waiting for backend confirmation. You can use "Check Payment Status" after a short delay.');
@@ -333,6 +377,7 @@ export default function LicenseActivationPage() {
       setError(licenseError.message);
     } finally {
       setIsActivating(false);
+      setConfirmationCountdown(null); // Reset countdown
     }
   };
 
@@ -522,8 +567,16 @@ export default function LicenseActivationPage() {
                 Activating License
               </DialogTitle>
               <DialogDescription className="text-center text-blue-600">
-                Processing your USDT payment and activating your yearly license...
+                {confirmationCountdown !== null
+                  ? `Awaiting blockchain confirmation - ${confirmationCountdown}s`
+                  : 'Processing your USDT payment and activating your yearly license...'
+                }
               </DialogDescription>
+              {confirmationCountdown !== null && (
+                <p className="text-xs text-muted-foreground text-center">
+                  Please wait while we confirm your transaction on the blockchain.
+                </p>
+              )}
             </div>
           </DialogHeader>
         </DialogContent>
