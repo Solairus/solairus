@@ -8,6 +8,7 @@ import { useWallet } from "@/contexts/wallet-context";
 import { AffiliateBackendService, type AffiliateSummary } from "@/services/affiliate/affiliate-backend";
 import { PublicKey } from "@solana/web3.js";
 import { Transaction } from "@solana/web3.js";
+import { confirmAndRecord } from '@/services/transactions/confirmAndRecord';
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { ApiClient, API_CONFIG } from "@/config/service-endpoints";
 import { toast } from "sonner";
@@ -138,14 +139,15 @@ export default function AffiliatePage() {
       const { orderId, txBase64 } = initJson as { orderId: string; txBase64: string };
       if (!orderId || !txBase64) throw new Error("Invalid init response from backend");
 
-      // Decode, sign and send transaction
+      // Decode, sign and confirm transaction using shared utility (REST-only; no WebSockets)
       const tx = Transaction.from(Buffer.from(txBase64, "base64"));
       const signed = await signTransaction(tx) as Transaction;
-      const signature = await anchorProvider.connection.sendRawTransaction(signed.serialize(), { skipPreflight: false });
-
-      // Confirm on-chain
-      const conf = await anchorProvider.connection.confirmTransaction(signature, "confirmed");
-      const ok = !conf?.value?.err;
+      const { signature } = await confirmAndRecord({
+        connection: anchorProvider.connection,
+        signedTx: signed,
+        orderId,
+      });
+      const ok = Boolean(signature && signature.length > 0);
 
       // Backend verification will be handled via orderId polling below.
       // The initial record created by /withdrawals/init has no signature yet,
@@ -153,19 +155,7 @@ export default function AffiliatePage() {
       // We rely on GET /transactions/:orderId which resolves the signature via reference
       // and updates status accordingly.
 
-      // Poll order status briefly to update UI derivations (status/uiStatus/finalized)
-      const statusUrl = `${baseUrl}/transactions/${orderId}`;
-      let finalized = false;
-      for (let i = 0; i < 5 && !finalized; i++) {
-        await new Promise(r => setTimeout(r, 1500));
-        try {
-          const sResp = await ApiClient.get(statusUrl);
-          const sJson = await sResp.json();
-          finalized = Boolean(sJson?.finalized);
-        } catch {
-          // ignore polling errors
-        }
-      }
+      // Order polling is already handled in confirmAndRecord; no extra WebSocket confirmation
 
       if (ok) {
         toast.success("Withdrawal sent and confirmed");
