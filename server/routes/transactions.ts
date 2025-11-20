@@ -12,6 +12,7 @@ import { Transaction, TransactionStatus, TransactionType } from '../types'
 import { z } from 'zod'
 import { Connection, PublicKey, ParsedInstruction, PartiallyDecodedInstruction } from '@solana/web3.js'
 import { BorshCoder, EventParser, Idl, utils } from '@coral-xyz/anchor'
+import { findPaymentSignatureByOrderId as findSignatureUnified } from '../services/onchain_verifier'
 import solairusPayIdl from '../idl/solairus_pay.json'
 import { getConnection, getCurrentCluster, getRpcManager } from '../lib/rpc-manager'
 import { attemptExpiredWithdrawalRefund } from '../services/withdrawal_refund'
@@ -77,10 +78,24 @@ function getAllMainnetRpcUrls(): string[] {
 async function findTransactionSignature(
   orderId: string,
   payerPublicKey: PublicKey,
-  solairusPayProgramId: string
+  _solairusPayProgramId: string
 ): Promise<ParsedPaymentEvent | null> {
   const connection = new Connection(resolveMainnetRpcUrl(), 'confirmed')
-  return findSignatureByPaymentEvent(connection, orderId, payerPublicKey, solairusPayProgramId)
+  const found = await findSignatureUnified(connection, payerPublicKey, orderId, { types: ['payment'], maxSignatures: 100 })
+  if (!found) return null
+  return {
+    signature: found.signature,
+    slot: found.slot,
+    event: {
+      payer: found.event.payer,
+      recipient: found.event.recipient,
+      mint: found.event.mint,
+      amount: found.event.amount,
+      decimals: found.event.decimals,
+      reference: found.event.reference,
+      memo: found.event.memo,
+    },
+  }
 }
 
 const router = Router()
