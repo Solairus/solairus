@@ -4,6 +4,7 @@ import { getConnection } from '../lib/rpc-manager'
 import { PublicKey } from '@solana/web3.js'
 import solairusPayIdl from '../idl/solairus_pay.json'
 import { deriveReference, findSignatureByReference, verifyTokenDelta, finalizeRecovery, finalizeRefund } from './withdrawal_verifier'
+import { toMicroBigInt, microBigIntToDecimalString } from './amount'
 
 export async function attemptExpiredBucketWithdrawalRefund(orderId: string): Promise<{ refunded: boolean; reason?: string }> {
   const client = await pool.connect()
@@ -33,7 +34,9 @@ export async function attemptExpiredBucketWithdrawalRefund(orderId: string): Pro
     const conn = await getConnection()
     const sig = await findSignatureByReference(conn, reference)
     if (sig) {
-      const valid = await verifyTokenDelta(conn, sig, record.initiator_wallet, record.mint_address, BigInt(record.amount), record.decimals || 6)
+      const decimals = record.decimals || 6
+      const amtMicro = toMicroBigInt(record.amount as any, decimals)
+      const valid = await verifyTokenDelta(conn, sig, record.initiator_wallet, record.mint_address, amtMicro, decimals)
       if (valid) {
         await finalizeRecovery(client, record.id, sig, { recoveredVia: 'reference', recoveredAt: new Date().toISOString() })
         return { refunded: false, reason: 'recovered_signature' }
@@ -48,17 +51,11 @@ export async function attemptExpiredBucketWithdrawalRefund(orderId: string): Pro
       return { refunded: false, reason: 'missing_bucket_type' }
     }
 
-    // Lock and update bucket balance
-    const sel = await client.query(`SELECT ${bucketType} FROM bucket_balances WHERE id = 1 FOR UPDATE`)
-    const current = sel.rows[0][bucketType]
-    const amountMicro = BigInt(record.amount)
-    const newVal = (BigInt(current || '0') + amountMicro).toString()
-    await client.query(`UPDATE bucket_balances SET ${bucketType} = $1 WHERE id = 1`, [newVal])
-    // Insert bucket history snapshot
-    await client.query(
-      'INSERT INTO bucket_histories (bucket_ref, amount, bucket_balance, transaction_id, created_at) VALUES ($1, $2, $3, $4, NOW())',
-      [bucketType, record.amount.toString(), newVal, record.id]
-    )
+    // Convert transaction amount to decimal USDT string and reuse shared bucket updater
+    const decimals = record.decimals || 6
+    const amountMicro = toMicroBigInt(record.amount as any, decimals)
+    const amountUsdt = microBigIntToDecimalString(amountMicro, decimals)
+    const postBalance = await (await import('./bucket')).applyBucketChange(client, bucketType as any, 'credit', amountUsdt, record.id)
 
     await finalizeRefund(client, record.id, { refund: true, refund_finalized: true, failureReason: 'Expired; no on-chain signature found', refundAt: now.toISOString(), reference: reference.toBase58(), bucket_type: bucketType })
     await client.query('COMMIT')

@@ -13,7 +13,7 @@ import { z } from 'zod'
 import { Connection, PublicKey, ParsedInstruction, PartiallyDecodedInstruction } from '@solana/web3.js'
 import { BorshCoder, EventParser, Idl, utils } from '@coral-xyz/anchor'
 import solairusPayIdl from '../idl/solairus_pay.json'
-import { getConnection, getCurrentCluster } from '../lib/rpc-manager'
+import { getConnection, getCurrentCluster, getRpcManager } from '../lib/rpc-manager'
 import { attemptExpiredWithdrawalRefund } from '../services/withdrawal_refund'
 import { attemptExpiredBucketWithdrawalRefund } from '../services/bucket_withdrawal_refund'
 import { deriveReference, findSignatureByReference } from '../services/withdrawal_verifier'
@@ -47,6 +47,28 @@ function resolveMainnetRpcUrl(): string {
   }
   throw new Error('No mainnet RPC endpoint provided. Set SOLANA_RPC_URL_MAINNET or similar environment variable.');
 }
+
+/**
+ * Return all configured RPC URLs for mainnet-beta, in order.
+ */
+function getAllMainnetRpcUrls(): string[] {
+  const keys = [
+    'SOLANA_RPC_URL_MAINNET',
+    'SOLANA_RPC_URL_MAINNET_2',
+    'SOLANA_RPC_URL_MAINNET_3',
+    'SOLANA_RPC_URL_MAINNET_4',
+    'SOLANA_RPC_URL_MAINNET_5',
+    'VITE_SOLANA_RPC_URL_MAINNET',
+    'VITE_SOLANA_RPC_URL_MAINNET_2',
+    'VITE_SOLANA_RPC_URL_MAINNET_3',
+    'VITE_SOLANA_RPC_URL_MAINNET_4',
+    'VITE_SOLANA_RPC_URL_MAINNET_5',
+  ]
+  const urls = keys.map((k) => process.env[k]).filter((v): v is string => Boolean(v)).map((u) => (u!.endsWith('/') ? u! : `${u!}/`))
+  return urls.length ? urls : [resolveMainnetRpcUrl()]
+}
+
+// Simplified resolver helpers: use single healthy connection per check; no multi-RPC scans
 
 /**
  * Reusable function to find transaction signature by PaymentMade events
@@ -726,12 +748,13 @@ router.post('/transactions/pending/resolve', async (req: Request, res: Response)
 
     if (!pending.rows.length) return res.status(200).end()
 
-    // Use a single connection to minimize RPC load
+    // Base connection for verification path; recovery calls rotate RPCs
     const connection = getConnection()
     const solairusPayProgramId =
       process.env.SOLAIRUS_PAY_PROGRAM_ID ?? (solairusPayIdl as { address?: string }).address ?? ''
 
-    for (const record of pending.rows) {
+    // Process at most 5 per call to reduce RPC load
+    for (const record of pending.rows.slice(0, 5)) {
       // Skip if refund already finalized
       if (record.metadata && (record.metadata as any)['refund_finalized'] === true) continue
 
@@ -757,7 +780,11 @@ router.post('/transactions/pending/resolve', async (req: Request, res: Response)
             continue
           }
         }
-        // If not found, leave pending; resolver is silent
+        // If not found, annotate metadata for diagnostics and leave pending
+        await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
+          JSON.stringify({ resolver_action: 'activation_recover_attempt', resolver_result: 'not_found' }),
+          record.id,
+        ])
         continue
       }
 
@@ -765,6 +792,7 @@ router.post('/transactions/pending/resolve', async (req: Request, res: Response)
       const refStr = (record.metadata as any)?.reference as string | undefined
       const reference = refStr ? new PublicKey(refStr) : (record.order_id ? deriveReference(record.order_id, solairusPayProgramId) : null)
       if (reference) {
+        const currentEndpoint = getRpcManager().getCurrentEndpoint()
         const sig = await findSignatureByReference(connection, reference)
         if (sig) {
           // Verify delta and finalize recovery
@@ -772,18 +800,45 @@ router.post('/transactions/pending/resolve', async (req: Request, res: Response)
           if (valid.ok) {
             await query<Transaction>(
               'UPDATE transactions SET status = $1, signature = $2, metadata = metadata || $3::jsonb WHERE id = $4',
-              ['confirmed', sig, JSON.stringify({ completed: true, recoveredVia: 'reference' }), record.id]
+              ['confirmed', sig, JSON.stringify({ completed: true, recoveredVia: 'reference', resolver_rpc_endpoint: currentEndpoint }), record.id]
             )
             continue
           }
+          await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
+            JSON.stringify({ resolver_action: 'withdrawal_recover_attempt', resolver_reason: 'reference_signature_delta_mismatch', resolver_rpc_endpoint: currentEndpoint }),
+            record.id,
+          ])
+        }
+        // Reference signature not found: refund candidate (no TTL required)
+        else {
+          await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
+            JSON.stringify({ resolver_action: 'withdrawal_recover_attempt', resolver_reason: 'reference_signature_not_found', resolver_rpc_endpoint: getRpcManager().getCurrentEndpoint() }),
+            record.id,
+          ])
         }
       }
 
-      // If recovery failed, perform refund safely
+      // If recovery failed or no reference, perform refund safely (idempotent)
       if (record.type === 'role_withdrawal') {
-        if (record.order_id) await attemptExpiredBucketWithdrawalRefund(record.order_id)
+        if (record.order_id) {
+          const rf = await attemptExpiredBucketWithdrawalRefund(record.order_id)
+          if (!rf.refunded && rf.reason) {
+            await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
+              JSON.stringify({ resolver_action: 'withdrawal_refund_attempt', resolver_reason: rf.reason, resolver_rpc_endpoint: getRpcManager().getCurrentEndpoint() }),
+              record.id,
+            ])
+          }
+        }
       } else {
-        if (record.order_id) await attemptExpiredWithdrawalRefund(record.order_id)
+        if (record.order_id) {
+          const rf = await attemptExpiredWithdrawalRefund(record.order_id)
+          if (!rf.refunded && rf.reason) {
+            await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
+              JSON.stringify({ resolver_action: 'withdrawal_refund_attempt', resolver_reason: rf.reason, resolver_rpc_endpoint: getRpcManager().getCurrentEndpoint() }),
+              record.id,
+            ])
+          }
+        }
       }
     }
 

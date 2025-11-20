@@ -27,6 +27,7 @@ import {
   TrendingUp,
   Bot
 } from 'lucide-react';
+import RpcHealthWidget from './RpcHealthWidget'
 
 /**
  * Main admin dashboard component with role-based rendering
@@ -257,6 +258,17 @@ export const AdminDashboard: React.FC = () => {
             </ul>
           </div>
         </div>
+      </ResponsiveCard>
+
+      {/* RPC Health (admin utility) */}
+      <ResponsiveCard
+        title="RPC Utilities"
+        description="Check frontend and backend RPC health (auto once per hour)"
+        icon={Activity}
+        variant="outlined"
+      >
+        {/* Lightweight widget with single-ping checks */}
+        <RpcHealthWidget />
       </ResponsiveCard>
     </div>
   );

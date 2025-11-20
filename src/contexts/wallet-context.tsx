@@ -4,6 +4,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useRef,
   type ReactNode,
 } from "react"
 import { Connection, PublicKey, clusterApiUrl, Transaction, VersionedTransaction } from "@solana/web3.js"
@@ -78,6 +79,9 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
   const [walletProvider, setWalletProvider] = useState<WalletProviderWithSigning | null>(null)
   const [lastBalanceUpdate, setLastBalanceUpdate] = useState<number>(0)
   const [balanceUpdateInProgress, setBalanceUpdateInProgress] = useState(false)
+  const lastConnectAddressRef = useRef<string | null>(null)
+  const lastConnectAtRef = useRef<number>(0)
+  const resolverTriggeredRef = useRef<boolean>(false)
 
   const walletManager = WalletManager.getInstance()
 
@@ -163,6 +167,12 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
   const handleWalletConnection = useCallback(
     async (address: string, provider: WalletProviderWithSigning) => {
       try {
+        const nowTs = Date.now()
+        if (lastConnectAddressRef.current === address && (nowTs - lastConnectAtRef.current) < 5000) {
+          return
+        }
+        lastConnectAddressRef.current = address
+        lastConnectAtRef.current = nowTs
         setAccount(address)
         setIsConnected(true)
         setWalletProvider(provider)
@@ -239,21 +249,22 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
         try {
           const res = await AuthService.authenticateWallet(address)
           console.log('✅ Backend session established for', res.user.user_address)
-        } catch (authError) {
-          console.warn('⚠️ Silent auth failed:', authError)
-        }
+        } catch {}
 
         // Silent pending withdrawals resolver (one-shot per page load)
-        try {
-          const url = `${API_CONFIG.getBaseUrl()}/transactions/pending/resolve`
-          await ApiClient.post(url, { walletAddress: address })
-        } catch {}
+        if (!resolverTriggeredRef.current) {
+          resolverTriggeredRef.current = true
+          try {
+            const url = `${API_CONFIG.getBaseUrl()}/transactions/pending/resolve`
+            await ApiClient.post(url, { walletAddress: address })
+          } catch {}
+        }
       } catch (error) {
         console.error("Wallet connection failed:", error)
         setLastError(error as Error)
       }
     },
-    [] // Remove walletManager dependency to prevent recreation
+    []
   )
 
   // WalletConnect/Reown integration - listen to AppKit events
@@ -343,7 +354,7 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
     }
 
     initializeWalletContext()
-  }, [account, handleWalletConnection, walletManager]) // Empty dependency array - only initialize once on mount
+  }, [])
 
   // Removed automatic balance updates to prevent unnecessary RPC calls
   // Balance will only be fetched when explicitly requested by user actions

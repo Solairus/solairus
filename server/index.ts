@@ -13,9 +13,11 @@ import settingsRouter from './routes/settings'
 import licenseRouter from './routes/license'
 import affiliateRouter from './routes/affiliate'
 import withdrawalsRouter from './routes/withdrawals'
+import { pingAllRpcEndpoints } from './lib/rpc-manager'
 import { getAuthorityPublicKeyBase58 } from './lib/authority'
 import agentsRouter from './routes/agents'
 import adminRouter from './routes/admin'
+import rpcRouter from './routes/rpc'
 
 const app = express()
 app.use(express.json())
@@ -67,6 +69,7 @@ app.use('/api', requireAuth, affiliateRouter)
 app.use('/api', requireAuth, withdrawalsRouter)
 app.use('/api', requireAuth, agentsRouter)
 app.use('/api', requireAuth, adminRouter)
+app.use('/api', requireAuth, rpcRouter)
 
 // Start server
 const port = Number(process.env.PORT || 4000)
@@ -85,6 +88,8 @@ async function startServer() {
       console.log(`Frontend served at http://localhost:${port}`)
     }
     console.log(`API available at http://localhost:${port}/api`)
+    setTimeout(() => { pingAllRpcEndpoints().catch(() => {}) }, 5000)
+    setInterval(() => { pingAllRpcEndpoints().catch(() => {}) }, 24 * 60 * 60 * 1000)
   })
 }
 

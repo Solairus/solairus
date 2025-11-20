@@ -173,7 +173,7 @@ class BackendRpcManager {
     operation: (connection: Connection) => Promise<T>,
     operationName: string = 'operation'
   ): Promise<T> {
-    const maxAttempts = 3
+    const maxAttempts = 2
     let lastError: Error | undefined
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -193,8 +193,7 @@ class BackendRpcManager {
         // If not the last attempt, switch to next endpoint
         if (attempt < maxAttempts) {
           this.switchToNext()
-          // Wait a bit before retrying
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
+          await new Promise(resolve => setTimeout(resolve, 300))
         }
       }
     }
@@ -239,6 +238,16 @@ class BackendRpcManager {
     const endpoint = endpoints[currentIdx]
     return endpoint?.url || 'unknown'
   }
+
+  public async pingAllEndpoints(): Promise<void> {
+    const endpoints = this.endpoints.get(this.cluster) || []
+    for (let i = 0; i < endpoints.length; i++) {
+      try {
+        const conn = new Connection(endpoints[i].url, 'confirmed')
+        await conn.getLatestBlockhash()
+      } catch {}
+    }
+  }
 }
 
 // Singleton instance
@@ -276,5 +285,9 @@ export async function retryOperation<T>(
  */
 export function getCurrentCluster(): ClusterName {
   return getRpcManager().getCluster()
+}
+
+export async function pingAllRpcEndpoints(): Promise<void> {
+  await getRpcManager().pingAllEndpoints()
 }
 

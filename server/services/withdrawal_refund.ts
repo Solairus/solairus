@@ -61,7 +61,10 @@ export async function attemptExpiredWithdrawalRefund(orderId: string): Promise<{
     const conn = await getConnection()
     const sig = await findSignatureByReference(conn, reference)
     if (sig) {
-      const valid = await verifyTokenDelta(conn, sig, record.initiator_wallet, record.mint_address, BigInt(record.amount), record.decimals || 6)
+      const decimals = record.decimals || 6
+      const amtNum = typeof record.amount === 'string' ? Number(record.amount) : (record.amount as unknown as number)
+      const amtMicro = BigInt(Math.round(amtNum * Math.pow(10, decimals)))
+      const valid = await verifyTokenDelta(conn, sig, record.initiator_wallet, record.mint_address, amtMicro, decimals)
       if (valid) {
         await finalizeRecovery(client, record.id, sig, { recoveredVia: 'reference', recoveredAt: new Date().toISOString() })
         return { refunded: false, reason: 'recovered_signature' }
@@ -80,7 +83,9 @@ export async function attemptExpiredWithdrawalRefund(orderId: string): Promise<{
 
     // Resolve or create balance row and credit the provisional debit back (single final action)
     const balanceId = await getOrCreateBalanceId(client, user.id)
-    const amountMicro = BigInt(record.amount)
+    const decimals = record.decimals || 6
+    const amtNum = typeof record.amount === 'string' ? Number(record.amount) : (record.amount as unknown as number)
+    const amountMicro = BigInt(Math.round(amtNum * Math.pow(10, decimals)))
     await applyBalanceBucketChange(
       client,
       balanceId,

@@ -20,6 +20,7 @@ import ComingSoon from "./pages/Dapp/ComingSoon";
 import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
 import Admin from "./pages/Admin";
+// Removed experimental DappSpecial; using existing Admin page
 import InstallPrompt from "@/components/InstallPrompt";
 import WalletGate from "@/components/WalletGate";
 import LicenseGuard from "@/components/license/LicenseGuard";

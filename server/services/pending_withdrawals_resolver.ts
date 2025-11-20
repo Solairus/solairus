@@ -45,7 +45,10 @@ export async function resolvePendingWithdrawalsForWallet(walletAddress: string):
         const s = statusResp.value[0]
         const isConfirmed = s && !s.err && (s.confirmationStatus === 'confirmed' || s.confirmationStatus === 'finalized')
         if (isConfirmed) {
-          const valid = await verifyTokenDelta(conn, record.signature, record.initiator_wallet, record.mint_address, BigInt(record.amount), record.decimals || 6)
+          const decimals = record.decimals || 6
+          const amtNum = typeof record.amount === 'string' ? Number(record.amount) : (record.amount as unknown as number)
+          const amtMicro = BigInt(Math.round(amtNum * Math.pow(10, decimals)))
+          const valid = await verifyTokenDelta(conn, record.signature, record.initiator_wallet, record.mint_address, amtMicro, decimals)
           if (valid) {
             await finalizeRecovery(client, record.id, record.signature, { completed: true, verified: true })
             continue
@@ -63,7 +66,10 @@ export async function resolvePendingWithdrawalsForWallet(walletAddress: string):
       if (reference) {
         const sig = await findSignatureByReference(conn, reference)
         if (sig) {
-          const valid = await verifyTokenDelta(conn, sig, record.initiator_wallet, record.mint_address, BigInt(record.amount), record.decimals || 6)
+          const decimals = record.decimals || 6
+          const amtNum = typeof record.amount === 'string' ? Number(record.amount) : (record.amount as unknown as number)
+          const amtMicro = BigInt(Math.round(amtNum * Math.pow(10, decimals)))
+          const valid = await verifyTokenDelta(conn, sig, record.initiator_wallet, record.mint_address, amtMicro, decimals)
           if (valid) {
             await finalizeRecovery(client, record.id, sig, { completed: true, recoveredVia: 'reference' })
             continue
