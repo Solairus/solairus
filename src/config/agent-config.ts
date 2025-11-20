@@ -371,17 +371,16 @@ export function getCurrentEnvConfig() {
 }
 
 // Validation helpers
-export function isValidTier(tier: unknown): tier is AgentTier {
-  return typeof tier === 'number' && tier >= 0 && tier <= 3;
+export function isValidTier(tierName: string): boolean {
+  return EXTENDED_AGENT_TIER_METADATA.some(config => config.name === tierName);
 }
 
 export function validateAgentConfig(): boolean {
   try {
     // Validate all tiers have complete configuration
-    for (const tier of [AgentTier.NOVA, AgentTier.VEGA, AgentTier.ORION, AgentTier.PRIME]) {
-      const config = EXTENDED_AGENT_TIER_CONFIGS[tier];
+    for (const config of EXTENDED_AGENT_TIER_METADATA) {
       if (!config || !config.name || !config.emoji || !config.styling) {
-        console.error(`Invalid configuration for tier ${tier}`);
+        console.error(`Invalid configuration for tier ${config.name}`);
         return false;
       }
     }
@@ -399,12 +398,4 @@ export function validateAgentConfig(): boolean {
   }
 }
 
-// Initialize configuration validation on module load
-if (import.meta.env.DEV) {
-  const isValid = validateAgentConfig();
-  if (!isValid) {
-    console.warn('⚠️ Agent configuration validation failed');
-  } else {
-    console.log('✅ Agent configuration validated successfully');
-  }
-}
+// No initialization needed - all agent data comes from backend APIs

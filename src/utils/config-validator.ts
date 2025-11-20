@@ -5,7 +5,6 @@
  * Ensures all required configurations are properly set up
  */
 
-import { validateAgentConfig } from '@/config/agent-config';
 import { validateEndpointConfig } from '@/config/service-endpoints';
 
 export interface ConfigValidationResult {
@@ -29,10 +28,8 @@ export function validateAgentSystemConfig(): ConfigValidationResult {
   const warnings: string[] = [];
 
   try {
-    // Validate agent configuration
-    if (!validateAgentConfig()) {
-      errors.push('Agent configuration validation failed');
-    }
+    // Skip agent configuration validation - was purely for smart contract integration
+    // All agent data now comes from backend APIs
 
     // Validate service endpoints
     if (!validateEndpointConfig()) {

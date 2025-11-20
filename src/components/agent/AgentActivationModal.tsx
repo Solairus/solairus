@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PublicKey, Connection } from '@solana/web3.js';
-import { AgentTier, AGENT_TIER_CONFIGS } from '@/lib/solairus-removed';
+import { EXTENDED_AGENT_TIER_METADATA } from '@/config/agent-config';
 import { TierSelection } from './TierSelection';
 import { 
   activateAgent, 
@@ -54,22 +54,23 @@ type ActivationStep = 'tier-selection' | 'amount-input' | 'confirmation' | 'proc
 /**
  * Get tier-specific success message
  */
-function getTierSpecificSuccessMessage(tier?: AgentTier, amount?: string): string {
+function getTierSpecificSuccessMessage(tier?: string, amount?: string): string {
   if (tier === undefined || !amount) {
     return 'Your AI trading agent is now active and ready to generate returns.';
   }
 
-  const tierName = AGENT_TIER_CONFIGS[tier].name;
-  const dailyRange = AGENT_TIER_CONFIGS[tier].dailyRange;
+  const tierConfig = EXTENDED_AGENT_TIER_METADATA[tier.toUpperCase()];
+  const tierName = tierConfig?.name || tier;
+  const dailyRange = tierConfig?.dailyRange || '1-5%';
   
-  switch (tier) {
-    case AgentTier.NOVA:
+  switch (tier.toUpperCase()) {
+    case 'NOVA':
       return `Your ${tierName} agent is now active with $${amount} investment. Expect steady daily returns between ${dailyRange} with minimal risk.`;
-    case AgentTier.VEGA:
+    case 'VEGA':
       return `Your ${tierName} agent is now active with $${amount} investment. Enjoy balanced daily returns between ${dailyRange} with moderate risk.`;
-    case AgentTier.ORION:
+    case 'ORION':
       return `Your ${tierName} agent is now active with $${amount} investment. Prepare for aggressive daily returns between ${dailyRange} with higher volatility.`;
-    case AgentTier.PRIME:
+    case 'PRIME':
       return `Your ${tierName} agent is now active with $${amount} investment. Experience elite daily returns between ${dailyRange} with maximum potential.`;
     default:
       return `Your ${tierName} agent is now active with $${amount} investment and ready to generate returns.`;
@@ -84,7 +85,7 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
   onSuccess
 }) => {
   const [currentStep, setCurrentStep] = useState<ActivationStep>('tier-selection');
-  const [selectedTier, setSelectedTier] = useState<AgentTier>();
+  const [selectedTier, setSelectedTier] = useState<string>();
   const [amount, setAmount] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<'usdt' | 'credit'>('usdt');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -125,7 +126,7 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
     }
   }, [selectedTier, amount, paymentMethod, userPublicKey]);
 
-  const handleTierSelect = (tier: AgentTier) => {
+  const handleTierSelect = (tier: string) => {
     setSelectedTier(tier);
   };
 
@@ -330,9 +331,9 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
                   type="number"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  placeholder={`Minimum: $${getMinimumActivationAmount(selectedTier || AgentTier.NOVA)}`}
+                  placeholder={`Minimum: $${getMinimumActivationAmount(selectedTier || 'NOVA')}`}
                   className="pr-16"
-                  min={getMinimumActivationAmount(selectedTier || AgentTier.NOVA)}
+                  min={getMinimumActivationAmount(selectedTier || 'NOVA')}
                   step="0.01"
                 />
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
@@ -400,7 +401,7 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
                         </div>
                       </div>
                       <Badge variant="outline" className="text-primary border-primary/50">
-                        {AgentTier[selectedTier]}
+                        {selectedTier}
                       </Badge>
                     </div>
                   </div>

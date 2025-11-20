@@ -2,14 +2,7 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import * as anchor from '@coral-xyz/anchor';
 import { createAssociatedTokenAccountInstruction } from '@solana/spl-token';
 import { API_CONFIG, AGENT_ENDPOINTS, ApiClient } from '@/config/service-endpoints';
-import {
-  getProgram,
-  derivePdas,
-  deriveAgentActivationPda,
-  AgentTier,
-  getErrorMessage,
-  PROGRAM_ID
-} from '@/lib/solairus-removed';
+import { EXTENDED_AGENT_TIER_METADATA } from '@/config/agent-config';
 // Referral hierarchy removed; no sponsor-tree dependency
 import { AgentErrorHandler } from '@/utils/agent-error-handler';
 
@@ -29,7 +22,7 @@ type ConfigAccount = {
 export interface AgentActivationParams {
   userPublicKey: PublicKey;
   amount: number; // Amount in USDT (with decimals)
-  tier: AgentTier;
+  tier: string; // Tier name (e.g., 'NOVA', 'VEGA', 'ORION', 'PRIME')
   paymentMethod: 'usdt' | 'credit';
 }
 
@@ -52,7 +45,7 @@ export async function activateAgent(
     console.log('🚀 Starting agent activation with AnchorProvider:', {
       user: params.userPublicKey.toBase58(),
       amount: params.amount,
-      tier: AgentTier[params.tier],
+      tier: params.tier,
       paymentMethod: params.paymentMethod
     });
 
@@ -287,7 +280,7 @@ export async function activateAgent(
       const resp = await ApiClient.post(url, {
         amountMicro,
         paymentMethod: 'credit',
-        tierName: AgentTier[params.tier],
+        tierName: params.tier,
       });
       if (!resp.ok) {
         const text = await resp.text();
@@ -331,16 +324,16 @@ export async function activateAgent(
 /**
  * Get the minimum activation amount for a tier
  */
-export function getMinimumActivationAmount(tier: AgentTier): number {
+export function getMinimumActivationAmount(tier: string): number {
   // These are example minimum amounts - adjust based on business requirements
-  switch (tier) {
-    case AgentTier.NOVA:
+  switch (tier.toUpperCase()) {
+    case 'NOVA':
       return 10; // $10 minimum
-    case AgentTier.VEGA:
+    case 'VEGA':
       return 25; // $25 minimum
-    case AgentTier.ORION:
+    case 'ORION':
       return 50; // $50 minimum
-    case AgentTier.PRIME:
+    case 'PRIME':
       return 100; // $100 minimum
     default:
       return 10;
@@ -363,11 +356,12 @@ export function validateActivationParams(params: AgentActivationParams): {
 
   const minAmount = getMinimumActivationAmount(params.tier);
   if (params.amount < minAmount) {
-    errors.push(`Minimum activation amount for ${AgentTier[params.tier]} tier is $${minAmount}`);
+    errors.push(`Minimum activation amount for ${params.tier} tier is $${minAmount}`);
   }
 
   // Validate tier
-  if (params.tier < 0 || params.tier > 3) {
+  const validTiers = ['NOVA', 'VEGA', 'ORION', 'PRIME'];
+  if (!validTiers.includes(params.tier.toUpperCase())) {
     errors.push('Invalid agent tier selected');
   }
 

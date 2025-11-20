@@ -31,9 +31,6 @@ import { AuthContextProvider } from '@/contexts/auth-context'
 import { SettingsContextProvider } from '@/contexts/settings-context'
 import { AppKitProvider } from '@/components/shared/appkit-provider'
 
-// Initialize configuration validation for agent system
-import "@/utils/config-validator";
-
 // Wrapper component to provide LicenseGuard
 function LicenseGuardWrapper({ children }: { children: ReactNode }) {
   return (

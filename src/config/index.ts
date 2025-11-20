@@ -15,18 +15,6 @@ export type {
   ExtendedTierConfig,
 } from './agent-config';
 
-export type {
-  ConfigValidationResult,
-  EnvironmentValidationResult,
-} from '../utils/config-validator';
-
-export {
-  validateAgentSystemConfig,
-  validateEnvironmentVariables,
-  getConfigurationSummary,
-  initializeConfigValidation,
-} from '../utils/config-validator';
-
 // Configuration constants for easy access
 export const CONFIG = {
   // Feature flags
