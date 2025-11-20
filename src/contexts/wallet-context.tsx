@@ -11,6 +11,7 @@ import { WalletManager } from "@/services/wallet/wallet-manager"
 import { getHealthyRpcConnection, handleRpcError, onNetworkChange } from "@/utils/rpc-switcher"
 import * as anchor from "@coral-xyz/anchor"
 import { AuthService } from '@/services/auth/auth-service'
+import { API_CONFIG, ApiClient } from '@/config/service-endpoints'
 
 // Interface for wallet provider with signing capabilities
 interface WalletProviderWithSigning {
@@ -241,6 +242,12 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
         } catch (authError) {
           console.warn('⚠️ Silent auth failed:', authError)
         }
+
+        // Silent pending withdrawals resolver (one-shot per page load)
+        try {
+          const url = `${API_CONFIG.getBaseUrl()}/withdrawals/pending/resolve`
+          await ApiClient.post(url, { walletAddress: address })
+        } catch {}
       } catch (error) {
         console.error("Wallet connection failed:", error)
         setLastError(error as Error)
