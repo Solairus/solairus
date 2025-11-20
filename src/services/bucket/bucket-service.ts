@@ -1,23 +1,26 @@
 import * as anchor from '@coral-xyz/anchor';
-import { PublicKey } from '@solana/web3.js';
-import { getProgram, derivePdas, Config } from '@/lib/solairus-removed';
+import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 import { BucketType } from '@/hooks/useBucketBalances';
+import { API_CONFIG, BUCKET_ENDPOINTS, ApiClient } from '@/config/service-endpoints';
+import { confirmAndRecord } from '@/services/transactions/confirmAndRecord';
+import { Connection } from '@solana/web3.js';
 
 // Bucket enum mapping to match the contract
-export function getBucketEnumValue(bucketType: BucketType): object {
+export function normalizeBucketType(bucketType: BucketType): string {
+  // Map UI bucket type to backend route param
   switch (bucketType) {
     case 'admin':
-      return { admin: {} };
+      return 'admin';
     case 'dev':
-      return { dev: {} };
-    case 'marketer1':
-      return { marketer1: {} };
-    case 'marketer2':
-      return { marketer2: {} };
+      return 'dev';
+    case 'marketer_1':
+      return 'marketer_1';
+    case 'marketer_2':
+      return 'marketer_2';
     case 'trader':
-      return { trader: {} };
-    case 'systemreserve':
-      return { systemReserve: {} };
+      return 'trader';
+    case 'reserve':
+      return 'reserve';
     default:
       throw new Error(`Invalid bucket type: ${bucketType}`);
   }
@@ -25,59 +28,65 @@ export function getBucketEnumValue(bucketType: BucketType): object {
 
 export interface WithdrawBucketParams {
   provider: anchor.AnchorProvider;
+  connection: Connection;
   bucketType: BucketType;
   amount: anchor.BN;
   authority: PublicKey;
+  usdtMint: PublicKey;
+  memo?: string;
+  signTransaction?: (tx: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>;
 }
 
 export async function withdrawFromBucket({
   provider,
+  connection,
   bucketType,
   amount,
   authority,
+  usdtMint,
+  memo,
 }: WithdrawBucketParams): Promise<string> {
-  const program = getProgram(provider);
-  const { config, vault } = derivePdas();
-  
-  // Get config data to get USDT mint
-  const configData = await program.account["config"].fetch(config) as Config;
-  const usdtMint = configData.usdtMint;
-  
-  // Derive token accounts
-  const authorityUsdt = anchor.utils.token.associatedAddress({
-    mint: usdtMint,
-    owner: authority,
-  });
-
-  const vaultUsdt = anchor.utils.token.associatedAddress({
-    mint: usdtMint,
-    owner: vault,
-  });
-
-  // Convert bucket type to contract enum
-  const targetBucket = getBucketEnumValue(bucketType);
-
-  try {
-    const txSignature = await program.methods
-      .withdrawSystemBucket(targetBucket, amount)
-      .accounts({
-        config,
-        vault,
-        caller: authority,
-        usdtMint,
-        recipientUsdt: authorityUsdt,
-        vaultUsdt,
-        tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
-        associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .rpc();
-
-    return txSignature;
-  } catch (error) {
-    console.error('Error withdrawing from bucket:', error);
-    throw error;
+  // Validate amount
+  if (amount.lte(new anchor.BN(0))) {
+    throw new Error('Invalid amount. Must be greater than zero.');
   }
+
+  // Derive recipient ATA and validate
+  const recipientAta = anchor.utils.token.associatedAddress({ mint: usdtMint, owner: authority });
+
+  const amountMicro = amount.toNumber();
+  const bucketParam = normalizeBucketType(bucketType);
+
+  // Initialize withdrawal via backend
+  const initUrl = BUCKET_ENDPOINTS.buildUrl(BUCKET_ENDPOINTS.initBucketWithdrawal, { bucketType: bucketParam });
+  const initResp = await ApiClient.post(initUrl, {
+    amountMicro,
+    mintAddress: usdtMint.toBase58(),
+    recipientAta: recipientAta.toBase58(),
+    memo: memo || `Bucket:${bucketParam}`,
+  });
+
+  const initData = await initResp.json();
+  const { txBase64, orderId } = initData;
+
+  // Decode and send transaction
+  const txBytes = Buffer.from(txBase64, 'base64');
+  let tx: VersionedTransaction | Transaction;
+  try {
+    tx = VersionedTransaction.deserialize(txBytes);
+  } catch {
+    tx = Transaction.from(txBytes);
+  }
+
+  // Sign using wallet adapter if available
+  if (typeof signTransaction === 'function') {
+    tx = await signTransaction(tx);
+  } else if (provider.wallet && typeof provider.wallet.signTransaction === 'function') {
+    tx = await provider.wallet.signTransaction(tx as Transaction);
+  }
+
+  const { signature } = await confirmAndRecord({ connection, signedTx: tx as VersionedTransaction, orderId })
+  return signature;
 }
 
 export function formatUsdtAmount(amount: anchor.BN): string {

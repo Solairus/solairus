@@ -76,6 +76,22 @@ export const AGENT_ENDPOINTS = {
   }
 };
 
+// Bucket service endpoints
+export const BUCKET_ENDPOINTS = {
+  // Admin buckets overview
+  getAdminBuckets: '/admin/buckets',
+  // Initialize a bucket withdrawal for a given bucket type
+  initBucketWithdrawal: '/admin/buckets/:bucketType/withdraw/init',
+  // Build full URL for bucket endpoint
+  buildUrl(endpoint: string, params: Record<string, string> = {}): string {
+    let url = `${API_CONFIG.getBaseUrl()}${endpoint}`;
+    Object.entries(params).forEach(([key, value]) => {
+      url = url.replace(`:${key}`, encodeURIComponent(value));
+    });
+    return url;
+  }
+};
+
 // Error reporting endpoints
 export const ERROR_REPORTING_ENDPOINTS = {
   // Error reporting

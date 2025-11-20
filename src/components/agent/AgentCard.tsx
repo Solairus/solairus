@@ -11,7 +11,7 @@ import { WithdrawalValidationFeedback, useWithdrawalValidation } from './Withdra
 import { useAgentErrorHandler } from '@/utils/agent-error-handler';
 import { useAgentRetryMechanism } from '@/utils/agent-retry-mechanism';
 import { AgentErrorDisplay } from './AgentErrorDisplay';
-import { getTierStyling } from '@/config/agent-config';
+import { getTierStyling } from '@/services/agent/tiers-ui';
 import { useLiveRoi } from '@/services/agent/live-roi-service';
 import { 
   TrendingUp, 

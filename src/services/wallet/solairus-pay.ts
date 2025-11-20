@@ -4,6 +4,7 @@ import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddres
 import idl from "@/idl/solairus_pay.json";
 import { ensureAtaExists } from "@/utils/token-ata";
 import { ensureSolairusProgramsInitialized } from "@/utils/solairus-program-validation";
+import { confirmAndRecord } from "@/services/transactions/confirmAndRecord";
 
 /**
  * SolairusPayService
@@ -135,53 +136,11 @@ export class SolairusPayService {
     tx.feePayer = payer;
 
     const signedTx = await provider.wallet.signTransaction(tx);
-    const signature = await provider.connection.sendRawTransaction(signedTx.serialize(), {
-      skipPreflight: false,
-      preflightCommitment: 'confirmed',
-      maxRetries: 0,
-    });
-
-    // Wait for transaction confirmation using gentle polling (every 5 seconds, 6 attempts = 30 seconds total)
-    console.log('🔄 Waiting for transaction confirmation:', signature);
-    const maxAttempts = 6;
-    const pollIntervalMs = 5000; // 5 seconds between checks
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        console.log(`🔍 Confirmation check ${attempt}/${maxAttempts}...`);
-        const status = await provider.connection.getSignatureStatuses([signature], { searchTransactionHistory: true });
-        const txStatus = status.value[0];
-
-        if (txStatus) {
-          if (txStatus.err) {
-            throw new Error(`Transaction failed: ${JSON.stringify(txStatus.err)}`);
-          }
-
-          if (txStatus.confirmationStatus === 'confirmed' || txStatus.confirmationStatus === 'finalized') {
-            console.log('✅ Transaction confirmed:', signature);
-            return signature;
-          }
-
-          console.log(`⏳ Transaction status: ${txStatus.confirmationStatus || 'processing'} (${txStatus.confirmations || 0} confirmations)`);
-        } else {
-          console.log('⏳ Transaction not yet found in blockchain...');
-        }
-
-        // Wait 5 seconds before next check (except on last attempt)
-        if (attempt < maxAttempts) {
-          console.log(`⏳ Waiting ${pollIntervalMs / 1000}s before next check...`);
-          await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-        }
-      } catch (error) {
-        console.warn(`Error checking transaction status (attempt ${attempt}/${maxAttempts}):`, error);
-        // Continue polling despite errors, but don't wait on last attempt
-        if (attempt < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-        }
-      }
-    }
-
-    throw new Error(`Transaction confirmation timeout after ${maxAttempts} attempts (${maxAttempts * pollIntervalMs / 1000}s)`);
+    const { signature } = await confirmAndRecord({
+      connection: provider.connection,
+      signedTx,
+    })
+    return signature;
   }
 
   /**

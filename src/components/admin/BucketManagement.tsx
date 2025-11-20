@@ -18,6 +18,7 @@ import { PublicKey } from '@solana/web3.js';
 import { Transaction } from '@solana/web3.js';
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import * as anchor from '@coral-xyz/anchor';
+import { confirmAndRecord } from '@/services/transactions/confirmAndRecord';
 
 type BucketType = 'admin' | 'dev' | 'marketer1' | 'marketer2' | 'trader' | 'reserve';
 
@@ -155,11 +156,12 @@ export function BucketManagement() {
       // Decode, sign and send transaction
       const tx = Transaction.from(Buffer.from(txBase64, 'base64'));
       const signed = await signTransaction(tx);
-      const signature = await anchorProvider.connection.sendRawTransaction(signed.serialize(), { skipPreflight: false });
-
-      // Confirm on-chain
-      const conf = await anchorProvider.connection.confirmTransaction(signature, 'confirmed');
-      const ok = !conf?.value?.err;
+      const { signature } = await confirmAndRecord({
+        connection: anchorProvider.connection,
+        signedTx: signed,
+        orderId
+      });
+      const ok = Boolean(signature && signature.length > 0);
 
       // Poll order status
       let finalized = false;

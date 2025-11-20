@@ -393,6 +393,9 @@ router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Requ
     const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], new PublicKey(PROGRAM_ID))
     const cfgInfo = await connection.getAccountInfo(configPda, 'confirmed')
     if (!cfgInfo) return res.status(400).json({ error: 'Config PDA not initialized on-chain' })
+    // Decode backend authority on-chain and compare to env
+    // Decode backend authority on-chain (for internal comparison if needed)
+    // const onChainBackend = new PublicKey(cfgInfo.data.slice(8, 8 + 32)).toBase58()
     const [vaultAuth] = PublicKey.findProgramAddressSync([Buffer.from('vault'), mint.toBuffer()], new PublicKey(PROGRAM_ID))
     const vaultAta = PublicKey.findProgramAddressSync(
       [vaultAuth.toBuffer(), new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA').toBuffer(), mint.toBuffer()],

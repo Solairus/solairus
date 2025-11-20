@@ -30,7 +30,7 @@ export async function attemptExpiredWithdrawalRefund(orderId: string): Promise<{
     )
     const record = txRes.rows[0]
     if (!record) return { refunded: false, reason: 'record_not_found' }
-    if (record.type !== 'user_withdrawal') return { refunded: false, reason: 'not_user_withdrawal' }
+    if (!(record.type === 'user_withdrawal' || record.type === 'role_withdrawal')) return { refunded: false, reason: 'not_withdrawal' }
     if (record.status !== 'pending') return { refunded: false, reason: 'not_pending' }
 
     // If refund already finalized, do not process again

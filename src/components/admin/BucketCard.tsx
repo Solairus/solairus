@@ -22,7 +22,7 @@ interface BucketCardProps {
 }
 
 export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess }: BucketCardProps) {
-  const { anchorProvider, publicKey } = useWallet();
+  const { anchorProvider, publicKey, signTransaction } = useWallet();
   const { showError, showSuccess } = useAdminErrorHandler();
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [showWithdrawForm, setShowWithdrawForm] = useState(false);
@@ -54,19 +54,19 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
   const bucketDisplayNames: Record<BucketType, string> = {
     admin: 'Admin',
     dev: 'Developer',
-    marketer1: 'Marketer 1',
-    marketer2: 'Marketer 2',
+    marketer_1: 'Marketer 1',
+    marketer_2: 'Marketer 2',
     trader: 'Trader',
-    systemreserve: 'System Reserve',
+    reserve: 'System Reserve',
   };
 
   const bucketColors: Record<BucketType, string> = {
     admin: 'bg-red-500/10 text-red-400 border-red-500/20',
     dev: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-    marketer1: 'bg-green-500/10 text-green-400 border-green-500/20',
-    marketer2: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+    marketer_1: 'bg-green-500/10 text-green-400 border-green-500/20',
+    marketer_2: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
     trader: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-    systemreserve: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
+    reserve: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
   };
 
   const formattedBalance = formatUsdtAmount(balance);
@@ -101,6 +101,21 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
     }
   };
 
+  // Helper: resolve USDT mint based on cluster
+  const resolveUsdtMint = (): PublicKey => {
+    const override = localStorage.getItem('solana_cluster_override')?.toLowerCase();
+    const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? 'devnet').toLowerCase();
+    const effective = override || envCluster;
+    const normalized = effective.startsWith('mainnet') ? 'mainnet-beta' : 'devnet';
+
+    const mintStr = normalized === 'mainnet-beta'
+      ? (import.meta.env.VITE_USDT_MINT as string)
+      : (import.meta.env.VITE_USDT_MINT_DEVNET as string);
+
+    if (!mintStr) throw new Error('USDT mint not configured');
+    return new PublicKey(mintStr);
+  };
+
   const handleWithdraw = async () => {
     if (!validateWithdrawal()) return;
 
@@ -111,9 +126,12 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
       
       const txSignature = await withdrawFromBucket({
         provider: anchorProvider,
+        connection: anchorProvider.connection,
         bucketType,
         amount: amountBN,
         authority: publicKey,
+        usdtMint: resolveUsdtMint(),
+        signTransaction: signTransaction || undefined,
       });
 
       return txSignature;

@@ -28,6 +28,7 @@ export interface AdminError {
   originalError: unknown;
   suggestedAction?: string;
   context?: string;
+  logs?: string[];
 }
 
 export interface TransactionStatus {
@@ -172,13 +173,20 @@ export class AdminErrorHandler {
     if (lowerMessage.includes('transaction') ||
         lowerMessage.includes('signature') ||
         lowerMessage.includes('blockhash')) {
-      return {
+      const enriched: AdminError = {
         type: 'transaction',
         message: 'Transaction failed. This may be a temporary network issue.',
         originalError: error,
         suggestedAction: 'Try again in a few moments',
         context,
       };
+      // Attempt to parse embedded logs if present in error message
+      const logsMatch = errorMessage.match(/logs:\s*\[(.*)\]/s);
+      if (logsMatch) {
+        const raw = logsMatch[1];
+        enriched.logs = raw.split('\n').map(l => l.trim()).filter(Boolean);
+      }
+      return enriched;
     }
 
     // Seeds constraint violation (Anchor Error Code 2006)
