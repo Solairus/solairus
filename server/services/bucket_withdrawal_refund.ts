@@ -35,7 +35,13 @@ export async function attemptExpiredBucketWithdrawalRefund(orderId: string): Pro
     const sig = await findSignatureByReference(conn, reference)
     if (sig) {
       const decimals = record.decimals || 6
-      const amtMicro = toMicroBigInt(record.amount as any, decimals)
+      // role_withdrawal: record.amount is stored in micro units; do not rescale here
+      const amtMicro = (() => {
+        const val = record.amount as any
+        if (typeof val === 'number') return BigInt(Math.round(val))
+        const s = String(val).trim()
+        return s ? BigInt(s) : 0n
+      })()
       const valid = await verifyTokenDelta(conn, sig, record.initiator_wallet, record.mint_address, amtMicro, decimals)
       if (valid) {
         await finalizeRecovery(client, record.id, sig, { recoveredVia: 'reference', recoveredAt: new Date().toISOString() })
@@ -51,13 +57,43 @@ export async function attemptExpiredBucketWithdrawalRefund(orderId: string): Pro
       return { refunded: false, reason: 'missing_bucket_type' }
     }
 
-    // Convert transaction amount to decimal USDT string and reuse shared bucket updater
+    // Special case: role_withdrawal refunds must convert micro → unit before bucket credit
     const decimals = record.decimals || 6
-    const amountMicro = toMicroBigInt(record.amount as any, decimals)
+    // Validate input is micro units (integer count)
+    const rawAmount = record.amount as any
+    const isValidMicro = (() => {
+      if (typeof rawAmount === 'number') return Number.isInteger(rawAmount)
+      const s = String(rawAmount)
+      return /^-?\d+$/.test(s)
+    })()
+    if (!isValidMicro || decimals !== 6) {
+      await finalizeRefund(client, record.id, { refund: false, failureReason: 'invalid_input_units', expected: 'micro', got: rawAmount, decimals })
+      await client.query('ROLLBACK')
+      return { refunded: false, reason: 'invalid_input_units' }
+    }
+    const amountMicro = typeof rawAmount === 'number' ? BigInt(Math.round(rawAmount)) : BigInt(String(rawAmount))
     const amountUsdt = microBigIntToDecimalString(amountMicro, decimals)
     const postBalance = await (await import('./bucket')).applyBucketChange(client, bucketType as any, 'credit', amountUsdt, record.id)
 
-    await finalizeRefund(client, record.id, { refund: true, refund_finalized: true, failureReason: 'Expired; no on-chain signature found', refundAt: now.toISOString(), reference: reference.toBase58(), bucket_type: bucketType })
+    // Monitoring: annotate conversion details and warn on unusually large amounts
+    try {
+      const asNum = Number(amountUsdt)
+      if (Number.isFinite(asNum) && asNum > 1_000_000) {
+        console.warn(`[Refund Monitor] Unusually large role_withdrawal refund: ${amountUsdt} USDT for order ${orderId}`)
+      }
+    } catch {}
+
+    await finalizeRefund(client, record.id, {
+      refund: true,
+      refund_finalized: true,
+      failureReason: 'Expired; no on-chain signature found',
+      refundAt: now.toISOString(),
+      reference: reference.toBase58(),
+      bucket_type: bucketType,
+      refund_amount_micro: amountMicro.toString(),
+      refund_amount_usdt: amountUsdt,
+      conversion_applied: true,
+    })
     await client.query('COMMIT')
     return { refunded: true }
   } catch (e) {
