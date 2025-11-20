@@ -803,34 +803,21 @@ router.post('/transactions/pending/resolve', async (req: Request, res: Response)
         continue
       }
 
-      // Withdrawals: check reference PDA first
-      const refStr = (record.metadata as any)?.reference as string | undefined
-      const reference = refStr ? new PublicKey(refStr) : (record.order_id ? deriveReference(record.order_id, solairusPayProgramId) : null)
-      if (reference) {
-        const currentEndpoint = getRpcManager().getCurrentEndpoint()
-        const sig = await findSignatureByReference(connection, reference)
-        if (sig) {
-          // Verify delta and finalize recovery
-          const valid = await verifyOnChainMatchesRecord(connection, { ...record, signature: sig } as Transaction)
-          if (valid.ok) {
-            await query<Transaction>(
-              'UPDATE transactions SET status = $1, signature = $2, metadata = metadata || $3::jsonb WHERE id = $4',
-              ['confirmed', sig, JSON.stringify({ completed: true, recoveredVia: 'reference', resolver_rpc_endpoint: currentEndpoint }), record.id]
-            )
-            continue
-          }
-          await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
-            JSON.stringify({ resolver_action: 'withdrawal_recover_attempt', resolver_reason: 'reference_signature_delta_mismatch', resolver_rpc_endpoint: currentEndpoint }),
-            record.id,
-          ])
+      // Withdrawals: unified event-based recovery (RewardsClaimed with memo === orderId)
+      if (record.order_id && solairusPayProgramId) {
+        const recipientPk = new PublicKey(record.initiator_wallet)
+        const found = await findSignatureUnified(connection, recipientPk, record.order_id, { types: ['withdrawal'], maxSignatures: 100 })
+        if (found?.signature) {
+          await query<Transaction>(
+            'UPDATE transactions SET status = $1, signature = $2, metadata = metadata || $3::jsonb WHERE id = $4',
+            ['confirmed', found.signature, JSON.stringify({ completed: true, recoveredVia: 'event', event: 'RewardsClaimed' }), record.id]
+          )
+          continue
         }
-        // Reference signature not found: refund candidate (no TTL required)
-        else {
-          await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
-            JSON.stringify({ resolver_action: 'withdrawal_recover_attempt', resolver_reason: 'reference_signature_not_found', resolver_rpc_endpoint: getRpcManager().getCurrentEndpoint() }),
-            record.id,
-          ])
-        }
+        await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
+          JSON.stringify({ resolver_action: 'withdrawal_recover_attempt', resolver_result: 'not_found' }),
+          record.id,
+        ])
       }
 
       // If recovery failed or no reference, perform refund safely (idempotent)
