@@ -245,7 +245,7 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
 
         // Silent pending withdrawals resolver (one-shot per page load)
         try {
-          const url = `${API_CONFIG.getBaseUrl()}/withdrawals/pending/resolve`
+          const url = `${API_CONFIG.getBaseUrl()}/transactions/pending/resolve`
           await ApiClient.post(url, { walletAddress: address })
         } catch {}
       } catch (error) {

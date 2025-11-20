@@ -15,6 +15,8 @@ import { BorshCoder, EventParser, Idl, utils } from '@coral-xyz/anchor'
 import solairusPayIdl from '../idl/solairus_pay.json'
 import { getConnection, getCurrentCluster } from '../lib/rpc-manager'
 import { attemptExpiredWithdrawalRefund } from '../services/withdrawal_refund'
+import { attemptExpiredBucketWithdrawalRefund } from '../services/bucket_withdrawal_refund'
+import { deriveReference, findSignatureByReference } from '../services/withdrawal_verifier'
 import { distributeAffiliateBonuses } from '../services/affiliate'
 import { applyBucketChange } from '../services/bucket'
 import { pool } from '../db'
@@ -700,6 +702,97 @@ router.post('/transactions/reapply-agent', reapplyAgentHandler)
 router.post('/transactions', createTransactionHandler)
 router.post('/withdrawals/user', setType('user_withdrawal'), createTransactionHandler)
 router.post('/withdrawals/role', setType('role_withdrawal'), createTransactionHandler)
+
+/**
+ * POST /api/transactions/pending/resolve
+ * Resolve all pending transactions for a wallet in a single silent call.
+ * - Activations: recover signature by orderId and verify; mark confirmed/completed
+ * - Withdrawals: recover via reference, verify delta; else refund safely and mark failed
+ * Always returns 200 with no payload; idempotent via refund_finalized guard.
+ */
+router.post('/transactions/pending/resolve', async (req: Request, res: Response) => {
+  try {
+    const walletAddress = String(req.body?.walletAddress || '')
+    if (!walletAddress || walletAddress.length < 32) return res.status(200).end()
+
+    // Fetch pending transactions for this wallet
+    const pending = await query<Transaction>(
+      `SELECT * FROM transactions
+       WHERE initiator_wallet = $1
+         AND status = 'pending'
+         AND type IN ('license_activation','agent_activation','user_withdrawal','role_withdrawal')`,
+      [walletAddress]
+    )
+
+    if (!pending.rows.length) return res.status(200).end()
+
+    // Use a single connection to minimize RPC load
+    const connection = getConnection()
+    const solairusPayProgramId =
+      process.env.SOLAIRUS_PAY_PROGRAM_ID ?? (solairusPayIdl as { address?: string }).address ?? ''
+
+    for (const record of pending.rows) {
+      // Skip if refund already finalized
+      if (record.metadata && (record.metadata as any)['refund_finalized'] === true) continue
+
+      // If signature exists, reuse shared verifier
+      if (record.signature) {
+        await verifyAndProcessTransaction(connection, record, {
+          requireOrderIdMatch: record.type === 'license_activation' || record.type === 'agent_activation',
+        })
+        continue
+      }
+
+      // No signature: recover or refund depending on type
+      if (record.type === 'license_activation' || record.type === 'agent_activation') {
+        // Recover by PaymentMade event memo (orderId)
+        if (record.order_id && solairusPayProgramId) {
+          const found = await findTransactionSignature(record.order_id, new PublicKey(walletAddress), solairusPayProgramId)
+          if (found?.signature) {
+            // Patch signature and verify
+            await query('UPDATE transactions SET signature = $1 WHERE id = $2', [found.signature, record.id])
+            await verifyAndProcessTransaction(connection, { ...record, signature: found.signature } as Transaction, {
+              requireOrderIdMatch: true,
+            })
+            continue
+          }
+        }
+        // If not found, leave pending; resolver is silent
+        continue
+      }
+
+      // Withdrawals: check reference PDA first
+      const refStr = (record.metadata as any)?.reference as string | undefined
+      const reference = refStr ? new PublicKey(refStr) : (record.order_id ? deriveReference(record.order_id, solairusPayProgramId) : null)
+      if (reference) {
+        const sig = await findSignatureByReference(connection, reference)
+        if (sig) {
+          // Verify delta and finalize recovery
+          const valid = await verifyOnChainMatchesRecord(connection, { ...record, signature: sig } as Transaction)
+          if (valid.ok) {
+            await query<Transaction>(
+              'UPDATE transactions SET status = $1, signature = $2, metadata = metadata || $3::jsonb WHERE id = $4',
+              ['confirmed', sig, JSON.stringify({ completed: true, recoveredVia: 'reference' }), record.id]
+            )
+            continue
+          }
+        }
+      }
+
+      // If recovery failed, perform refund safely
+      if (record.type === 'role_withdrawal') {
+        if (record.order_id) await attemptExpiredBucketWithdrawalRefund(record.order_id)
+      } else {
+        if (record.order_id) await attemptExpiredWithdrawalRefund(record.order_id)
+      }
+    }
+
+    return res.status(200).end()
+  } catch (e) {
+    // Silent response; never block UI
+    return res.status(200).end()
+  }
+})
 
 /**
  * POST /api/transactions/:id/cancel
