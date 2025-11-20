@@ -2,54 +2,45 @@
  * Lazy validation for Solairus program IDs during payment/withdrawal operations
  */
 
+import idl from '@/idl/solairus_pay.json'
+
 interface ProgramValidationResult {
   isValid: boolean
   errors: string[]
   programIds: {
-    main?: string
     pay?: string
   }
 }
 
 export function validateSolairusProgramIds(): ProgramValidationResult {
   const errors: string[] = []
-  const programIds: { main?: string; pay?: string } = {}
+  const programIds: { pay?: string } = {}
 
-  // Validate SolairusPay program ID (required for payments/withdrawals)
-  const payProgramId = import.meta.env.VITE_SOLAIRUS_PAY_PROGRAM_ID
-  if (!payProgramId) {
-    errors.push('VITE_SOLAIRUS_PAY_PROGRAM_ID is required for payment/withdrawal operations')
-  } else {
+  const payEnv = import.meta.env.VITE_SOLAIRUS_PAY_PROGRAM_ID
+  const rawIdl = idl as unknown as { address?: string; metadata?: { address?: string } }
+  const idlAddress = rawIdl.address ?? rawIdl.metadata?.address
+
+  if (payEnv) {
     try {
-      // Basic validation that it looks like a valid Solana program ID
-      if (!payProgramId.match(/^[A-Za-z0-9]{43,44}$/)) {
-        errors.push(`Invalid VITE_SOLAIRUS_PAY_PROGRAM_ID format: ${payProgramId}`)
+      if (!payEnv.match(/^[A-Za-z0-9]{43,44}$/)) {
+        errors.push(`Invalid VITE_SOLAIRUS_PAY_PROGRAM_ID format: ${payEnv}`)
       } else {
-        programIds.pay = payProgramId
+        programIds.pay = payEnv
       }
     } catch (error) {
       errors.push(`Error validating VITE_SOLAIRUS_PAY_PROGRAM_ID: ${error}`)
     }
-  }
-
-  // Solairus Main program ID is optional (legacy, not used in current flows)
-  const mainProgramId = import.meta.env.VITE_SOLAIRUS_MAIN_PROGRAM_ID
-  if (mainProgramId) {
-    try {
-      if (!mainProgramId.match(/^[A-Za-z0-9]{43,44}$/)) {
-        errors.push(`Invalid VITE_SOLAIRUS_MAIN_PROGRAM_ID format: ${mainProgramId}`)
-      } else {
-        programIds.main = mainProgramId
-      }
-    } catch (error) {
-      errors.push(`Error validating VITE_SOLAIRUS_MAIN_PROGRAM_ID: ${error}`)
-    }
+  } else if (idlAddress && /^[A-Za-z0-9]{43,44}$/.test(idlAddress)) {
+    programIds.pay = idlAddress
+    try { console.warn('Using IDL address as fallback for SolairusPay program ID') } catch {}
+  } else {
+    errors.push('VITE_SOLAIRUS_PAY_PROGRAM_ID is required for payment/withdrawal operations')
   }
 
   return {
     isValid: errors.length === 0,
     errors,
-    programIds
+    programIds,
   }
 }
 

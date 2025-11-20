@@ -6,6 +6,7 @@ interface ImportMetaEnv {
   readonly VITE_DEFAULT_SPONSOR_ADDRESS?: string;
   // Local testing override for withdrawal window seconds
   readonly VITE_WITHDRAWAL_WINDOW_SECONDS?: string;
+  readonly VITE_SOLAIRUS_PAY_PROGRAM_ID?: string;
 }
 
 interface ImportMeta {
