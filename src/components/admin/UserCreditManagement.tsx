@@ -7,7 +7,7 @@ import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '@/contexts/wallet-context';
 import { useAdminRole } from '@/hooks/useAdminRole';
 import { UserLookup, UserInfo } from './UserLookup';
-import { getProgram, derivePdas } from '@/lib/solairus-removed';
+// Purged solairus-removed imports from admin credit management
 import { useAdminErrorHandler } from '@/utils/admin-error-handler';
 import { useTransactionStatus } from '@/hooks/useTransactionStatus';
 import { createAdminService } from '@/services/admin/admin-service';
@@ -65,8 +65,7 @@ export function UserCreditManagement() {
   const transactionStatus = useTransactionStatus({
     steps: [
       { id: 'validate', label: 'Validating operation' },
-      { id: 'sign', label: 'Waiting for signature' },
-      { id: 'confirm', label: 'Confirming transaction' },
+      { id: 'process', label: 'Processing backend operation' },
     ],
     onSuccess: (signature) => {
       const operationType = form.isDebit ? 'debit' : 'credit';
@@ -169,13 +168,13 @@ export function UserCreditManagement() {
     // Update form state to track operation type
     setForm(prev => ({ ...prev, isDebit }));
 
-    await transactionStatus.executeTransaction(async () => {
+    const txSig = await transactionStatus.executeTransaction(async () => {
       transactionStatus.updateProgress(20, 'validate');
       
       const userPubkey = new PublicKey(userInfo!.address);
       const amountBN = parseUsdtAmount(form.amount);
       
-      transactionStatus.updateProgress(40, 'sign');
+      transactionStatus.updateProgress(40, 'process');
 
       // Use the admin service instead of calling contract directly
       const adminService = createAdminService(anchorProvider);
@@ -187,10 +186,22 @@ export function UserCreditManagement() {
         authority: publicKey,
       });
 
-      const txSignature = result.txSignature;
-
-      return txSignature;
+      return result.txSignature;
     }, `User ${isDebit ? 'debit' : 'credit'} operation`);
+
+    if (txSig && typeof txSig === 'string' && txSig.length <= 40) {
+      const operationType = isDebit ? 'debit' : 'credit';
+      const operationText = isDebit ? 'debited from' : 'credited to';
+      showSuccess(`Successfully ${operationText} user balance`, {
+        description: `${form.amount} USDT ${operationText} ${userInfo?.address.slice(0, 8)}... | Tx: ${txSig.slice(0, 8)}...`,
+      });
+      setLastOperation({ type: operationType, amount: form.amount, success: true });
+      const currentAddress = userInfo!.address;
+      setUserInfo(null);
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('refreshUserLookup', { detail: { address: currentAddress } }));
+      }, 1000);
+    }
   };
 
   const handleUserFound = (info: UserInfo | null) => {

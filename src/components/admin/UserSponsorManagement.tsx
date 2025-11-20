@@ -8,10 +8,10 @@ import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '@/contexts/wallet-context';
 import { useAdminRole } from '@/hooks/useAdminRole';
 import { UserLookup, UserInfo } from './UserLookup';
-import { getProgram, derivePdas } from '@/lib/solairus-removed';
+// Purged solairus-removed; use backend-only AdminService
 import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { updateUserSponsor, validateSponsorChange, getUserSponsorInfo } from '@/services/admin/sponsor-management-service';
+import { createAdminService } from '@/services/admin/admin-service';
 import * as anchor from '@coral-xyz/anchor';
 
 interface SponsorUpdateForm {
@@ -51,21 +51,28 @@ export function UserSponsorManagement() {
   }
 
   const validateSponsorAddress = (address: string): { isValid: boolean; error?: string } => {
-    try {
-      const newSponsorPubkey = new PublicKey(address);
-      
-      if (!userInfo || !userInfo.exists) {
-        return { isValid: false, error: 'Please lookup an existing user first' };
-      }
-      
-      const userPubkey = new PublicKey(userInfo.address);
-      const currentSponsor = userInfo.sponsor || PublicKey.default;
-      
-      // Use the enhanced validation from the service
-      return validateSponsorChange(userPubkey, currentSponsor, newSponsorPubkey);
-    } catch {
-      return { isValid: false, error: 'Invalid Solana address format' };
+    const trimmed = (address || '').trim();
+    if (!userInfo || !userInfo.exists) {
+      return { isValid: false, error: 'Please lookup an existing user first' };
     }
+    if (!trimmed) {
+      return { isValid: false, error: 'Sponsor address is required' };
+    }
+
+    // Basic length sanity check only; avoid strict base58 validation to reduce false negatives
+    if (trimmed.length < 32 || trimmed.length > 64) {
+      return { isValid: false, error: 'Sponsor address length looks invalid' };
+    }
+
+    const userAddr = userInfo.address.trim();
+    const currentSponsorStr = userInfo.sponsor?.toString().trim() || '';
+    if (trimmed === userAddr) {
+      return { isValid: false, error: 'User cannot sponsor themselves' };
+    }
+    if (currentSponsorStr && trimmed === currentSponsorStr) {
+      return { isValid: false, error: 'User already has this sponsor' };
+    }
+    return { isValid: true };
   };
 
   const handleUserFound = (info: UserInfo | null) => {
@@ -91,17 +98,17 @@ export function UserSponsorManagement() {
       return;
     }
 
-    const validation = validateSponsorAddress(form.newSponsorAddress);
+      const validation = validateSponsorAddress(form.newSponsorAddress);
     if (!validation.isValid) {
       toast.error(validation.error || 'Invalid sponsor address');
       return;
     }
 
-    const newSponsorPubkey = new PublicKey(form.newSponsorAddress);
+    const newSponsorAddress = form.newSponsorAddress.trim();
     const currentSponsorAddress = userInfo.sponsor?.toString() || 'None';
 
     // Check if the new sponsor is the same as current
-    if (userInfo.sponsor && userInfo.sponsor.equals(newSponsorPubkey)) {
+    if (userInfo.sponsor && userInfo.sponsor === newSponsorAddress) {
       toast.error('New sponsor address is the same as current sponsor');
       return;
     }
@@ -111,7 +118,7 @@ export function UserSponsorManagement() {
       show: true,
       userInfo,
       currentSponsor: currentSponsorAddress,
-      newSponsor: form.newSponsorAddress,
+      newSponsor: newSponsorAddress,
     });
   };
 
@@ -125,25 +132,19 @@ export function UserSponsorManagement() {
     setConfirmation({ ...confirmation, show: false });
 
     try {
-      const program = getProgram(anchorProvider);
-      const userPubkey = new PublicKey(confirmation.userInfo.address);
-      const newSponsorPubkey = new PublicKey(confirmation.newSponsor);
-      
-      // Use the enhanced sponsor management service
-      const result = await updateUserSponsor({
-        userPubkey,
-        newSponsorPubkey,
-        authorityPubkey: publicKey,
-        program,
+      const adminService = createAdminService(anchorProvider);
+      const txSig = await adminService.updateUserSponsor({
+        provider: anchorProvider,
+        userPubkey: confirmation.userInfo.address.trim(),
+        newSponsor: confirmation.newSponsor.trim(),
+        authority: publicKey,
       });
 
-      toast.success('Successfully updated user sponsor', {
-        description: `User: ${confirmation.userInfo.address.slice(0, 8)}... | Tx: ${result.txSignature.slice(0, 8)}...`,
-      });
+      toast.success('Successfully updated user sponsor');
 
       setLastOperation({
         success: true,
-        message: `Sponsor updated from ${result.oldSponsor.toString().slice(0, 8)}... to ${result.newSponsor.toString().slice(0, 8)}...`,
+        message: `Sponsor updated successfully`,
       });
 
       // Clear form
@@ -153,7 +154,7 @@ export function UserSponsorManagement() {
       const currentAddress = confirmation.userInfo.address;
       setUserInfo(null);
       
-      // Small delay to allow blockchain state to update
+      // Small delay to allow backend state to update
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent('refreshUserLookup', { detail: { address: currentAddress } }));
       }, 1000);
@@ -168,7 +169,7 @@ export function UserSponsorManagement() {
         errorMessage = String(error.message);
       }
 
-      // Handle specific contract errors
+      // Handle specific backend errors
       if (errorMessage.includes('UnauthorizedSponsorUpdate')) {
         errorMessage = 'Only admin or dev can update user sponsors';
       } else if (errorMessage.includes('SponsorNotRegistered')) {
@@ -198,12 +199,12 @@ export function UserSponsorManagement() {
   };
 
   const canUpdateSponsor = (): boolean => {
-    if (isProcessing || !userInfo || !userInfo.exists || form.newSponsorAddress.trim() === '') {
-      return false;
-    }
-    
-    const validation = validateSponsorAddress(form.newSponsorAddress);
-    return validation.isValid;
+    if (isProcessing || !userInfo || !userInfo.exists) return false;
+    const newAddr = form.newSponsorAddress.trim();
+    if (!newAddr) return false;
+    const isSelf = newAddr === userInfo.address.trim();
+    const isSame = userInfo.sponsor ? newAddr === userInfo.sponsor.toString().trim() : false;
+    return !isSelf && !isSame;
   };
 
   const formatAddress = (address: string): string => {
@@ -229,6 +230,7 @@ export function UserSponsorManagement() {
         onUserFound={handleUserFound}
         showCreateOption={false}
         className="w-full"
+        mode="sponsor"
       />
 
       {/* Sponsor Update Form */}
@@ -411,7 +413,7 @@ export function UserSponsorManagement() {
               <li>The new sponsor address must be a valid Solana wallet address</li>
               <li>Sponsor updates affect referral hierarchies and commission distributions</li>
               <li>Only admin and dev roles can perform sponsor updates</li>
-              <li>All sponsor updates are logged on the blockchain for audit purposes</li>
+              <li>All sponsor updates are audit logged in backend</li>
             </ul>
           </div>
         </CardContent>

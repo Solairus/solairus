@@ -3,6 +3,7 @@ import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import idl from "@/idl/solairus_pay.json";
 import { ensureAtaExists } from "@/utils/token-ata";
+import { ensureSolairusProgramsInitialized } from "@/utils/solairus-program-validation";
 
 /**
  * SolairusPayService
@@ -19,8 +20,12 @@ export class SolairusPayService {
    * Initializes Anchor Program instance using processed IDL.
    * - Adds root-level address field
    * - Fixes type compatibility (publicKey -> pubkey)
+   * - Validates SolairusPay program ID on-demand
    */
   constructor(provider: anchor.AnchorProvider) {
+    // Validate SolairusPay program ID before initialization
+    ensureSolairusProgramsInitialized();
+    
     const rawIdl = idl as unknown as { address?: string; metadata?: { address?: string } };
     const fixedIdl = SolairusPayService.fixIdlTypes({
       ...idl,

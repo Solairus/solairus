@@ -119,9 +119,9 @@ export function BucketManagement() {
     }
 
     const amountMicro = Math.floor(amount * 1_000_000);
-    const currentBalance = balances ? parseFloat(balances[selectedBucket] || '0') : 0;
+    const currentBalanceUnits = balances ? parseFloat(balances[selectedBucket] || '0') : 0;
 
-    if (amountMicro > currentBalance) {
+    if (amount > currentBalanceUnits) {
       showError('Insufficient bucket balance', 'Bucket withdrawal', { showRetry: false });
       return;
     }

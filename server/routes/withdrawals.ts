@@ -14,6 +14,8 @@ import { Router, Request, Response } from 'express'
 import { PublicKey } from '@solana/web3.js'
 import { z } from 'zod'
 import crypto from 'crypto'
+import solairusPayIdl from '../idl/solairus_pay.json'
+import { getConnection } from '../lib/rpc-manager'
 import { query, pool } from '../db'
 import { buildClaimRewardsTx } from '../services/withdrawals'
 
@@ -50,7 +52,7 @@ router.post('/withdrawals/init', async (req: Request, res: Response) => {
   const user = userRes.rows[0] ?? null
   if (!user) return res.status(404).json({ error: 'User not found' })
 
-  const PROGRAM_ID = process.env.SOLAIRUS_PAY_PROGRAM_ID || '5eRuzYxGUE4VHadPEhihHMpuPa6n2WvCR6ENx3WSW6ek'
+  const PROGRAM_ID = process.env.SOLAIRUS_PAY_PROGRAM_ID || (solairusPayIdl as { address?: string }).address!
   const orderId = crypto.randomUUID()
   const referencePubkey = deriveReference(orderId, PROGRAM_ID)
 
@@ -66,6 +68,28 @@ router.post('/withdrawals/init', async (req: Request, res: Response) => {
       memo: parsed.data.memo,
       referencePubkey,
     })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Unknown error'
+    return res.status(400).json({ error: msg })
+  }
+
+  // Preflight: config authority and vault funding
+  try {
+    const connection = getConnection()
+    const mint = new PublicKey(parsed.data.mintAddress)
+    const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], new PublicKey(PROGRAM_ID))
+    const cfgInfo = await connection.getAccountInfo(configPda, 'confirmed')
+    if (!cfgInfo) return res.status(400).json({ error: 'Config PDA not initialized on-chain' })
+    const [vaultAuth] = PublicKey.findProgramAddressSync([Buffer.from('vault'), mint.toBuffer()], new PublicKey(PROGRAM_ID))
+    const vaultAta = PublicKey.findProgramAddressSync(
+      [vaultAuth.toBuffer(), new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA').toBuffer(), mint.toBuffer()],
+      new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+    )[0]
+    const bal = await connection.getTokenAccountBalance(vaultAta, 'confirmed').catch(() => null)
+    const availableMicro = bal ? BigInt(bal.value.amount) : 0n
+    if (availableMicro < BigInt(parsed.data.amountMicro)) {
+      return res.status(400).json({ error: 'Vault underfunded for requested amount' })
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
     return res.status(400).json({ error: msg })

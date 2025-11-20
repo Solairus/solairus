@@ -1,6 +1,7 @@
 import * as anchor from '@coral-xyz/anchor';
 import { PublicKey } from '@solana/web3.js';
-import { getProgram, derivePdas, type Config } from '@/lib/solairus-removed';
+// Purged solairus-removed from admin service
+import { ApiClient, API_CONFIG } from '@/config/service-endpoints';
 
 /**
  * Manual License Activation Parameters
@@ -92,281 +93,119 @@ export interface CreditBalanceUpdatedEvent {
  * Admin Service for managing administrative operations
  */
 export class AdminService {
-  private program: anchor.Program;
-  
-  constructor(provider: anchor.AnchorProvider) {
-    this.program = getProgram(provider);
+  private program?: anchor.Program;
+  constructor(_provider: anchor.AnchorProvider) {}
+
+  private programAccessError(): never {
+    throw new Error('AdminService program access disabled: use backend routes');
   }
 
   /**
    * Manually activate a user's license without USDT payment
    */
   async activateLicenseManual(params: ManualLicenseActivationParams): Promise<ManualLicenseActivationResult> {
-    const {
-      userPubkey,
-      sponsorPubkey,
-      durationDays,
-      extendExisting,
-      authority,
-    } = params;
+    const { userPubkey, sponsorPubkey, durationDays, extendExisting } = params;
 
-    // Validate parameters
     if (durationDays <= 0) {
       throw new Error('Duration days must be greater than 0');
     }
 
-    // Derive PDAs
-    const { config } = derivePdas();
-    const { profile: userProfile } = derivePdas(userPubkey);
-
-    if (!userProfile) {
-      throw new Error('Could not derive user profile PDA');
+    const base = API_CONFIG.getBaseUrl();
+    const url = `${base}/users/${userPubkey.toBase58()}/license`;
+    const resp = await ApiClient.post(url, { durationDays, extendExisting });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(text || 'Failed to activate license (manual)');
     }
+    const payload = await resp.json() as { success: boolean; new_expiration: string; transaction_id?: number };
+    const licenseExpiresAt = new Date(payload.new_expiration);
 
-    // Check if user profile exists to determine if this is a new user
-    let wasNewUser = false;
-    let previousExpiration: Date | null = null;
-
-    try {
-      const existingProfile = await this.program.account['userProfile'].fetch(userProfile);
-      // If profile exists but user field is default, it's effectively a new user
-      wasNewUser = existingProfile.user.equals(PublicKey.default);
-      
-      if (!wasNewUser && existingProfile.licenseExpiresAt) {
-        const prevExpTimestamp = existingProfile.licenseExpiresAt.toNumber();
-        if (prevExpTimestamp > 0) {
-          previousExpiration = new Date(prevExpTimestamp * 1000);
-        }
-      }
-    } catch (error) {
-      // Profile doesn't exist, so it's a new user
-      wasNewUser = true;
-    }
-
-    try {
-      // Call the contract method
-      const txSignature = await this.program.methods
-        .activateLicenseManual(
-          userPubkey,
-          sponsorPubkey,
-          durationDays,
-          extendExisting
-        )
-        .accounts({
-          config,
-          userProfile,
-          authority,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
-        .rpc();
-
-      // Calculate the expected expiration date
-      const now = new Date();
-      const durationMs = durationDays * 24 * 60 * 60 * 1000;
-      
-      let licenseExpiresAt: Date;
-      if (extendExisting && previousExpiration && previousExpiration > now) {
-        // Extend from previous expiration
-        licenseExpiresAt = new Date(previousExpiration.getTime() + durationMs);
-      } else {
-        // Set from current time
-        licenseExpiresAt = new Date(now.getTime() + durationMs);
-      }
-
-      return {
-        txSignature,
-        userPubkey,
-        sponsorPubkey,
-        durationDays,
-        licenseExpiresAt,
-        wasNewUser,
-        extendExisting,
-        previousExpiration,
-      };
-    } catch (error) {
-      console.error('Error in manual license activation:', error);
-      throw this.formatContractError(error);
-    }
+    return {
+      txSignature: payload.transaction_id ? `BACKEND-LICENSE-${payload.transaction_id}` : 'BACKEND-LICENSE',
+      userPubkey,
+      sponsorPubkey,
+      durationDays,
+      licenseExpiresAt,
+      wasNewUser: false,
+      extendExisting,
+      previousExpiration: null,
+    };
   }
 
   /**
    * Credit or debit a user's balance
    */
   async creditUserBalance(params: UserCreditParams): Promise<UserCreditResult> {
-    const { userPubkey, amount, isDebit, authority } = params;
+    const { userPubkey, amount, isDebit } = params;
 
-    // Validate parameters - amount should be a number (already converted from BN)
     if (amount <= 0) {
       throw new Error('Amount must be greater than 0');
     }
 
-    // Derive PDAs
-    const { config } = derivePdas();
-    const { profile: userProfile } = derivePdas(userPubkey);
-
-    if (!userProfile) {
-      throw new Error('Could not derive user profile PDA');
+    const base = API_CONFIG.getBaseUrl();
+    const url = isDebit
+      ? `${base}/users/${userPubkey.toBase58()}/debit`
+      : `${base}/users/${userPubkey.toBase58()}/credit`;
+    const resp = await ApiClient.post(url, { amount });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(text || 'Failed to update user credit balance');
+    }
+    const payload = await resp.json() as { success: boolean; new_balance?: number | string };
+    let balanceAfter = 0;
+    if (typeof payload.new_balance === 'number') {
+      balanceAfter = payload.new_balance;
+    } else if (typeof payload.new_balance === 'string') {
+      const micro = Number(payload.new_balance);
+      balanceAfter = Number.isFinite(micro) ? micro : 0;
     }
 
-    // Check if user profile exists to determine if this is a new user
-    let wasNewUser = false;
-    try {
-      const existingProfile = await this.program.account['userProfile'].fetch(userProfile);
-      wasNewUser = existingProfile.user.equals(PublicKey.default);
-    } catch (error) {
-      // Profile doesn't exist, so it's a new user
-      wasNewUser = true;
-    }
-
-    try {
-      // Call the contract method - ensure amount is properly converted to BN
-      const amountBN = new anchor.BN(Math.floor(amount)); // Ensure integer value
-      const txSignature = await this.program.methods
-        .creditUserBalance(userPubkey, amountBN, isDebit)
-        .accounts({
-          config,
-          profile: userProfile,
-          authority,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
-        .rpc();
-
-      // Fetch updated profile to get balance after
-      const updatedProfile = await this.program.account['userProfile'].fetch(userProfile);
-      const balanceAfter = updatedProfile.creditBalance?.toNumber() || 0;
-
-      return {
-        txSignature,
-        userPubkey,
-        amount,
-        isDebit,
-        balanceAfter,
-        wasNewUser,
-      };
-    } catch (error) {
-      console.error('Error in credit user balance:', error);
-      throw this.formatContractError(error);
-    }
+    return {
+      txSignature: isDebit ? 'BACKEND-DEBIT' : 'BACKEND-CREDIT',
+      userPubkey,
+      amount,
+      isDebit,
+      balanceAfter,
+      wasNewUser: false,
+    };
   }
 
   /**
    * Update a user's sponsor
    */
   async updateUserSponsor(params: UserSponsorUpdateParams): Promise<string> {
-    const { userPubkey, newSponsor, authority } = params;
-
-    // Derive PDAs
-    const { config } = derivePdas();
-    const { profile: userProfile } = derivePdas(userPubkey);
-
-    if (!userProfile) {
-      throw new Error('Could not derive user profile PDA');
+    const { userPubkey, newSponsor } = params as { userPubkey: PublicKey | string; newSponsor: PublicKey | string };
+    const base = API_CONFIG.getBaseUrl();
+    const userAddr = typeof userPubkey === 'string' ? userPubkey : userPubkey.toBase58();
+    const sponsorAddr = typeof newSponsor === 'string' ? newSponsor : newSponsor.toBase58();
+    const url = `${base}/users/${userAddr}/sponsor`;
+    const resp = await ApiClient.post(url, { newSponsorAddress: sponsorAddr });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(text || 'Failed to update user sponsor');
     }
-
-    // Verify user profile exists
-    try {
-      const existingProfile = await this.program.account['userProfile'].fetch(userProfile);
-      if (existingProfile.user.equals(PublicKey.default)) {
-        throw new Error('User profile does not exist');
-      }
-    } catch (error) {
-      throw new Error('User profile not found. User must be registered first.');
-    }
-
-    // Verify new sponsor is registered
-    const { profile: sponsorProfile } = derivePdas(newSponsor);
-    if (!sponsorProfile) {
-      throw new Error('Could not derive sponsor profile PDA');
-    }
-
-    try {
-      const sponsorProfileData = await this.program.account['userProfile'].fetch(sponsorProfile);
-      if (sponsorProfileData.user.equals(PublicKey.default)) {
-        throw new Error('New sponsor is not registered');
-      }
-    } catch (error) {
-      throw new Error('New sponsor is not registered in the system');
-    }
-
-    try {
-      // Call the update_user_profile method (assuming it exists in the contract)
-      const txSignature = await this.program.methods
-        .updateUserProfile(newSponsor)
-        .accounts({
-          config,
-          profile: userProfile,
-          authority,
-        })
-        .rpc();
-
-      return txSignature;
-    } catch (error) {
-      console.error('Error updating user sponsor:', error);
-      throw this.formatContractError(error);
-    }
+    return 'BACKEND-SPONSOR-UPDATED';
   }
 
   /**
    * Get user profile information
    */
   async getUserProfile(userPubkey: PublicKey) {
-    const { profile } = derivePdas(userPubkey);
-    
-    if (!profile) {
-      throw new Error('Could not derive user profile PDA');
-    }
-
-    try {
-      const userProfile = await this.program.account['userProfile'].fetch(profile);
-      
-      // Check if profile is initialized
-      if (userProfile.user.equals(PublicKey.default)) {
-        return null; // Profile exists but not initialized
-      }
-
-      return {
-        user: userProfile.user,
-        sponsor: userProfile.sponsor,
-        createdAt: new Date(userProfile.createdAt.toNumber() * 1000),
-        activePrincipalUsdt: userProfile.activePrincipalUsdt.toNumber(),
-        lastRoiWithdrawAt: userProfile.lastRoiWithdrawAt.toNumber() > 0 
-          ? new Date(userProfile.lastRoiWithdrawAt.toNumber() * 1000) 
-          : null,
-        licenseExpiresAt: userProfile.licenseExpiresAt.toNumber() > 0 
-          ? new Date(userProfile.licenseExpiresAt.toNumber() * 1000) 
-          : null,
-        totalAffiliateEarnings: userProfile.totalAffiliateEarnings.toNumber(),
-        totalAffiliateWithdrawn: userProfile.totalAffiliateWithdrawn.toNumber(),
-        level1Earnings: userProfile.level1Earnings.toNumber(),
-        level2Earnings: userProfile.level2Earnings.toNumber(),
-        level3Earnings: userProfile.level3Earnings.toNumber(),
-        creditBalance: userProfile.creditBalance?.toNumber() || 0,
-      };
-    } catch (error) {
-      // Profile doesn't exist
-      return null;
-    }
+    this.programAccessError();
   }
 
   /**
    * Check if a user has an active license
    */
   async hasActiveLicense(userPubkey: PublicKey): Promise<boolean> {
-    const profile = await this.getUserProfile(userPubkey);
-    
-    if (!profile || !profile.licenseExpiresAt) {
-      return false;
-    }
-
-    return profile.licenseExpiresAt > new Date();
+    this.programAccessError();
   }
 
   /**
    * Get system configuration
    */
-  async getConfig(): Promise<Config> {
-    const { config } = derivePdas();
-    return await this.program.account['config'].fetch(config) as Config;
+  async getConfig(): Promise<never> {
+    this.programAccessError();
   }
 
   /**

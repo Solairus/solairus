@@ -18,11 +18,14 @@
  *  - Serialize base64 with requireAllSignatures=false
  */
 import { PublicKey, Transaction, TransactionInstruction, SystemProgram, ParsedAccountData } from '@solana/web3.js'
+import solairusPayIdl from '../idl/solairus_pay.json'
 import { getAuthorityKeypair } from '../lib/authority'
 import { getConnection } from '../lib/rpc-manager'
 
 // Program IDs and constants from IDL
-const PROGRAM_ID = new PublicKey(process.env.SOLAIRUS_PAY_PROGRAM_ID || '5eRuzYxGUE4VHadPEhihHMpuPa6n2WvCR6ENx3WSW6ek')
+const PROGRAM_ID = new PublicKey(
+  process.env.SOLAIRUS_PAY_PROGRAM_ID || (solairusPayIdl as { address?: string }).address!
+)
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
 const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
 
@@ -93,17 +96,21 @@ export async function buildClaimRewardsTx(params: {
     throw new Error('Withdrawal amount must be positive')
   }
 
-  // Validate recipient ATA exists and matches owner/mint via parsed account info
-  const parsedInfo = await connection.getParsedAccountInfo(recipientAta, 'confirmed')
-  if (!parsedInfo.value || parsedInfo.value.owner?.toBase58() !== TOKEN_PROGRAM_ID.toBase58()) {
-    throw new Error('Recipient ATA not found or invalid')
+  // Validate or prepare to create recipient ATA
+  const derivedAta = deriveAta(recipient, mint)
+  if (!derivedAta.equals(recipientAta)) {
+    throw new Error('Recipient ATA address does not match derived ATA')
   }
-  const accountData = parsedInfo.value.data as ParsedAccountData
-  const parsedToken = accountData.parsed as { info: { owner: string; mint: string } }
-  const ownerMatch = parsedToken?.info?.owner === recipient.toBase58()
-  const mintMatch = parsedToken?.info?.mint === mint.toBase58()
-  if (!ownerMatch || !mintMatch) {
-    throw new Error('Recipient ATA owner/mint mismatch')
+  const parsedInfo = await connection.getParsedAccountInfo(recipientAta, 'confirmed')
+  let needCreateAta = false
+  if (!parsedInfo.value || parsedInfo.value.owner?.toBase58() !== TOKEN_PROGRAM_ID.toBase58()) {
+    needCreateAta = true
+  } else {
+    const accountData = parsedInfo.value.data as ParsedAccountData
+    const parsedToken = accountData.parsed as { info: { owner: string; mint: string } }
+    const ownerMatch = parsedToken?.info?.owner === recipient.toBase58()
+    const mintMatch = parsedToken?.info?.mint === mint.toBase58()
+    if (!ownerMatch || !mintMatch) needCreateAta = true
   }
 
   const config = deriveConfigPda()
@@ -139,6 +146,22 @@ export async function buildClaimRewardsTx(params: {
   const tx = new Transaction()
   tx.feePayer = initiator
   tx.recentBlockhash = recent.blockhash
+  // Pre-instruction: create ATA if missing
+  if (needCreateAta) {
+    const createAtaIx = new TransactionInstruction({
+      programId: ASSOCIATED_TOKEN_PROGRAM_ID,
+      keys: [
+        { pubkey: initiator, isSigner: true, isWritable: true }, // payer
+        { pubkey: recipientAta, isSigner: false, isWritable: true }, // ata
+        { pubkey: recipient, isSigner: false, isWritable: false }, // owner
+        { pubkey: mint, isSigner: false, isWritable: false }, // mint
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system program
+        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }, // token program
+      ],
+      data: Buffer.alloc(0),
+    })
+    tx.add(createAtaIx)
+  }
   tx.add(ix)
 
   // Partial sign with backend authority

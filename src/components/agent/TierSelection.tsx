@@ -1,6 +1,5 @@
 import React from 'react';
-import { AgentTier } from '@/lib/solairus-removed';
-import { EXTENDED_AGENT_TIER_CONFIGS, ExtendedTierConfig } from '@/config/agent-config';
+import { EXTENDED_AGENT_TIER_METADATA, ExtendedTierConfig } from '@/config/agent-config';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { 
@@ -14,22 +13,20 @@ import {
 import { cn } from '@/lib/utils';
 
 interface TierSelectionProps {
-  selectedTier?: AgentTier;
-  onTierSelect: (tier: AgentTier) => void;
+  selectedTierName?: string;
+  onTierSelect: (tierName: string) => void;
   disabled?: boolean;
   className?: string;
 }
 
 interface TierCardProps {
-  tier: AgentTier;
   config: ExtendedTierConfig;
   selected: boolean;
-  onSelect: (tier: AgentTier) => void;
+  onSelect: (tierName: string) => void;
   disabled?: boolean;
 }
 
 const TierCard: React.FC<TierCardProps> = ({ 
-  tier, 
   config, 
   selected, 
   onSelect, 
@@ -39,17 +36,8 @@ const TierCard: React.FC<TierCardProps> = ({
   const styling = config.styling;
   
   // Get tier-specific icon
-  const getIconComponent = (tierValue: AgentTier) => {
-    switch (tierValue) {
-      case AgentTier.NOVA: return Target;
-      case AgentTier.VEGA: return TrendingUp;
-      case AgentTier.ORION: return Zap;
-      case AgentTier.PRIME: return Crown;
-      default: return Target;
-    }
-  };
-
-  const IconComponent = getIconComponent(tier);
+  const iconMap: Record<string, any> = { Nova: Target, Vega: TrendingUp, Orion: Zap, Prime: Crown };
+  const IconComponent = iconMap[config.name] || Target;
 
   return (
     <div
@@ -62,7 +50,7 @@ const TierCard: React.FC<TierCardProps> = ({
           : "border-border/30 hover:border-border/50 hover:scale-[1.01]",
         disabled && "opacity-50 cursor-not-allowed"
       )}
-      onClick={() => !disabled && onSelect(tier)}
+      onClick={() => !disabled && onSelect(config.name)}
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
@@ -128,10 +116,10 @@ const TierCard: React.FC<TierCardProps> = ({
         <div className="flex items-center gap-2">
           <IconComponent className={cn("h-4 w-4", styling.accent)} />
           <span className="text-xs text-muted-foreground">
-            {tier === AgentTier.NOVA && "Stable daily returns with minimal risk"}
-            {tier === AgentTier.VEGA && "Balanced approach with steady growth"}
-            {tier === AgentTier.ORION && "Higher yields with controlled volatility"}
-            {tier === AgentTier.PRIME && "Maximum returns for experienced traders"}
+            {config.name === 'Nova' && "Stable daily returns with minimal risk"}
+            {config.name === 'Vega' && "Balanced approach with steady growth"}
+            {config.name === 'Orion' && "Higher yields with controlled volatility"}
+            {config.name === 'Prime' && "Maximum returns for experienced traders"}
           </span>
         </div>
       </div>
@@ -160,7 +148,7 @@ const TierCard: React.FC<TierCardProps> = ({
 };
 
 export const TierSelection: React.FC<TierSelectionProps> = ({ 
-  selectedTier, 
+  selectedTierName, 
   onTierSelect, 
   disabled,
   className 
@@ -180,32 +168,28 @@ export const TierSelection: React.FC<TierSelectionProps> = ({
 
       {/* Tier Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {Object.entries(EXTENDED_AGENT_TIER_CONFIGS).map(([tierKey, config]) => {
-          const tier = parseInt(tierKey) as AgentTier;
-          return (
-            <TierCard
-              key={tier}
-              tier={tier}
-              config={config}
-              selected={selectedTier === tier}
-              onSelect={onTierSelect}
-              disabled={disabled}
-            />
-          );
-        })}
+        {EXTENDED_AGENT_TIER_METADATA.map((config) => (
+          <TierCard
+            key={config.name}
+            config={config}
+            selected={selectedTierName === config.name}
+            onSelect={onTierSelect}
+            disabled={disabled}
+          />
+        ))}
       </div>
 
       {/* Selected Tier Summary */}
-      {selectedTier !== undefined && (
+      {selectedTierName && (
         <div className="glass rounded-xl p-4 border border-primary/30 bg-gradient-to-r from-primary/10 to-primary/5">
           <div className="flex items-center gap-3 mb-3">
-            <span className="text-2xl">{EXTENDED_AGENT_TIER_CONFIGS[selectedTier].emoji}</span>
+            <span className="text-2xl">{EXTENDED_AGENT_TIER_METADATA.find(t => t.name === selectedTierName)?.emoji}</span>
             <div>
               <h3 className="font-semibold text-primary">
-                {EXTENDED_AGENT_TIER_CONFIGS[selectedTier].name} Agent Selected
+                {selectedTierName} Agent Selected
               </h3>
               <p className="text-sm text-muted-foreground">
-                {EXTENDED_AGENT_TIER_CONFIGS[selectedTier].description}
+                {EXTENDED_AGENT_TIER_METADATA.find(t => t.name === selectedTierName)?.description}
               </p>
             </div>
           </div>
@@ -214,13 +198,13 @@ export const TierSelection: React.FC<TierSelectionProps> = ({
             <div>
               <span className="text-muted-foreground">Daily Yield Range:</span>
               <p className="font-semibold text-primary">
-                {EXTENDED_AGENT_TIER_CONFIGS[selectedTier].dailyRange}
+                {EXTENDED_AGENT_TIER_METADATA.find(t => t.name === selectedTierName)?.dailyRange}
               </p>
             </div>
             <div>
               <span className="text-muted-foreground">Maximum Total Yield:</span>
               <p className="font-semibold text-primary">
-                {EXTENDED_AGENT_TIER_CONFIGS[selectedTier].yieldCapPct}%
+                {EXTENDED_AGENT_TIER_METADATA.find(t => t.name === selectedTierName)?.yieldCapPct}%
               </p>
             </div>
           </div>

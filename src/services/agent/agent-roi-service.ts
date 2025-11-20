@@ -1,17 +1,40 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Connection, PublicKey, Transaction, VersionedTransaction, TransactionSignature } from "@solana/web3.js";
-import { 
-  getProgram,
-  derivePdas,
-  deriveAgentActivationPda,
-  canWithdrawRoi,
-  getErrorMessage,
-  AGENT_TIER_CONFIGS
-} from "@/lib/solairus-removed";
 import { getWithdrawalLimitStatus, canWithdrawAmount } from "./withdrawal-limit-service";
 import { getUserAgent } from "./agent-service";
 import { AgentErrorHandler } from "@/utils/agent-error-handler";
 import { getContractSecondsPerDay } from "./contract-timing-service";
+import { EXTENDED_AGENT_TIER_METADATA } from "@/config/agent-config";
+
+// Helper function to check if ROI withdrawal is possible
+function canWithdrawRoi(agentData: any): { canWithdraw: boolean; reason?: string; nextWithdrawalAt?: Date } {
+  // This is a simplified version - in reality you'd check the actual contract state
+  const now = Math.floor(Date.now() / 1000);
+  const lastWithdrawal = agentData.lastRoiWithdrawal || 0;
+  const secondsPerDay = 86400; // 24 hours in production
+  
+  if (now - lastWithdrawal < secondsPerDay) {
+    const nextWithdrawalAt = new Date((lastWithdrawal + secondsPerDay) * 1000);
+    return {
+      canWithdraw: false,
+      reason: 'Must wait 24 hours between withdrawals',
+      nextWithdrawalAt
+    };
+  }
+  
+  if (agentData.yieldCapReached) {
+    return {
+      canWithdraw: false,
+      reason: 'Yield cap reached'
+    };
+  }
+  
+  return { canWithdraw: true };
+}
+
+function getErrorMessage(error: any): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export interface WithdrawAgentRoiOptions {
   confirmationTimeout?: number; // Timeout in milliseconds for transaction confirmation
@@ -82,80 +105,37 @@ export async function withdrawAgentRoi(
     
     console.log('✅ Global withdrawal limit check passed');
     
-    // Step 4: Set up program with provided anchor provider
-    const program = getProgram(anchorProvider);
+    // Step 4: Use backend API for withdrawal instead of direct contract calls
+    console.log('🚀 Initiating ROI withdrawal via backend API...');
     
-    // Step 5: Derive necessary PDAs and accounts
-    const { config, vault, profile } = derivePdas(userPublicKey);
-    if (!profile) {
-      throw new Error("Could not derive user profile PDA");
-    }
-    
-    // Derive the specific agent activation PDA
-    const activationPda = deriveAgentActivationPda(userPublicKey, new anchor.BN(activationId));
-    
-    // Get config data for USDT mint and vault setup
-    const configData = await program.account["config"].fetch(config);
-    const usdtMint = configData.usdtMint;
-    
-    // Derive token accounts
-    const userUsdt = anchor.utils.token.associatedAddress({
-      mint: usdtMint,
-      owner: userPublicKey,
-    });
-    
-    const vaultUsdt = anchor.utils.token.associatedAddress({
-      mint: usdtMint,
-      owner: vault,
-    });
-    
-    console.log('✅ All accounts and PDAs derived');
-    
-    // Step 6: Build and send transaction
-    console.log('🚀 Sending withdraw_agent_roi transaction...');
-    
-    const txSignature = await program.methods
-      .withdrawAgentRoi(new anchor.BN(activationId))
-      .accounts({
-        config,
-        vault,
-        profile,
-        activation: activationPda,
-        user: userPublicKey,
-        usdtMint,
-        userUsdt,
-        vaultUsdt,
-        tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
+    // Call backend withdrawal endpoint
+    const response = await fetch('/api/withdrawals/agent-roi', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        activationId,
+        walletAddress: userPublicKey.toString()
       })
-      .rpc();
+    });
     
-    console.log('✅ Transaction sent:', txSignature);
-    
-    // Step 7: Wait for confirmation with timeout
-    const startTime = Date.now();
-    let confirmed = false;
-    
-    while (!confirmed && (Date.now() - startTime) < confirmationTimeout) {
-      try {
-        const status = await connection.getSignatureStatus(txSignature);
-        if (status.value?.confirmationStatus === 'confirmed' || status.value?.confirmationStatus === 'finalized') {
-          confirmed = true;
-          break;
-        }
-        
-        // Wait 1 second before checking again
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      } catch (error) {
-        console.warn('⚠️ Error checking transaction status:', error);
-      }
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(`Backend withdrawal failed: ${errorData.error || response.statusText}`);
     }
     
-    if (!confirmed) {
-      console.warn('⚠️ Transaction confirmation timeout, but transaction may still succeed');
-    }
+    const backendResult = await response.json();
+    console.log('✅ Backend withdrawal successful:', backendResult);
     
-    // Step 8: Get updated agent state to determine actual withdrawal amount
-    const result: WithdrawAgentRoiResult = { signature: txSignature };
+    // Step 8: Prepare result from backend response
+    const result: WithdrawAgentRoiResult = { 
+      signature: backendResult.signature || 'backend-withdrawal',
+      roiAmount: backendResult.roiAmount,
+      agentRetired: backendResult.agentRetired,
+      newTotalWithdrawn: backendResult.newTotalWithdrawn,
+      userTotalWithdrawn: backendResult.userTotalWithdrawn
+    };
     
     try {
       // Wait a bit for state to update
@@ -235,8 +215,11 @@ export async function estimateAgentRoi(
     const tierConfig = agentData.tierConfig;
     const activationAmount = agentData.activationAmount;
     
-    // Get the actual tier config with yield basis points
-    const fullTierConfig = AGENT_TIER_CONFIGS[agentData.tier];
+    // Get the actual tier config with yield basis points from backend-driven config
+    const fullTierConfig = EXTENDED_AGENT_TIER_METADATA.find(t => t.name === agentData.tier);
+    if (!fullTierConfig) {
+      throw new Error(`Tier configuration not found for: ${agentData.tier}`);
+    }
     
     const minRoi = (activationAmount * fullTierConfig.minYieldBps) / 10000;
     const maxRoi = (activationAmount * fullTierConfig.maxYieldBps) / 10000;

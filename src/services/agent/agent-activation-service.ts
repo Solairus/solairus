@@ -1,6 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import * as anchor from '@coral-xyz/anchor';
 import { createAssociatedTokenAccountInstruction } from '@solana/spl-token';
+import { API_CONFIG, AGENT_ENDPOINTS, ApiClient } from '@/config/service-endpoints';
 import {
   getProgram,
   derivePdas,
@@ -9,7 +10,7 @@ import {
   getErrorMessage,
   PROGRAM_ID
 } from '@/lib/solairus-removed';
-import { buildSponsorHierarchy } from '@/lib/sponsor-tree';
+// Referral hierarchy removed; no sponsor-tree dependency
 import { AgentErrorHandler } from '@/utils/agent-error-handler';
 
 // Temporary type for account access until IDL is updated
@@ -280,95 +281,37 @@ export async function activateAgent(
       }
 
     } else {
-      // Credit payment method - NO remaining accounts needed (no affiliate earnings for credits)
-      console.log('🎫 Credit payment method - no affiliate earnings distribution');
-
-      // Get the actual dev profile from config
-      console.log('🔧 Using actual dev profile from config...');
-      const { profile: actualDevProfile } = derivePdas(configAccount.dev);
-      console.log('✅ Actual dev profile PDA:', actualDevProfile?.toString());
-
-      // Use credit payment method - NO remaining accounts
-      const accounts = {
-        user: params.userPublicKey,
-        config,
-        profile: profilePda,
-        counter: counterPda,
-        activation: activationPda,
-        vault,
-        vaultUsdt,
-        usdtMint,
-        userUsdt,
-        devProfile: actualDevProfile!, // Use actual dev profile from config.dev
-        tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
-        associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      };
-
-      console.log('🎫 Activating agent with credit payment...');
-      console.log('📋 Main accounts:', Object.keys(accounts).map(key => `${key}: ${accounts[key as keyof typeof accounts]?.toString()}`));
-
-      try {
-        // For credit activation, we don't actually need the user's USDT account to exist
-        // since no USDT transfer occurs. The contract just needs the account addresses
-        // for the instruction structure, but they won't be used.
-        console.log('💡 Credit activation: USDT accounts are for instruction structure only');
-
-        txSignature = await program.methods
-          .activateAgentCredit(amountBN, params.tier)
-          .accounts(accounts)
-          .rpc();
-
-        console.log('✅ Credit activation transaction successful:', txSignature);
-      } catch (error) {
-        console.error('❌ Credit activation transaction failed:', error);
-        console.error('❌ Error details:', JSON.stringify(error, null, 2));
-
-        // Check if it's specifically a USDT account error
-        if (error instanceof Error && error.message.includes('AccountNotInitialized')) {
-          console.log('🔧 USDT account error detected, creating account and retrying...');
-
-          try {
-            // Create the USDT token account as a pre-instruction
-            const createAccountIx = createAssociatedTokenAccountInstruction(
-              params.userPublicKey, // payer
-              userUsdt, // associated token account
-              params.userPublicKey, // owner
-              usdtMint // mint
-            );
-
-            // Retry with account creation
-            txSignature = await program.methods
-              .activateAgentCredit(amountBN, params.tier)
-              .accounts(accounts)
-              .preInstructions([createAccountIx])
-              .rpc();
-
-            console.log('✅ Credit activation with USDT account creation successful:', txSignature);
-          } catch (retryError) {
-            console.error('❌ Retry with account creation failed:', retryError);
-            throw new Error(
-              'Failed to create required token account. Please ensure you have sufficient SOL for transaction fees.'
-            );
-          }
-        } else if (error instanceof Error && error.message.includes('insufficient funds')) {
-          throw new Error(
-            'Insufficient SOL for transaction fees. Please add some SOL to your wallet.'
-          );
-        } else {
-          throw error;
-        }
+      console.log('🎫 Credit payment method - backend activation');
+      const amountMicro = Math.round(params.amount * 1_000_000);
+      const url = `${API_CONFIG.getBaseUrl()}${AGENT_ENDPOINTS.activateAgent}`;
+      const resp = await ApiClient.post(url, {
+        amountMicro,
+        paymentMethod: 'credit',
+        tierName: AgentTier[params.tier],
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || 'Credit activation failed');
       }
+      const payload = await resp.json();
+      const activationIdFromBackend = payload?.agent?.id as number | undefined;
+      console.log('✅ Credit activation completed via backend');
+      return {
+        success: true,
+        activationId: activationIdFromBackend,
+        userFriendlyMessage: `Successfully activated agent with ${params.amount} credits!`,
+      };
     }
 
     console.log('✅ Agent activation successful!');
-    console.log('📝 Transaction signature:', txSignature);
-
+    if (txSignature) {
+      console.log('📝 Transaction signature:', txSignature);
+    }
     return {
       success: true,
       txSignature,
       activationId: nextActivationId,
-      userFriendlyMessage: `Successfully activated agent with ${params.amount} USDT!`
+      userFriendlyMessage: `Successfully activated agent with ${params.amount} ${params.paymentMethod === 'credit' ? 'credits' : 'USDT'}!`
     };
 
   } catch (error: unknown) {

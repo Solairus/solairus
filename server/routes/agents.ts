@@ -5,7 +5,10 @@
  * Outputs: WithdrawalLimitDisplay-compatible payload for UI rendering
  */
 import { Router, Request, Response } from 'express'
-import { query } from '../db'
+import { query, pool } from '../db'
+import { z } from 'zod'
+import { randomUUID } from 'crypto'
+import { applyBalanceBucketChange, getOrCreateBalanceId } from '../services/balance'
 
 const router = Router()
 
@@ -176,6 +179,109 @@ router.get('/agents/user/:userAddress', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[agents/user] error', err)
     return res.status(500).json({ error: 'Failed to fetch user agents' })
+  }
+})
+
+router.post('/agents/activate', async (req: Request, res: Response) => {
+  const auth = res.locals.auth as { sub: number; addr: string }
+  if (!auth?.sub || !auth?.addr) return res.status(401).json({ error: 'Unauthorized' })
+
+  const schema = z.object({
+    amountMicro: z.number().int().positive(),
+    paymentMethod: z.literal('credit'),
+    tierId: z.number().int().positive().optional(),
+    tierName: z.string().optional(),
+  })
+
+  const parsed = schema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
+
+  const { amountMicro } = parsed.data
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+
+    const userId = auth.sub
+
+    const balanceId = await getOrCreateBalanceId(client, userId)
+    const balRes = await client.query('SELECT credit_balance FROM balances WHERE id = $1 FOR UPDATE', [balanceId])
+    const currentCredit = BigInt((balRes.rows[0]?.credit_balance as unknown as string) ?? '0')
+    const required = BigInt(amountMicro)
+    if (currentCredit < required) {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ error: 'Insufficient credit balance' })
+    }
+
+    let tierRow: { id: number | null; tier_name: string | null } = { id: null, tier_name: null }
+    const tRes = await client.query<{ id: number; tier_name: string }>(
+      'SELECT id, tier_name FROM agent_tiers WHERE $1::bigint BETWEEN min_amount AND max_amount LIMIT 1',
+      [amountMicro]
+    )
+    tierRow = {
+      id: tRes.rows[0]?.id ?? null,
+      tier_name: tRes.rows[0]?.tier_name ?? null,
+    }
+
+    const orderId = randomUUID()
+    const meta = {
+      paymentMethod: 'credit',
+      signature_label: 'credit_balance',
+      tier_id: tierRow.id,
+      tier_name: tierRow.tier_name,
+      phase: 'created',
+      completed: false,
+    }
+
+    const txIns = await client.query<{ id: number }>(
+      `INSERT INTO transactions (type, status, signature, initiator_wallet, recipient_wallet, program_id, amount, mint_address, decimals, metadata, order_id)
+       VALUES ($1, $2, NULL, $3, NULL, NULL, $4, $5, $6, $7::jsonb, $8)
+       RETURNING id`,
+      ['agent_activation', 'confirmed', auth.addr, amountMicro, 'CREDITS', 6, JSON.stringify(meta), orderId]
+    )
+    const transactionId = txIns.rows[0]?.id
+    if (!transactionId) {
+      throw new Error('Failed to create transaction')
+    }
+
+    await applyBalanceBucketChange(
+      client,
+      balanceId,
+      'credit_balance',
+      'debit',
+      BigInt(amountMicro),
+      transactionId,
+      { source: 'agent_activation_credit' }
+    )
+
+    const agentLabel = tierRow.tier_name ? `Agent ${tierRow.tier_name}` : 'Agent'
+    const agentMeta = { transaction_id: transactionId, tier_id: tierRow.id, tier_name: tierRow.tier_name }
+    const agentIns = await client.query<{ id: number }>(
+      `INSERT INTO agents (user_id, agent_label, status, activation_signature, amount, tier_id, metadata)
+       VALUES ($1, $2, 'active', NULL, $3, $4, $5::jsonb)
+       RETURNING id`,
+      [userId, agentLabel, amountMicro, tierRow.id, JSON.stringify(agentMeta)]
+    )
+    const agentId = agentIns.rows[0]?.id
+
+    await client.query(
+      'UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2',
+      [JSON.stringify({ agent_id: agentId }), transactionId]
+    )
+
+    await client.query('COMMIT')
+
+    return res.status(201).json({
+      activated: true,
+      agent: { id: agentId, amount: Number(amountMicro) / 1_000_000, tier_name: tierRow.tier_name },
+      transaction: { id: transactionId, status: 'confirmed', order_id: orderId },
+    })
+  } catch (e) {
+    await client.query('ROLLBACK')
+    const msg = e instanceof Error ? e.message : 'Activation failed'
+    return res.status(500).json({ error: msg })
+  } finally {
+    client.release()
   }
 })
 

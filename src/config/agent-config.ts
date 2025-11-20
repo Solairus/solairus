@@ -8,7 +8,7 @@
  * - UI constants and theming
  */
 
-import { AgentTier, AGENT_TIER_CONFIGS } from '@/lib/solairus-removed';
+// Removed solairus-removed; agent tiers fetched from backend
 
 // Extended tier metadata for UI components
 export interface ExtendedTierConfig {
@@ -49,19 +49,20 @@ export interface ExtendedTierConfig {
 }
 
 // Complete tier configurations with UI metadata
-export const EXTENDED_AGENT_TIER_CONFIGS: Record<AgentTier, ExtendedTierConfig> = {
-  [AgentTier.NOVA]: {
-    // Core config from smart contract
-    ...AGENT_TIER_CONFIGS[AgentTier.NOVA],
-    
-    // Extended UI metadata
+export const EXTENDED_AGENT_TIER_METADATA: ExtendedTierConfig[] = [
+  {
+    minYieldBps: 0,
+    maxYieldBps: 0,
+    yieldCapPct: 200,
+    name: 'Nova',
+    emoji: '🌀',
+    description: 'Stable daily returns with minimal risk',
+    dailyRange: '1%–2% (backend)',
     persona: 'Nova',
     tagline: 'Pattern Seeker',
     targetUser: 'Beginners',
     riskLevel: 'Low Risk',
     riskColor: 'text-green-500',
-    
-    // Styling configuration
     styling: {
       gradient: 'from-cyan-500/20 via-cyan-400/15 to-cyan-600/10',
       border: 'border-cyan-500/40',
@@ -72,37 +73,27 @@ export const EXTENDED_AGENT_TIER_CONFIGS: Record<AgentTier, ExtendedTierConfig> 
       secondary: 'text-cyan-300',
       background: 'bg-cyan-500/10',
     },
-    
-    // Feature highlights
     features: [
-      'Stable daily returns with minimal risk',
-      'Conservative trading strategies',
-      'Ideal for first-time users',
+      'Stable daily returns',
+      'Conservative strategies',
       'Predictable yield patterns'
     ],
-    
-    // Investment guidance
-    recommendedFor: [
-      'New to crypto trading',
-      'Risk-averse investors',
-      'Learning the platform',
-      'Small initial investments'
-    ],
+    recommendedFor: ['New to crypto', 'Risk-averse investors', 'Small initial investments'],
     minimumExperience: 'Beginner'
   },
-  
-  [AgentTier.VEGA]: {
-    // Core config from smart contract
-    ...AGENT_TIER_CONFIGS[AgentTier.VEGA],
-    
-    // Extended UI metadata
+  {
+    minYieldBps: 0,
+    maxYieldBps: 0,
+    yieldCapPct: 200,
+    name: 'Vega',
+    emoji: '⭐',
+    description: 'Balanced approach with steady growth',
+    dailyRange: '2%–3% (backend)',
     persona: 'Vega',
     tagline: 'Momentum Scout',
     targetUser: 'Balanced',
     riskLevel: 'Medium Risk',
     riskColor: 'text-amber-500',
-    
-    // Styling configuration
     styling: {
       gradient: 'from-emerald-500/20 via-emerald-400/15 to-emerald-600/10',
       border: 'border-emerald-500/40',
@@ -113,37 +104,23 @@ export const EXTENDED_AGENT_TIER_CONFIGS: Record<AgentTier, ExtendedTierConfig> 
       secondary: 'text-emerald-300',
       background: 'bg-emerald-500/10',
     },
-    
-    // Feature highlights
-    features: [
-      'Balanced approach with steady growth',
-      'Momentum-based trading signals',
-      'Good risk-reward ratio',
-      'Suitable for regular investors'
-    ],
-    
-    // Investment guidance
-    recommendedFor: [
-      'Some trading experience',
-      'Balanced risk tolerance',
-      'Medium-term investments',
-      'Diversified portfolios'
-    ],
+    features: ['Momentum signals', 'Balanced risk-reward'],
+    recommendedFor: ['Some trading experience', 'Balanced risk tolerance'],
     minimumExperience: 'Intermediate'
   },
-  
-  [AgentTier.ORION]: {
-    // Core config from smart contract
-    ...AGENT_TIER_CONFIGS[AgentTier.ORION],
-    
-    // Extended UI metadata
+  {
+    minYieldBps: 0,
+    maxYieldBps: 0,
+    yieldCapPct: 200,
+    name: 'Orion',
+    emoji: '💠',
+    description: 'Higher yields with controlled volatility',
+    dailyRange: '3%–4% (backend)',
     persona: 'Orion',
     tagline: 'Risk Balancer',
     targetUser: 'Aggressive',
     riskLevel: 'High Risk',
     riskColor: 'text-orange-500',
-    
-    // Styling configuration
     styling: {
       gradient: 'from-indigo-500/20 via-indigo-400/15 to-indigo-600/10',
       border: 'border-indigo-500/40',
@@ -154,37 +131,23 @@ export const EXTENDED_AGENT_TIER_CONFIGS: Record<AgentTier, ExtendedTierConfig> 
       secondary: 'text-indigo-300',
       background: 'bg-indigo-500/10',
     },
-    
-    // Feature highlights
-    features: [
-      'Higher yields with controlled volatility',
-      'Advanced risk management',
-      'Aggressive but calculated strategies',
-      'Enhanced profit potential'
-    ],
-    
-    // Investment guidance
-    recommendedFor: [
-      'Experienced traders',
-      'Higher risk tolerance',
-      'Seeking better returns',
-      'Active portfolio management'
-    ],
+    features: ['Advanced risk management', 'Enhanced profit potential'],
+    recommendedFor: ['Experienced traders', 'Higher risk tolerance'],
     minimumExperience: 'Advanced'
   },
-  
-  [AgentTier.PRIME]: {
-    // Core config from smart contract
-    ...AGENT_TIER_CONFIGS[AgentTier.PRIME],
-    
-    // Extended UI metadata
+  {
+    minYieldBps: 0,
+    maxYieldBps: 0,
+    yieldCapPct: 200,
+    name: 'Prime',
+    emoji: '🚀',
+    description: 'Maximum returns for experienced traders',
+    dailyRange: '4%–5% (backend)',
     persona: 'Prime',
     tagline: 'Alpha Hunter',
     targetUser: 'Elite',
     riskLevel: 'Max Risk',
     riskColor: 'text-red-500',
-    
-    // Styling configuration
     styling: {
       gradient: 'from-amber-500/20 via-amber-400/15 to-amber-600/10',
       border: 'border-amber-500/40',
@@ -195,25 +158,11 @@ export const EXTENDED_AGENT_TIER_CONFIGS: Record<AgentTier, ExtendedTierConfig> 
       secondary: 'text-amber-300',
       background: 'bg-amber-500/10',
     },
-    
-    // Feature highlights
-    features: [
-      'Maximum returns for experienced traders',
-      'Elite trading algorithms',
-      'Highest yield potential',
-      'Premium risk management'
-    ],
-    
-    // Investment guidance
-    recommendedFor: [
-      'Expert traders only',
-      'Maximum risk tolerance',
-      'Large investments',
-      'Professional trading'
-    ],
+    features: ['Elite algorithms', 'Premium risk management'],
+    recommendedFor: ['Expert traders', 'Large investments'],
     minimumExperience: 'Expert'
   }
-};
+];
 
 // Agent service configuration
 export const AGENT_SERVICE_CONFIG = {

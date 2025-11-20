@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import type { ReactNode } from "react"
 import { WalletManager } from "@/services/wallet/wallet-manager"
-import { logEnvironmentStatus, validateEnvironmentVariables } from "@/utils/env-validation"
+import { logEnvironmentStatus } from "@/utils/env-validation"
 import { debugEnvironmentVariables } from "@/utils/env-debug-vercel"
 
 export function AppKitProvider({ children }: { children: ReactNode }) {
@@ -11,16 +11,7 @@ export function AppKitProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const initializeAppKit = async () => {
       try {
-        // Validate environment variables first
-        const validation = validateEnvironmentVariables()
-        if (!validation.isValid) {
-          console.error("Environment validation failed:", validation.errors)
-          setInitError(`Environment configuration error: ${validation.errors.join(', ')}`)
-          setIsInitialized(true)
-          return
-        }
-        
-        // Log environment status for debugging
+        // Log environment status for debugging (non-blocking)
         const envDebug = debugEnvironmentVariables()
         console.log('📊 Environment Summary:', envDebug)
         

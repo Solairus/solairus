@@ -7,7 +7,7 @@ import { Search, User, Calendar, Wallet, AlertCircle, CheckCircle, Clock } from 
 import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '@/contexts/wallet-context';
 import { toast } from 'sonner';
-import { ApiClient } from '@/config/service-endpoints';
+import { ApiClient, API_CONFIG } from '@/config/service-endpoints';
 
 export interface UserProfile {
   credit_balance?: number;
@@ -38,9 +38,10 @@ interface UserLookupProps {
   onUserFound?: (userInfo: UserInfo) => void;
   showCreateOption?: boolean;
   className?: string;
+  mode?: 'default' | 'sponsor';
 }
 
-export function UserLookup({ onUserFound, showCreateOption = false, className }: UserLookupProps) {
+export function UserLookup({ onUserFound, showCreateOption = false, className, mode = 'default' }: UserLookupProps) {
   const { anchorProvider } = useWallet();
   const [userAddress, setUserAddress] = useState('');
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
@@ -73,7 +74,7 @@ export function UserLookup({ onUserFound, showCreateOption = false, className }:
 
     try {
       // Use backend API instead of blockchain calls
-      const response = await ApiClient.get(`/admin/users/${userAddress}`);
+      const response = await ApiClient.get(`${API_CONFIG.getBaseUrl()}/users/${userAddress}`);
       const userData: UserProfile | null = response.ok ? await response.json() : null;
 
       const info: UserInfo = {
@@ -142,12 +143,13 @@ export function UserLookup({ onUserFound, showCreateOption = false, className }:
     }
   };
 
-  const formatBalance = (balance: number): string => {
+  const formatBalance = (balanceMicro: number | string): string => {
     try {
-      // Balance is already in USDT (not micro-USDT)
-      return balance.toLocaleString('en-US', {
+      const micro = typeof balanceMicro === 'string' ? parseFloat(balanceMicro) : balanceMicro;
+      const usdt = micro / 1_000_000; // convert micro → units
+      return usdt.toLocaleString('en-US', {
         minimumFractionDigits: 0,
-        maximumFractionDigits: 6
+        maximumFractionDigits: 6,
       });
     } catch {
       return '0';
@@ -245,18 +247,20 @@ export function UserLookup({ onUserFound, showCreateOption = false, className }:
             {userInfo.exists && userInfo.profile && (
               <div className="space-y-3 bg-gray-800/50 rounded-md p-4">
                 {/* Credit Balance */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-gray-400">
-                    <Wallet className="h-4 w-4" />
-                    <span className="text-sm">Credit Balance:</span>
+                {mode !== 'sponsor' && (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-gray-400">
+                      <Wallet className="h-4 w-4" />
+                      <span className="text-sm">Credit Balance:</span>
+                    </div>
+                    <span className="text-white font-semibold">
+                      {formatBalance(userInfo.balance || 0)} USDT
+                    </span>
                   </div>
-                  <span className="text-white font-semibold">
-                    {formatBalance(userInfo.balance || 0)} USDT
-                  </span>
-                </div>
+                )}
 
                 {/* Principal Balance (from license activations) */}
-                {userInfo.principalBalance && userInfo.principalBalance > 0 && (
+                {mode !== 'sponsor' && (userInfo.principalBalance ?? 0) > 0 && (
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-gray-400">
                       <Wallet className="h-4 w-4" />
@@ -297,17 +301,17 @@ export function UserLookup({ onUserFound, showCreateOption = false, className }:
                 ) : null}
 
                 {/* Sponsor Information */}
-                {userInfo.sponsor && (
+                {(userInfo.sponsor ?? '').toString().trim() !== '' && (
                   <div className="flex items-center justify-between">
                     <span className="text-gray-400 text-sm">Sponsor:</span>
                     <span className="text-xs text-gray-300 font-mono">
-                      {userInfo.sponsor.toString().slice(0, 8)}...{userInfo.sponsor.toString().slice(-8)}
+                      {mode === 'sponsor' ? userInfo.sponsor.toString() : `${userInfo.sponsor.toString().slice(0, 8)}...${userInfo.sponsor.toString().slice(-8)}`}
                     </span>
                   </div>
                 )}
 
                 {/* Affiliate Earnings */}
-                {userInfo.totalAffiliateEarnings && userInfo.totalAffiliateEarnings > 0 && (
+                {mode !== 'sponsor' && (userInfo.totalAffiliateEarnings ?? 0) > 0 && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-gray-400 text-sm">Total Affiliate Earnings:</span>

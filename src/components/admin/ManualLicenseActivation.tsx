@@ -8,7 +8,7 @@ import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '@/contexts/wallet-context';
 import { useAdminRole } from '@/hooks/useAdminRole';
 import { UserLookup, UserInfo } from './UserLookup';
-import { getProgram, derivePdas } from '@/lib/solairus-removed';
+import { createAdminService } from '@/services/admin/admin-service';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ResponsiveCard, InfoCard } from './ResponsiveCard';
 import { FormInput } from './FormInput';
@@ -134,8 +134,9 @@ export function ManualLicenseActivation() {
     const currentTime = new Date();
     const durationMs = parseInt(form.durationDays) * 24 * 60 * 60 * 1000;
     
-    if (form.extendExisting && userInfo!.licenseExpiresAt && userInfo!.licenseStatus === 'active') {
-      return new Date(userInfo!.licenseExpiresAt.getTime() + durationMs);
+    const currentExp = userInfo?.licenseExpiresAt ? new Date(userInfo!.licenseExpiresAt) : null;
+    if (form.extendExisting && currentExp && userInfo!.licenseStatus === 'active') {
+      return new Date(currentExp.getTime() + durationMs);
     } else {
       return new Date(currentTime.getTime() + durationMs);
     }
@@ -150,49 +151,56 @@ export function ManualLicenseActivation() {
   const handleActivation = async () => {
     if (!validateActivation()) return;
 
-    await transactionStatus.executeTransaction(async () => {
+    const result = await transactionStatus.executeTransaction(async () => {
       transactionStatus.updateProgress(20, 'validate');
-      
-      const program = getProgram(anchorProvider);
+
       const userPubkey = new PublicKey(userInfo!.address);
-      const { config, profile } = derivePdas(userPubkey);
 
-      if (!profile) {
-        throw new Error('Could not derive user profile PDA');
-      }
-
-      // Determine sponsor - use provided sponsor for new users, or existing sponsor for existing users
       let sponsorPubkey: PublicKey;
       if (!userInfo!.exists) {
-        // New user - use provided sponsor
         sponsorPubkey = new PublicKey(form.sponsorAddress);
       } else {
-        // Existing user - use their current sponsor
-        sponsorPubkey = userInfo!.sponsor || new PublicKey(form.sponsorAddress || publicKey.toString());
+        sponsorPubkey = userInfo!.sponsor ? new PublicKey(userInfo!.sponsor) : new PublicKey(form.sponsorAddress || publicKey.toString());
       }
 
       const durationDays = parseInt(form.durationDays);
 
       transactionStatus.updateProgress(40, 'sign');
 
-      // Call the activate_license_manual method
-      const txSignature = await program.methods
-        .activateLicenseManual(
-          userPubkey,
-          sponsorPubkey,
-          durationDays,
-          form.extendExisting
-        )
-        .accounts({
-          config,
-          userProfile: profile,
-          authority: publicKey,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
-        .rpc();
-
-      return txSignature;
+      const adminService = createAdminService(anchorProvider);
+      const svcResult = await adminService.activateLicenseManual({
+        provider: anchorProvider,
+        userPubkey,
+        sponsorPubkey,
+        durationDays,
+        extendExisting: form.extendExisting,
+        authority: publicKey,
+      });
+      return svcResult.txSignature;
     }, 'Manual license activation');
+
+    if (result && typeof result === 'string' && result.length <= 40) {
+      const durationDays = parseInt(form.durationDays);
+      AdminNotifications.licenseActivation(
+        userInfo!.address,
+        durationDays,
+        result,
+        !userInfo!.exists
+      );
+
+      setLastResult({
+        success: true,
+        txSignature: result,
+        wasNewUser: !userInfo!.exists,
+        newExpiration: calculateNewExpiration()
+      });
+
+      const currentAddress = userInfo!.address;
+      setUserInfo(null);
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('refreshUserLookup', { detail: { address: currentAddress } }));
+      }, 1000);
+    }
   };
 
   const handleUserFound = (info: UserInfo | null) => {
@@ -261,9 +269,9 @@ export function ManualLicenseActivation() {
         {userInfo.licenseExpiresAt && (
           <div className="text-xs text-gray-500">
             {userInfo.licenseStatus === 'active' || userInfo.licenseStatus === 'near-expiry' ? (
-              <>Expires: {userInfo.licenseExpiresAt.toLocaleDateString()} ({userInfo.daysRemaining} days)</>
+              <>Expires: {new Date(userInfo.licenseExpiresAt).toLocaleDateString()} ({(userInfo.daysRemaining ?? 0)} days)</>
             ) : userInfo.licenseStatus === 'expired' ? (
-              <>Expired: {userInfo.licenseExpiresAt.toLocaleDateString()}</>
+              <>Expired: {new Date(userInfo.licenseExpiresAt).toLocaleDateString()}</>
             ) : null}
           </div>
         )}
@@ -453,7 +461,7 @@ export function ManualLicenseActivation() {
               <li>For existing users with active licenses, choose to extend or replace</li>
               <li>For new users, provide a sponsor address for auto-registration</li>
               <li>Manual activations do not involve USDT payments or affiliate commissions</li>
-              <li>All activations are logged on the blockchain for audit purposes</li>
+              <li>All activations are audit logged in backend</li>
             </ul>
           </div>
         </ResponsiveCard>

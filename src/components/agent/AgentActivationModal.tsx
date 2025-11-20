@@ -640,7 +640,7 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
       case 'confirmation':
         return 'Review your agent activation details before confirming the transaction.';
       case 'processing':
-        return 'Your agent is being activated on the blockchain.';
+        return paymentMethod === 'credit' ? 'Processing your activation using credit balance...' : 'Your agent is being activated on the blockchain.';
       case 'success':
         return 'Your AI trading agent is now active and ready to generate returns.';
       default:

@@ -12,7 +12,7 @@ import {
   getLicenseExpiryDate,
   activateLicenseUsdt,
 } from "@/lib/solairus-removed";
-import { getSponsorL1, type SponsorHierarchy } from "@/lib/sponsor-tree";
+// Referral hierarchy removed; resolve L1 sponsor via backend or default env
 import { LicenseErrorHandler } from "@/utils/license-error-handler";
 import { LicensePerformanceMonitor } from "@/utils/license-performance";
 import { ensureAtaExists } from "@/utils/token-ata";
@@ -245,6 +245,23 @@ export class LicenseService {
       console.error("Error checking registration status:", getErrorMessage(error));
       return false;
     }
+  }
+
+  /** Resolve L1 sponsor for a user: prefer backend DB sponsor; fallback to env default */
+  async resolveSponsorL1(userPubkey: PublicKey): Promise<PublicKey> {
+    try {
+      const base = (import.meta as any).env?.VITE_API_BASE_URL || ''
+      const resp = await fetch(`${base}/api/users/${userPubkey.toBase58()}`)
+      if (resp.ok) {
+        const data = await resp.json()
+        const sponsorAddress = data?.sponsor_address
+        if (sponsorAddress && typeof sponsorAddress === 'string' && sponsorAddress.length >= 32) {
+          return new PublicKey(sponsorAddress)
+        }
+      }
+    } catch {}
+    const def = (import.meta as any).env?.VITE_DEFAULT_SPONSOR_ADDRESS
+    return new PublicKey(def)
   }
 
   /**

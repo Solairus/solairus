@@ -7,6 +7,7 @@ import { UserSponsorManagement } from './UserSponsorManagement';
 import { ManualLicenseActivation } from './ManualLicenseActivation';
 import { ConfigManagement } from './ConfigManagement';
 import { AgentTiersManagement } from './AgentTiersManagement';
+import { AdminUsersTable } from './AdminUsersTable';
 import { MarketerDashboard } from './MarketerDashboard';
 import { AdminErrorBoundary } from './AdminErrorBoundary';
 import { ResponsiveCard, InfoCard, ActionCard } from './ResponsiveCard';
@@ -278,25 +279,10 @@ export const AdminDashboard: React.FC = () => {
         <Users className="h-8 w-8 text-blue-400" />
         <div>
           <h1 className="text-2xl font-bold text-white">User Management</h1>
-          <p className="text-gray-400">General user management and profile operations</p>
+          <p className="text-gray-400">Search and view registered users</p>
         </div>
       </div>
-      
-      <Card className="p-6 bg-gray-800 border-gray-700">
-        <p className="text-gray-300 mb-4">
-          User management interface will be implemented here.
-        </p>
-        <div className="bg-gray-700 p-4 rounded-lg">
-          <p className="text-yellow-400 text-sm">
-            🚧 This feature is under development and will include:
-          </p>
-          <ul className="mt-2 space-y-1 text-sm text-gray-300">
-            <li>• User profile lookup</li>
-            <li>• Profile information display</li>
-            <li>• User status management</li>
-          </ul>
-        </div>
-      </Card>
+      <AdminUsersTable />
     </div>
   );  
 const renderCreditsContent = () => (

@@ -1,4 +1,4 @@
-import { LicenseInfo, PROGRAM_ID } from "@/lib/solairus-removed";
+// Removed solairus-removed; license info is from backend only
 import { PublicKey } from "@solana/web3.js";
 
 /**

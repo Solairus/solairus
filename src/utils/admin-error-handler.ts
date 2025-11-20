@@ -270,10 +270,7 @@ export class AdminErrorHandler {
     toast.error(message, {
       description,
       duration: options?.duration || 5000,
-      action: options?.showRetry && options.onRetry ? {
-        label: 'Retry',
-        onClick: options.onRetry,
-      } : undefined,
+      // No actions for backend-only admin operations
     });
   }
 

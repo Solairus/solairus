@@ -8,9 +8,13 @@
 import { Router, Request, Response } from 'express'
 import { z } from 'zod'
 import { query, pool } from '../db'
+import { randomUUID } from 'crypto'
+import { applyBalanceBucketChange, getOrCreateBalanceId } from '../services/balance'
 import { PublicKey } from '@solana/web3.js'
 import crypto from 'crypto'
+import solairusPayIdl from '../idl/solairus_pay.json'
 import { buildClaimRewardsTx } from '../services/withdrawals'
+import { getConnection } from '../lib/rpc-manager'
 
 // Extend Request interface for admin middleware
 declare module 'express' {
@@ -191,6 +195,93 @@ router.delete('/agent-tiers/:id', requireAdmin, async (req: Request, res: Respon
   }
 })
 
+// Alias paths to support frontend calls to /api/admin/agent-tiers
+router.get('/admin/agent-tiers', requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const { rows } = await query(`
+      SELECT id, tier_name, min_amount, max_amount,
+             daily_reward_min_bp, daily_reward_max_bp, reward_cap_bp,
+             created_at, updated_at
+      FROM agent_tiers
+      ORDER BY id
+    `)
+    res.json(rows)
+  } catch (error) {
+    console.error('Error fetching agent tiers (alias):', error)
+    res.status(500).json({ error: 'Failed to fetch agent tiers' })
+  }
+})
+
+router.post('/admin/agent-tiers', requireAdmin, async (req: Request, res: Response) => {
+  const parsed = AgentTierSchema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
+  try {
+    const { rows } = await query(`
+      INSERT INTO agent_tiers (tier_name, min_amount, max_amount, daily_reward_min_bp, daily_reward_max_bp, reward_cap_bp)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    `, [
+      parsed.data.tier_name,
+      parsed.data.min_amount,
+      parsed.data.max_amount,
+      parsed.data.daily_reward_min_bp,
+      parsed.data.daily_reward_max_bp,
+      parsed.data.reward_cap_bp,
+    ])
+    res.status(201).json(rows[0])
+  } catch (error) {
+    console.error('Error creating agent tier (alias):', error)
+    res.status(500).json({ error: 'Failed to create agent tier' })
+  }
+})
+
+router.put('/admin/agent-tiers/:id', requireAdmin, async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id)
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid tier ID' })
+  const parsed = AgentTierSchema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
+  try {
+    const { rows } = await query(`
+      UPDATE agent_tiers
+      SET tier_name = $1,
+          min_amount = $2,
+          max_amount = $3,
+          daily_reward_min_bp = $4,
+          daily_reward_max_bp = $5,
+          reward_cap_bp = $6,
+          updated_at = NOW()
+      WHERE id = $7
+      RETURNING *
+    `, [
+      parsed.data.tier_name,
+      parsed.data.min_amount,
+      parsed.data.max_amount,
+      parsed.data.daily_reward_min_bp,
+      parsed.data.daily_reward_max_bp,
+      parsed.data.reward_cap_bp,
+      id,
+    ])
+    if (rows.length === 0) return res.status(404).json({ error: 'Agent tier not found' })
+    res.json(rows[0])
+  } catch (error) {
+    console.error('Error updating agent tier (alias):', error)
+    res.status(500).json({ error: 'Failed to update agent tier' })
+  }
+})
+
+router.delete('/admin/agent-tiers/:id', requireAdmin, async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id)
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid tier ID' })
+  try {
+    const { rowCount } = await query('DELETE FROM agent_tiers WHERE id = $1', [id])
+    if (rowCount === 0) return res.status(404).json({ error: 'Agent tier not found' })
+    res.status(204).send()
+  } catch (error) {
+    console.error('Error deleting agent tier (alias):', error)
+    res.status(500).json({ error: 'Failed to delete agent tier' })
+  }
+})
+
 // BUCKET MANAGEMENT
 router.get('/buckets', requireAdmin, async (req: Request, res: Response) => {
   try {
@@ -242,8 +333,14 @@ function filterBucketsByAccess(row: Record<string, any>, accessible: BucketType[
   if (typeof row.id !== 'undefined') base.id = row.id
 
   // Only include buckets the role can access
+  const keyMap: Record<string, string> = {
+    marketer1: 'marketer_1',
+    marketer2: 'marketer_2',
+  }
   for (const key of accessible) {
-    base[key] = row[key] || '0'
+    const col = keyMap[key] || key
+    const val = row[col]
+    base[key] = typeof val === 'undefined' ? '0' : val
   }
 
   return base
@@ -268,7 +365,7 @@ router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Requ
 
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
 
-  const PROGRAM_ID = process.env.SOLAIRUS_PAY_PROGRAM_ID || '5eRuzYxGUE4VHadPEhihHMpuPa6n2WvCR6ENx3WSW6ek'
+  const PROGRAM_ID = process.env.SOLAIRUS_PAY_PROGRAM_ID || (solairusPayIdl as { address?: string }).address!
   const orderId = crypto.randomUUID()
   const referencePubkey = deriveReference(orderId, PROGRAM_ID)
 
@@ -289,32 +386,55 @@ router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Requ
     return res.status(400).json({ error: msg })
   }
 
-  // Debit bucket balance atomically
+  // Preflight: config PDA and vault funding
+  try {
+    const connection = getConnection()
+    const mint = new PublicKey(parsed.data.mintAddress)
+    const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], new PublicKey(PROGRAM_ID))
+    const cfgInfo = await connection.getAccountInfo(configPda, 'confirmed')
+    if (!cfgInfo) return res.status(400).json({ error: 'Config PDA not initialized on-chain' })
+    const [vaultAuth] = PublicKey.findProgramAddressSync([Buffer.from('vault'), mint.toBuffer()], new PublicKey(PROGRAM_ID))
+    const vaultAta = PublicKey.findProgramAddressSync(
+      [vaultAuth.toBuffer(), new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA').toBuffer(), mint.toBuffer()],
+      new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+    )[0]
+    const bal = await connection.getTokenAccountBalance(vaultAta, 'confirmed').catch(() => null)
+    const availableMicro = bal ? BigInt(bal.value.amount) : 0n
+    if (availableMicro < BigInt(parsed.data.amountMicro)) {
+      return res.status(400).json({ error: 'Vault underfunded for requested amount' })
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Unknown error'
+    return res.status(400).json({ error: msg })
+  }
+
+  // Debit bucket balance atomically (bucket_balances are NUMERIC(20,6) units)
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
 
     // Check and debit bucket balance
-    const { rows: balanceRows } = await client.query(
-      `SELECT ${bucketType} FROM bucket_balances WHERE id = 1 FOR UPDATE`
+    const amountUnits = parsed.data.amountMicro / 1_000_000
+    const okRes = await client.query(
+      `SELECT (${bucketType} >= $1::numeric) AS ok FROM bucket_balances WHERE id = 1 FOR UPDATE`,
+      [amountUnits]
     )
-    const currentBalance = parseFloat(balanceRows[0][bucketType] || '0')
-
-    if (currentBalance < parsed.data.amountMicro) {
+    const ok = !!okRes.rows[0]?.ok
+    if (!ok) {
       throw new Error('Insufficient bucket balance')
     }
 
     // Update bucket balance
     await client.query(
-      `UPDATE bucket_balances SET ${bucketType} = ${bucketType} - $1 WHERE id = 1`,
-      [parsed.data.amountMicro.toString()]
+      `UPDATE bucket_balances SET ${bucketType} = ${bucketType} - $1::numeric WHERE id = 1`,
+      [amountUnits]
     )
 
     // Get new balance for history
     const { rows: newBalanceRows } = await client.query(
-      `SELECT ${bucketType} FROM bucket_balances WHERE id = 1`
+      `SELECT ${bucketType} AS bal FROM bucket_balances WHERE id = 1`
     )
-    const newBalance = newBalanceRows[0][bucketType]
+    const newBalanceUnits = newBalanceRows[0].bal
 
     // Create transaction record
     const { rows: txRows } = await client.query(`
@@ -346,8 +466,8 @@ router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Requ
     // Insert bucket history
     await client.query(`
       INSERT INTO bucket_histories (bucket_ref, amount, bucket_balance, transaction_id, created_at)
-      VALUES ($1, $2, $3, $4, NOW())
-    `, [bucketType, parsed.data.amountMicro.toString(), newBalance, txId])
+      VALUES ($1, $2::numeric, $3::numeric, $4, NOW())
+    `, [bucketType, -amountUnits, newBalanceUnits, txId])
 
     await client.query('COMMIT')
   } catch (e) {
@@ -359,6 +479,98 @@ router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Requ
   }
 
   res.status(201).json({ orderId, referencePubkey, txBase64: built.txBase64, ttlMs: built.ttlMs })
+})
+
+// Alias route to match frontend path
+router.post('/admin/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Request, res: Response) => {
+  // Delegate to the same handler by reusing logic block above
+  // Copy the body to avoid duplication across files
+  const auth = res.locals.auth as { sub: number; addr: string }
+  const parsed = z.object({
+    amountMicro: z.number().int().positive(),
+    mintAddress: z.string().min(32).max(64),
+    recipientAta: z.string().min(32).max(64),
+    memo: z.string().max(128).optional(),
+  }).safeParse(req.body)
+
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
+
+  const PROGRAM_ID = process.env.SOLAIRUS_PAY_PROGRAM_ID || (solairusPayIdl as { address?: string }).address!
+  const orderId = crypto.randomUUID()
+  const referencePubkey = deriveReference(orderId, PROGRAM_ID)
+
+  let built
+  try {
+    built = await buildClaimRewardsTx({
+      initiatorWallet: auth.addr,
+      recipient: auth.addr,
+      mintAddress: parsed.data.mintAddress,
+      amountMicro: parsed.data.amountMicro,
+      recipientAta: parsed.data.recipientAta,
+      memo: parsed.data.memo,
+      referencePubkey,
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Unknown error'
+    return res.status(400).json({ error: msg })
+  }
+
+  const bucketType = req.params.bucketType as BucketType
+  const amountUnits = parsed.data.amountMicro / 1_000_000
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const okRes = await client.query(
+      `SELECT (${bucketType} >= $1::numeric) AS ok FROM bucket_balances WHERE id = 1 FOR UPDATE`,
+      [amountUnits]
+    )
+    if (!okRes.rows[0]?.ok) throw new Error('Insufficient bucket balance')
+
+    await client.query(
+      `UPDATE bucket_balances SET ${bucketType} = ${bucketType} - $1::numeric WHERE id = 1`,
+      [amountUnits]
+    )
+    const { rows: newBalanceRows } = await client.query(
+      `SELECT ${bucketType} AS bal FROM bucket_balances WHERE id = 1`
+    )
+    const newBalanceUnits = newBalanceRows[0].bal
+
+    const { rows: txRows } = await client.query(
+      `INSERT INTO transactions (type, status, signature, initiator_wallet, recipient_wallet, program_id, amount, mint_address, decimals, metadata, order_id)
+       VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id`,
+      [
+        'role_withdrawal',
+        'pending',
+        auth.addr,
+        auth.addr,
+        PROGRAM_ID,
+        parsed.data.amountMicro,
+        parsed.data.mintAddress,
+        6,
+        JSON.stringify({ route: 'admin.buckets.withdraw.init', order_id: orderId, reference: referencePubkey, bucket_type: bucketType, ttlMs: 120000, phase: 'created', completed: false }),
+        orderId,
+      ]
+    )
+    const txId = txRows[0].id
+
+    await client.query(
+      'INSERT INTO bucket_histories (bucket_ref, amount, bucket_balance, transaction_id, created_at) VALUES ($1, $2::numeric, $3::numeric, $4, NOW())',
+      [bucketType, -amountUnits, newBalanceUnits, txId]
+    )
+
+    await client.query('COMMIT')
+    res.status(201).json({ orderId, referencePubkey, txBase64: built.txBase64, ttlMs: built.ttlMs })
+  } catch (e) {
+    await client.query('ROLLBACK')
+    const msg = e instanceof Error ? e.message : 'Unknown error'
+    if (msg.includes('Insufficient bucket balance')) return res.status(400).json({ error: msg })
+    console.error('Bucket withdrawal init error (alias):', e)
+    res.status(500).json({ error: msg })
+  } finally {
+    client.release()
+  }
 })
 
 // SETTINGS MANAGEMENT
@@ -442,11 +654,20 @@ router.get('/users/:address', requireAdmin, async (req: Request, res: Response) 
     const address = req.params.address
     const { rows } = await query(`
       SELECT
-        u.id, u.user_address, u.license_status, u.license_expiration, u.ref_by,
-        u.created_at as user_created_at,
-        b.bonus_balance, b.reward_balance, b.credit_balance, b.total_earnings,
-        b.created_at as balance_created_at
+        u.id,
+        u.user_address,
+        u.license_status,
+        u.license_expiration,
+        u.ref_by,
+        s.user_address AS sponsor_address,
+        u.created_at AS user_created_at,
+        b.bonus_balance,
+        b.reward_balance,
+        b.credit_balance,
+        b.total_earnings,
+        b.created_at AS balance_created_at
       FROM users u
+      LEFT JOIN users s ON u.ref_by = s.id
       LEFT JOIN balances b ON u.id = b.user_id
       WHERE u.user_address = $1
     `, [address])
@@ -462,12 +683,55 @@ router.get('/users/:address', requireAdmin, async (req: Request, res: Response) 
   }
 })
 
+// Admin: searchable list of users
+router.get('/admin/users/list', requireAdmin, async (req: Request, res: Response) => {
+  const search = (req.query.search as string | undefined)?.trim() || ''
+  try {
+    const { rows } = await query(`
+      WITH agent_stats AS (
+        SELECT 
+          user_id,
+          COUNT(*)::int AS total_agents,
+          COALESCE(SUM(COALESCE(amount, NULLIF((metadata->>'amount'), '')::bigint)),0)::bigint AS total_agent_amount
+        FROM agents
+        WHERE status = 'active'
+        GROUP BY user_id
+      ),
+      user_withdrawals AS (
+        SELECT initiator_wallet, COALESCE(SUM(amount),0)::bigint AS total_withdrawn
+        FROM transactions
+        WHERE type = 'user_withdrawal' AND status IN ('confirmed','completed')
+        GROUP BY initiator_wallet
+      )
+      SELECT
+        u.user_address,
+        s.user_address AS sponsor_address,
+        u.license_status,
+        u.license_expiration,
+        COALESCE(ast.total_agents, 0) AS total_agents,
+        COALESCE(ast.total_agent_amount, 0) AS total_agent_amount,
+        u.created_at AS registration_date,
+        COALESCE(uw.total_withdrawn, 0) AS total_withdrawn
+      FROM users u
+      LEFT JOIN users s ON u.ref_by = s.id
+      LEFT JOIN agent_stats ast ON ast.user_id = u.id
+      LEFT JOIN user_withdrawals uw ON uw.initiator_wallet = u.user_address
+      WHERE $1 = '' OR u.user_address ILIKE ($1 || '%')
+      ORDER BY u.created_at DESC
+    `, [search])
+    res.json(rows)
+  } catch (error) {
+    console.error('Error fetching users list:', error)
+    res.status(500).json({ error: 'Failed to fetch users list' })
+  }
+})
+
 router.post('/users/:address/credit', requireAdmin, async (req: Request, res: Response) => {
   const parsed = UserCreditSchema.safeParse(req.body)
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
 
   const address = req.params.address
-  const amount = parsed.data.amount
+  const amountMicro = BigInt(parsed.data.amount)
 
   const client = await pool.connect()
   try {
@@ -480,7 +744,6 @@ router.post('/users/:address/credit', requireAdmin, async (req: Request, res: Re
     let userId: number
 
     if (userRows.length === 0) {
-      // Auto-create user with dev as sponsor
       const devAddress = process.env.DEV_ADDRESS || process.env.VITE_DEV_ADDRESS
       const { rows: newUserRows } = await client.query(
         'INSERT INTO users (user_address, ref_by) VALUES ($1, (SELECT id FROM users WHERE user_address = $2 LIMIT 1)) RETURNING id',
@@ -491,41 +754,30 @@ router.post('/users/:address/credit', requireAdmin, async (req: Request, res: Re
       userId = userRows[0].id
     }
 
-    // Get or create balance record
-    const { rows: balanceRows } = await client.query(
-      'SELECT id FROM balances WHERE user_id = $1 FOR UPDATE', [userId]
+    const balanceId = await getOrCreateBalanceId(client, userId)
+
+    const orderId = randomUUID()
+    const txIns = await client.query<{ id: number }>(
+      `INSERT INTO transactions (type, status, signature, initiator_wallet, recipient_wallet, program_id, amount, mint_address, decimals, metadata, order_id)
+       VALUES ($1, $2, NULL, $3, NULL, NULL, $4, $5, $6, $7::jsonb, $8)
+       RETURNING id`,
+      ['admin_credit', 'confirmed', res.locals.auth.addr, amountMicro.toString(), 'CREDITS', 6, JSON.stringify({ source: 'admin_credit' }), orderId]
     )
-    let balanceId: number
+    const transactionId = txIns.rows[0]?.id
+    if (!transactionId) throw new Error('Failed to create transaction')
 
-    if (balanceRows.length === 0) {
-      const { rows: newBalanceRows } = await client.query(
-        'INSERT INTO balances (user_id, bonus_balance, reward_balance, credit_balance, total_earnings) VALUES ($1, 0, 0, 0, 0) RETURNING id',
-        [userId]
-      )
-      balanceId = newBalanceRows[0].id
-    } else {
-      balanceId = balanceRows[0].id
-    }
-
-    // Credit balance
-    await client.query(
-      'UPDATE balances SET credit_balance = credit_balance + $1, total_earnings = total_earnings + $1, updated_at = NOW() WHERE id = $2',
-      [amount.toString(), balanceId]
+    const postBalance = await applyBalanceBucketChange(
+      client,
+      balanceId,
+      'credit_balance',
+      'credit',
+      amountMicro,
+      transactionId,
+      { reason: 'admin_credit' }
     )
-
-    // Insert balance history
-    const { rows: updatedBalanceRows } = await client.query(
-      'SELECT credit_balance FROM balances WHERE id = $1', [balanceId]
-    )
-    const newBalance = updatedBalanceRows[0].credit_balance
-
-    await client.query(`
-      INSERT INTO balance_history (balance_id, change, event_type, metadata, created_at)
-      VALUES ($1, $2, $3, $4, NOW())
-    `, [balanceId, amount.toString(), 'adjustment', JSON.stringify({ reason: 'admin_credit', admin_address: res.locals.auth.addr })])
 
     await client.query('COMMIT')
-    res.json({ success: true, new_balance: newBalance })
+    res.json({ success: true, new_balance: postBalance.toString(), order_id: orderId, transaction_id: transactionId })
   } catch (error) {
     await client.query('ROLLBACK')
     console.error('Error crediting user:', error)
@@ -540,50 +792,42 @@ router.post('/users/:address/debit', requireAdmin, async (req: Request, res: Res
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
 
   const address = req.params.address
-  const amount = parsed.data.amount
+  const amountMicro = BigInt(parsed.data.amount)
 
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
 
-    // Get user and balance
-    const { rows: userRows } = await client.query(`
-      SELECT u.id, b.id as balance_id, b.credit_balance
-      FROM users u
-      JOIN balances b ON u.id = b.user_id
-      WHERE u.user_address = $1 FOR UPDATE
-    `, [address])
-
-    if (userRows.length === 0) {
-      throw new Error('User not found or has no balance')
-    }
-
-    const { balance_id, credit_balance } = userRows[0]
-    const currentBalance = parseFloat(credit_balance || '0')
-
-    if (currentBalance < amount) {
-      throw new Error('Insufficient credit balance')
-    }
-
-    // Debit balance
-    await client.query(
-      'UPDATE balances SET credit_balance = credit_balance - $1, updated_at = NOW() WHERE id = $2',
-      [amount.toString(), balance_id]
+    const { rows: userRows } = await client.query(
+      'SELECT id FROM users WHERE user_address = $1', [address]
     )
+    if (userRows.length === 0) throw new Error('User not found')
+    const userId: number = userRows[0].id
 
-    // Insert balance history
-    const { rows: updatedBalanceRows } = await client.query(
-      'SELECT credit_balance FROM balances WHERE id = $1', [balance_id]
+    const balanceId = await getOrCreateBalanceId(client, userId)
+
+    const orderId = randomUUID()
+    const txIns = await client.query<{ id: number }>(
+      `INSERT INTO transactions (type, status, signature, initiator_wallet, recipient_wallet, program_id, amount, mint_address, decimals, metadata, order_id)
+       VALUES ($1, $2, NULL, $3, NULL, NULL, $4, $5, $6, $7::jsonb, $8)
+       RETURNING id`,
+      ['admin_debit', 'confirmed', res.locals.auth.addr, amountMicro.toString(), 'CREDITS', 6, JSON.stringify({ source: 'admin_debit' }), orderId]
     )
-    const newBalance = updatedBalanceRows[0].credit_balance
+    const transactionId = txIns.rows[0]?.id
+    if (!transactionId) throw new Error('Failed to create transaction')
 
-    await client.query(`
-      INSERT INTO balance_history (balance_id, change, event_type, metadata, created_at)
-      VALUES ($1, $2, $3, $4, NOW())
-    `, [balance_id, (-amount).toString(), 'adjustment', JSON.stringify({ reason: 'admin_debit', admin_address: res.locals.auth.addr })])
+    const postBalance = await applyBalanceBucketChange(
+      client,
+      balanceId,
+      'credit_balance',
+      'debit',
+      amountMicro,
+      transactionId,
+      { reason: 'admin_debit' }
+    )
 
     await client.query('COMMIT')
-    res.json({ success: true, new_balance: newBalance })
+    res.json({ success: true, new_balance: postBalance.toString(), order_id: orderId, transaction_id: transactionId })
   } catch (error) {
     await client.query('ROLLBACK')
     const msg = error instanceof Error ? error.message : 'Unknown error'

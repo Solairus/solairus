@@ -16,6 +16,10 @@
 import { pool, query } from '../db'
 import type { Transaction } from '../types'
 import { applyBalanceBucketChange, getOrCreateBalanceId } from './balance'
+import { getConnection } from '../lib/rpc-manager'
+import { PublicKey } from '@solana/web3.js'
+import solairusPayIdl from '../idl/solairus_pay.json'
+import { deriveReference, findSignatureByReference, verifyTokenDelta, finalizeRecovery, finalizeRefund } from './withdrawal_verifier'
 
 export async function attemptExpiredWithdrawalRefund(orderId: string): Promise<{ refunded: boolean; reason?: string }> {
   const client = await pool.connect()
@@ -28,6 +32,11 @@ export async function attemptExpiredWithdrawalRefund(orderId: string): Promise<{
     if (!record) return { refunded: false, reason: 'record_not_found' }
     if (record.type !== 'user_withdrawal') return { refunded: false, reason: 'not_user_withdrawal' }
     if (record.status !== 'pending') return { refunded: false, reason: 'not_pending' }
+
+    // If refund already finalized, do not process again
+    if (record.metadata && (record.metadata as Record<string, unknown>)['refund_finalized'] === true) {
+      return { refunded: false, reason: 'refund_finalized' }
+    }
 
     // Parse TTL from metadata; fallback to 120s
     const ttlMs = (() => {
@@ -45,9 +54,18 @@ export async function attemptExpiredWithdrawalRefund(orderId: string): Promise<{
       return { refunded: false, reason: 'not_expired' }
     }
 
-    // Safety: if signature exists, do NOT auto-refund (could be in flight or already confirmed)
-    if (record.signature) {
-      return { refunded: false, reason: 'signature_present' }
+    // Safety: on-chain verification first
+    const PROGRAM_ID = process.env.SOLAIRUS_PAY_PROGRAM_ID || (solairusPayIdl as { address?: string }).address!
+    const referenceStr = (record.metadata && (record.metadata as Record<string, unknown>)['reference']) as string | undefined
+    const reference = referenceStr ? new PublicKey(referenceStr) : deriveReference(orderId, PROGRAM_ID)
+    const conn = await getConnection()
+    const sig = await findSignatureByReference(conn, reference)
+    if (sig) {
+      const valid = await verifyTokenDelta(conn, sig, record.initiator_wallet, record.mint_address, BigInt(record.amount), record.decimals || 6)
+      if (valid) {
+        await finalizeRecovery(client, record.id, sig, { recoveredVia: 'reference', recoveredAt: new Date().toISOString() })
+        return { refunded: false, reason: 'recovered_signature' }
+      }
     }
 
     // Lookup user id from wallet
@@ -60,7 +78,7 @@ export async function attemptExpiredWithdrawalRefund(orderId: string): Promise<{
 
     await client.query('BEGIN')
 
-    // Resolve or create balance row and credit the provisional debit back
+    // Resolve or create balance row and credit the provisional debit back (single final action)
     const balanceId = await getOrCreateBalanceId(client, user.id)
     const amountMicro = BigInt(record.amount)
     await applyBalanceBucketChange(
@@ -78,14 +96,7 @@ export async function attemptExpiredWithdrawalRefund(orderId: string): Promise<{
     )
 
     // Mark transaction failed + refunded in metadata
-    await client.query(
-      'UPDATE transactions SET status = $1, metadata = metadata || $2::jsonb, updated_at = NOW() WHERE id = $3',
-      [
-        'failed',
-        JSON.stringify({ refund: true, failureReason: 'Expired without signature; refunded', refundAt: now.toISOString() }),
-        record.id,
-      ]
-    )
+    await finalizeRefund(client, record.id, { refund: true, refund_finalized: true, failureReason: 'Expired; no on-chain signature found', refundAt: now.toISOString(), reference: reference.toBase58() })
 
     await client.query('COMMIT')
     return { refunded: true }

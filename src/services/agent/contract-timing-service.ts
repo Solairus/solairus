@@ -7,7 +7,7 @@
 
 import { Connection, PublicKey } from '@solana/web3.js';
 import * as anchor from '@coral-xyz/anchor';
-import { getProgram } from '@/lib/solairus-removed';
+// Removed solairus-removed; timing is backend-configured
 
 // Cache for the contract timing to avoid repeated RPC calls
 let cachedSecondsPerDay: number | null = null;
@@ -70,8 +70,14 @@ export async function getContractSecondsPerDay(
  */
 async function detectDebugMode(connection: Connection | anchor.AnchorProvider): Promise<boolean> {
   try {
-    // Get the program ID from environment
+    // Get the program ID from environment (optional now)
     const programId = import.meta.env.VITE_SOLAIRUS_MAIN_PROGRAM_ID;
+    
+    // If no program ID is set, default to production mode
+    if (!programId) {
+      console.log('ℹ️ No VITE_SOLAIRUS_MAIN_PROGRAM_ID set, defaulting to production timing');
+      return false;
+    }
     
     // If we're using the debug program ID, we're in debug mode
     // The debug program ID is: Ab3nFaKP6hHxKYKELvdRz3THWp5ew1xxckNiT4ZzNb4

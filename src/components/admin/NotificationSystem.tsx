@@ -19,6 +19,7 @@ export interface NotificationOptions {
 export class AdminNotifications {
   static success(message: string, options: NotificationOptions = {}) {
     const { title, description, duration = 5000, action, txSignature } = options;
+    const isOnChainSig = typeof txSignature === 'string' && txSignature.length > 40 && !txSignature.startsWith('BACKEND-');
     
     toast.success(title || message, {
       description: description || (txSignature ? `Transaction: ${txSignature.slice(0, 8)}...` : undefined),
@@ -27,7 +28,7 @@ export class AdminNotifications {
       action: action ? {
         label: action.label,
         onClick: action.onClick,
-      } : txSignature ? {
+      } : isOnChainSig && txSignature ? {
         label: 'Copy Tx',
         onClick: () => {
           navigator.clipboard.writeText(txSignature);
@@ -144,16 +145,16 @@ export class AdminNotifications {
 
   // Specialized notifications for common admin operations
   static transactionSuccess(operation: string, txSignature: string, details?: string) {
+    const isOnChainSig = typeof txSignature === 'string' && txSignature.length > 40 && !txSignature.startsWith('BACKEND-');
     this.success(`${operation} completed successfully`, {
       description: details,
       txSignature,
-      action: {
+      action: isOnChainSig ? {
         label: 'View on Explorer',
         onClick: () => {
-          // This would open the transaction in a Solana explorer
           window.open(`https://explorer.solana.com/tx/${txSignature}?cluster=devnet`, '_blank');
         },
-      },
+      } : undefined,
     });
   }
 

@@ -15,7 +15,6 @@ export function validateEnvironmentVariables(): EnvValidationResult {
   // Required variables
   const requiredVars = [
     'VITE_SOLANA_CLUSTER',
-    'VITE_SOLAIRUS_MAIN_PROGRAM_ID',
     'VITE_DEFAULT_SPONSOR_ADDRESS',
   ]
 
@@ -45,6 +44,18 @@ export function validateEnvironmentVariables(): EnvValidationResult {
   const cluster = import.meta.env.VITE_SOLANA_CLUSTER?.toLowerCase()
   if (!['mainnet-beta', 'mainnet', 'devnet', 'testnet'].includes(cluster)) {
     errors.push(`Invalid VITE_SOLANA_CLUSTER: ${cluster}. Must be 'mainnet-beta', 'devnet', or 'testnet'`)
+  }
+
+  // Validate Solairus program IDs (now optional for lazy initialization)
+  const mainProgramId = import.meta.env.VITE_SOLAIRUS_MAIN_PROGRAM_ID
+  const payProgramId = import.meta.env.VITE_SOLAIRUS_PAY_PROGRAM_ID
+  
+  if (!mainProgramId) {
+    warnings.push('VITE_SOLAIRUS_MAIN_PROGRAM_ID not set - will validate during payment/withdrawal initialization')
+  }
+  
+  if (!payProgramId) {
+    warnings.push('VITE_SOLAIRUS_PAY_PROGRAM_ID not set - will validate during payment/withdrawal initialization')
   }
 
   return {
@@ -134,7 +145,8 @@ export function logEnvironmentStatus(): void {
   // Log current configuration
   console.log('📋 Current Configuration:')
   console.log(`  - Cluster: ${import.meta.env.VITE_SOLANA_CLUSTER}`)
-  console.log(`  - Program ID: ${import.meta.env.VITE_SOLAIRUS_MAIN_PROGRAM_ID}`)
+  console.log(`  - Main Program ID: ${import.meta.env.VITE_SOLAIRUS_MAIN_PROGRAM_ID || 'Not set (lazy validation)'}`)
+  console.log(`  - Pay Program ID: ${import.meta.env.VITE_SOLAIRUS_PAY_PROGRAM_ID || 'Not set (lazy validation)'}`)
   console.log(`  - Wallet Guard: ${import.meta.env.VITE_ENABLE_WALLET_GUARD}`)
   console.log(`  - License Guard: ${import.meta.env.VITE_ENABLE_LICENSE_GUARD}`)
   console.log(`  - Project IDs: ${getWalletConnectProjectIds().length} configured`)

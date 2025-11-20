@@ -6,6 +6,10 @@ export type TransactionType =
   | 'agent_activation'
   | 'user_withdrawal'
   | 'role_withdrawal'
+  | 'admin_credit'
+  | 'admin_debit'
+  | 'transfer_in'
+  | 'transfer_out'
 
 export type TransactionStatus = 'pending' | 'confirmed' | 'completed' | 'failed'
 

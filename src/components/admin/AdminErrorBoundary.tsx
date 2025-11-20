@@ -65,7 +65,7 @@ export class AdminErrorBoundary extends Component<Props, State> {
     this.reportError(error, errorInfo, adminError);
   }
 
-  private reportError = (error: Error, errorInfo: ErrorInfo, adminError: any) => {
+  private reportError = (error: Error, errorInfo: ErrorInfo, adminError: unknown) => {
     // In a real application, you would send this to your error monitoring service
     const errorReport = {
       id: this.state.errorId,
