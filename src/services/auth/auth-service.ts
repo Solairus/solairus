@@ -11,6 +11,8 @@ export interface BackendUser {
   updated_at: string;
   // Bonus balance from backend DB (micro-USDT, string to preserve precision)
   bonus_balance_micro?: string;
+  // Credit balance from backend DB (micro-USDT, string)
+  credit_balance_micro?: string;
 }
 
 export interface AuthResponse {
@@ -44,6 +46,11 @@ export class AuthService {
     const data = await resp.json() as { jwt: string; user: BackendUser };
     const token = data.jwt;
     AuthService.setToken(token);
+    try {
+      localStorage.setItem('solairus.user', JSON.stringify(data.user));
+    } catch {
+      // ignore storage errors
+    }
     return { token, user: data.user };
   }
 
@@ -63,6 +70,16 @@ export class AuthService {
   static getToken(): string | null {
     try {
       return localStorage.getItem(TOKEN_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Get cached user payload from last authentication */
+  static getCachedUser(): BackendUser | null {
+    try {
+      const raw = localStorage.getItem('solairus.user');
+      return raw ? (JSON.parse(raw) as BackendUser) : null;
     } catch {
       return null;
     }

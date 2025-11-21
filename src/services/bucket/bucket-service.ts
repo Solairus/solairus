@@ -90,20 +90,11 @@ export async function withdrawFromBucket({
 }
 
 export function formatUsdtAmount(amount: anchor.BN): string {
-  // USDT has 6 decimal places
+  // Always format with exactly 6 decimal places (USDT precision)
   const divisor = new anchor.BN(1_000_000);
-  const wholePart = amount.div(divisor);
-  const fractionalPart = amount.mod(divisor);
-  
-  // Format with proper decimal places
-  const fractionalStr = fractionalPart.toString().padStart(6, '0');
-  const trimmedFractional = fractionalStr.replace(/0+$/, '');
-  
-  if (trimmedFractional === '') {
-    return wholePart.toString();
-  }
-  
-  return `${wholePart.toString()}.${trimmedFractional}`;
+  const wholePart = amount.div(divisor).toString();
+  const fractionalPart = amount.mod(divisor).toString().padStart(6, '0');
+  return `${wholePart}.${fractionalPart}`;
 }
 
 export function parseUsdtAmount(amountStr: string): anchor.BN {

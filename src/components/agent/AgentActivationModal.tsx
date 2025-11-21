@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { PublicKey, Connection } from '@solana/web3.js';
 import { EXTENDED_AGENT_TIER_METADATA } from '@/config/agent-config';
 import { TierSelection } from './TierSelection';
@@ -10,7 +10,6 @@ import {
   type AgentActivationResult 
 } from '@/services/agent/agent-activation-service';
 import { useAgentErrorHandler } from '@/utils/agent-error-handler';
-import { useAgentRetryMechanism } from '@/utils/agent-retry-mechanism';
 import { AgentErrorDisplay } from './AgentErrorDisplay';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,6 +39,10 @@ import {
   Loader2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useWallet } from '@/contexts/wallet-context';
+ 
+import { AuthService } from '@/services/auth/auth-service';
+import { useBalance } from '@/hooks/useBalance';
 
 interface AgentActivationModalProps {
   isOpen: boolean;
@@ -65,15 +68,15 @@ function getTierSpecificSuccessMessage(tier?: string, amount?: string): string {
   
   switch (tier.toUpperCase()) {
     case 'NOVA':
-      return `Your ${tierName} agent is now active with $${amount} investment. Expect steady daily returns between ${dailyRange} with minimal risk.`;
+      return `Your ${tierName} agent is now active with $${amount} liquidity. Expect steady daily returns between ${dailyRange} with minimal risk.`;
     case 'VEGA':
-      return `Your ${tierName} agent is now active with $${amount} investment. Enjoy balanced daily returns between ${dailyRange} with moderate risk.`;
+      return `Your ${tierName} agent is now active with $${amount} liquidity. Enjoy balanced daily returns between ${dailyRange} with moderate risk.`;
     case 'ORION':
-      return `Your ${tierName} agent is now active with $${amount} investment. Prepare for aggressive daily returns between ${dailyRange} with higher volatility.`;
+      return `Your ${tierName} agent is now active with $${amount} liquidity. Prepare for aggressive daily returns between ${dailyRange} with higher volatility.`;
     case 'PRIME':
-      return `Your ${tierName} agent is now active with $${amount} investment. Experience elite daily returns between ${dailyRange} with maximum potential.`;
+      return `Your ${tierName} agent is now active with $${amount} liquidity. Experience elite daily returns between ${dailyRange} with maximum potential.`;
     default:
-      return `Your ${tierName} agent is now active with $${amount} investment and ready to generate returns.`;
+      return `Your ${tierName} agent is now active with $${amount} liquidity and ready to generate returns.`;
   }
 }
 
@@ -93,7 +96,41 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [activationError, setActivationError] = useState<unknown>(null);
   const { showError, showSuccess, formatErrorForUI } = useAgentErrorHandler();
-  const { executeWithRetry } = useAgentRetryMechanism('activation');
+
+  const { anchorProvider } = useWallet();
+  const [creditBalanceMicro, setCreditBalanceMicro] = useState<number | null>(null);
+  const [creditLoading, setCreditLoading] = useState<boolean>(false);
+  const [creditError, setCreditError] = useState<string | null>(null);
+  const { balanceDisplay: usdtBalanceDisplay, isLoading: usdtLoading, refresh: refreshUsdt, balanceMicro: usdtBalanceMicro } = useBalance();
+  const tierCfg = selectedTier ? EXTENDED_AGENT_TIER_METADATA[selectedTier.toUpperCase()] : undefined;
+
+  const formatUsd = (micro?: number) => {
+    const n = Number(micro ?? 0);
+    const usd = Math.floor(n) / 1_000_000;
+    return new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(usd);
+  };
+
+  const fetchCreditBalance = useCallback(async () => {
+    if (!userPublicKey) {
+      setCreditBalanceMicro(0);
+      setCreditError(null);
+      return;
+    }
+    setCreditLoading(true);
+    setCreditError(null);
+    try {
+      const sessionUser = await AuthService.getSession();
+      const raw = sessionUser?.credit_balance_micro ?? '0';
+      const bal = Number(raw);
+      setCreditBalanceMicro(Number.isFinite(bal) ? bal : 0);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to fetch credit balance';
+      setCreditError(msg);
+      setCreditBalanceMicro(null);
+    } finally {
+      setCreditLoading(false);
+    }
+  }, [userPublicKey]);
 
   // Reset state when modal opens/closes
   useEffect(() => {
@@ -106,8 +143,24 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
       setActivationResult(undefined);
       setValidationErrors([]);
       setActivationError(null);
+      fetchCreditBalance();
     }
-  }, [isOpen]);
+  }, [isOpen, fetchCreditBalance]);
+
+  useEffect(() => {
+    if (isOpen && paymentMethod === 'credit') {
+      fetchCreditBalance();
+    }
+  }, [isOpen, paymentMethod, fetchCreditBalance]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const id = setInterval(() => {
+      fetchCreditBalance();
+      refreshUsdt();
+    }, 30000);
+    return () => clearInterval(id);
+  }, [isOpen, fetchCreditBalance, refreshUsdt]);
 
   // Validate amount when it changes
   useEffect(() => {
@@ -160,37 +213,46 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
         paymentMethod
       };
 
-      // Use retry mechanism for activation
-      const result = await executeWithRetry(
-        () => activateAgent(connection, params),
-        {
-          context: 'Agent activation',
-          onRetryAttempt: (attempt, error) => {
-            console.log(`🔄 Activation retry attempt ${attempt}:`, error.message);
-            showError(error, 'Agent activation retry', undefined, {
-              showRetry: false,
-              duration: 3000
-            });
-          },
-          onUserConfirmation: async (error) => {
-            // Always require user confirmation for activation retries
-            const errorInfo = formatErrorForUI(error, 'Agent activation');
-            // For demo purposes, auto-confirm network errors only
-            return errorInfo.type === 'network';
-          }
+      const amountMicro = Math.floor((parseFloat(amount) || 0) * 1_000_000);
+      if (paymentMethod === 'credit') {
+        const available = Number(creditBalanceMicro ?? 0);
+        if (!Number.isFinite(available) || available < amountMicro) {
+          setCurrentStep('confirmation');
+          setIsProcessing(false);
+          showError('Insufficient credit balance', 'Agent activation', undefined, { showRetry: false, duration: 4000 });
+          return;
         }
-      );
+      } else if (paymentMethod === 'usdt') {
+        if (usdtLoading) {
+          showError('Fetching USDT balance, please wait...', 'Agent activation', undefined, { showRetry: false, duration: 3000 });
+          setCurrentStep('confirmation');
+          setIsProcessing(false);
+          return;
+        }
+        const available = Number(usdtBalanceMicro ?? 0);
+        if (!Number.isFinite(available) || amountMicro > available) {
+          const availUsd = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(available / 1_000_000);
+          showError(`Insufficient USDT balance. Available: $${availUsd}`, 'Agent activation', undefined, { showRetry: false, duration: 4000 });
+          setCurrentStep('confirmation');
+          setIsProcessing(false);
+          return;
+        }
+      }
+
+      const result = await activateAgent(connection, params);
 
       if (result.success && result.data) {
         setActivationResult(result.data);
         setCurrentStep('success');
         
         // Show success toast
+        const tierName = EXTENDED_AGENT_TIER_METADATA[selectedTier]?.name || String(selectedTier);
         showSuccess('Agent activated successfully!', {
-          description: `${AGENT_TIER_CONFIGS[selectedTier].name} agent activated with ${amount} USDT`
+          description: `${tierName} agent activated with ${amount} USDT`
         });
         
         onSuccess?.(result.data);
+        await fetchCreditBalance();
       } else {
         // Handle activation failure
         const error = result.error || new Error('Activation failed');
@@ -282,14 +344,14 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
             {selectedTier !== undefined && (
               <div className="glass rounded-xl p-4 border border-primary/30">
                 <div className="flex items-center gap-3 mb-2">
-                  <span className="text-2xl">{AGENT_TIER_CONFIGS[selectedTier].emoji}</span>
+                  <span className="text-2xl">{tierCfg?.emoji}</span>
                   <div>
                     <h3 className="font-semibold text-primary">
-                      {AGENT_TIER_CONFIGS[selectedTier].name} Agent
+                      {tierCfg?.name} Agent
                     </h3>
                     <p className="text-sm text-muted-foreground">
-                      Daily yield: {AGENT_TIER_CONFIGS[selectedTier].dailyRange} • 
-                      Cap: {AGENT_TIER_CONFIGS[selectedTier].yieldCapPct}%
+                      Daily yield: {tierCfg?.dailyRange} • 
+                      Cap: {tierCfg?.yieldCapPct}%
                     </p>
                   </div>
                 </div>
@@ -298,7 +360,34 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
 
             {/* Payment Method Selection */}
             <div className="space-y-3">
-              <Label>Payment Method</Label>
+              <div className="flex items-center justify-between">
+                {creditLoading || usdtLoading ? (
+                  <div className="flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span className="text-xs text-muted-foreground">Loading...</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 overflow-hidden flex-nowrap py-0.5 w-full">
+                    <Badge
+                      variant="secondary"
+                      className="inline-flex items-center whitespace-nowrap px-1 py-0.5 text-[11px] rounded-full flex-1 min-w-0"
+                    >
+                      <DollarSign className="h-3 w-3 mr-1 flex-shrink-0" />
+                      <span className="whitespace-nowrap">{usdtBalanceDisplay}</span>
+                    </Badge>
+                    {creditBalanceMicro !== null && creditBalanceMicro > 0 && (
+                      <Badge
+                        variant="default"
+                        className="inline-flex items-center whitespace-nowrap px-1 py-0.5 text-[11px] bg-blue-600 hover:bg-blue-700 rounded-full flex-1 min-w-0"
+                      >
+                        <CreditCard className="h-3 w-3 mr-1 flex-shrink-0" />
+                        <span className="whitespace-nowrap">${formatUsd(creditBalanceMicro)}</span>
+                      </Badge>
+                    )}
+                  </div>
+                )}
+              </div>
+              {/* <Label className="text-[12px] my-[2px]">Payment Method</Label> */}
               <Select value={paymentMethod} onValueChange={(value: 'usdt' | 'credit') => setPaymentMethod(value)}>
                 <SelectTrigger>
                   <SelectValue />
@@ -391,12 +480,12 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-3">
                         <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center">
-                          <span className="text-2xl">{AGENT_TIER_CONFIGS[selectedTier].emoji}</span>
+                          <span className="text-2xl">{tierCfg?.emoji}</span>
                         </div>
                         <div>
-                          <p className="font-semibold text-lg">{AGENT_TIER_CONFIGS[selectedTier].name} Agent</p>
+                          <p className="font-semibold text-lg">{tierCfg?.name} Agent</p>
                           <p className="text-sm text-muted-foreground">
-                            {AGENT_TIER_CONFIGS[selectedTier].description}
+                            {tierCfg?.description}
                           </p>
                         </div>
                       </div>
@@ -406,10 +495,10 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Investment & Payment Details */}
+                  {/* Liquidity & Payment Details */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="p-3 bg-background/50 rounded-lg">
-                      <p className="text-sm text-muted-foreground mb-1">Investment Amount</p>
+                      <p className="text-sm text-muted-foreground mb-1">Liquidity Amount</p>
                       <p className="font-semibold text-lg">${amount}</p>
                       <p className="text-xs text-muted-foreground capitalize">via {paymentMethod}</p>
                     </div>
@@ -429,19 +518,19 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
                       <div>
                         <p className="text-muted-foreground">Daily Yield Range</p>
                         <p className="font-semibold text-green-400">
-                          {AGENT_TIER_CONFIGS[selectedTier].dailyRange}
+                          {tierCfg?.dailyRange}
                         </p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Maximum Total Yield</p>
                         <p className="font-semibold text-green-400">
-                          {AGENT_TIER_CONFIGS[selectedTier].yieldCapPct}%
+                          {tierCfg?.yieldCapPct}%
                         </p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Estimated Max Return</p>
                         <p className="font-semibold text-green-400">
-                          ${((parseFloat(amount) || 0) * AGENT_TIER_CONFIGS[selectedTier].yieldCapPct / 100).toFixed(2)}
+                          ${((parseFloat(amount) || 0) * ((tierCfg?.yieldCapPct ?? 0)) / 100).toFixed(2)}
                         </p>
                       </div>
                       <div>
@@ -534,26 +623,26 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
               {selectedTier !== undefined && (
                 <div className="glass rounded-xl p-4 mb-4 bg-gradient-to-r from-green-500/10 to-green-600/5 border border-green-500/30">
                   <div className="flex items-center justify-center gap-3 mb-3">
-                    <span className="text-3xl">{AGENT_TIER_CONFIGS[selectedTier].emoji}</span>
+                    <span className="text-3xl">{tierCfg?.emoji}</span>
                     <div>
                       <h4 className="font-semibold text-green-400">
-                        {AGENT_TIER_CONFIGS[selectedTier].name} Agent Activated
+                        {tierCfg?.name} Agent Activated
                       </h4>
                       <p className="text-sm text-muted-foreground">
-                        {AGENT_TIER_CONFIGS[selectedTier].description}
+                        {tierCfg?.description}
                       </p>
                     </div>
                   </div>
                   
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div className="text-center">
-                      <p className="text-muted-foreground">Investment Amount</p>
+                      <p className="text-muted-foreground">Liquidity Amount</p>
                       <p className="font-semibold text-green-400">${amount}</p>
                     </div>
                     <div className="text-center">
                       <p className="text-muted-foreground">Expected Daily Yield</p>
                       <p className="font-semibold text-green-400">
-                        {AGENT_TIER_CONFIGS[selectedTier].dailyRange}
+                        {tierCfg?.dailyRange}
                       </p>
                     </div>
                   </div>
@@ -598,7 +687,7 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
                 {selectedTier !== undefined && (
                   <li className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-primary"></div>
-                    Maximum total yield: {AGENT_TIER_CONFIGS[selectedTier].yieldCapPct}% of investment
+                    Maximum total yield: {tierCfg?.yieldCapPct}% of investment
                   </li>
                 )}
               </ul>

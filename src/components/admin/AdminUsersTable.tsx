@@ -18,8 +18,8 @@ interface AdminUserRow {
 
 function formatUsdtMicro(v: number | string): string {
   const n = typeof v === 'string' ? parseFloat(v) : v
-  const units = n / 1_000_000
-  return units.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 6 })
+  const units = Math.floor(n) / 1_000_000
+  return units.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 function formatDateISO(iso?: string): string {

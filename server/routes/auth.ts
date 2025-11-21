@@ -51,12 +51,22 @@ async function getBonusBalanceMicro(userId: number): Promise<string> {
 
 async function sanitizeUser(row: UserRow) {
   const bonus_balance_micro = await getBonusBalanceMicro(row.id)
+  const credit_balance_micro = await (async () => {
+    try {
+      const res = await query<{ credit_balance: string | number }>('SELECT credit_balance FROM balances WHERE user_id = $1 LIMIT 1', [row.id])
+      const raw = res.rows[0]?.credit_balance ?? 0
+      return typeof raw === 'number' ? String(raw) : (raw ?? '0')
+    } catch (_e) {
+      return '0'
+    }
+  })()
   return {
     user_address: row.user_address,
     license_status: row.license_status,
     license_expiration: row.license_expiration,
     ref_by: row.ref_by ?? null,
     bonus_balance_micro,
+    credit_balance_micro,
   }
 }
 

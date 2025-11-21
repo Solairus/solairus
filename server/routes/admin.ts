@@ -378,7 +378,7 @@ router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Requ
       mintAddress: parsed.data.mintAddress,
       amountMicro: parsed.data.amountMicro,
       recipientAta: parsed.data.recipientAta,
-      memo: parsed.data.memo,
+      memo: orderId,
       referencePubkey,
     })
   } catch (e) {
@@ -510,7 +510,7 @@ router.post('/admin/buckets/:bucketType/withdraw/init', requireAdmin, async (req
       mintAddress: parsed.data.mintAddress,
       amountMicro: parsed.data.amountMicro,
       recipientAta: parsed.data.recipientAta,
-      memo: parsed.data.memo,
+      memo: orderId,
       referencePubkey,
     })
   } catch (e) {

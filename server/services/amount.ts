@@ -7,7 +7,7 @@ export function toMicroBigInt(amount: string | number, decimals = 6): bigint {
   if (typeof amount === 'number') {
     const negative = amount < 0
     const abs = Math.abs(amount)
-    const scaled = Math.round(abs * Math.pow(10, d))
+    const scaled = Math.floor(abs * Math.pow(10, d))
     const bi = BigInt(scaled)
     return negative ? -bi : bi
   }

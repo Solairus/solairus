@@ -275,7 +275,7 @@ export async function activateAgent(
 
     } else {
       console.log('🎫 Credit payment method - backend activation');
-      const amountMicro = Math.round(params.amount * 1_000_000);
+      const amountMicro = Math.floor(params.amount * 1_000_000);
       const url = `${API_CONFIG.getBaseUrl()}${AGENT_ENDPOINTS.activateAgent}`;
       const resp = await ApiClient.post(url, {
         amountMicro,
@@ -304,7 +304,7 @@ export async function activateAgent(
       success: true,
       txSignature,
       activationId: nextActivationId,
-      userFriendlyMessage: `Successfully activated agent with ${params.amount} ${params.paymentMethod === 'credit' ? 'credits' : 'USDT'}!`
+      userFriendlyMessage: `Successfully activated agent with ${params.amount} liquidity!`
     };
 
   } catch (error: unknown) {

@@ -98,6 +98,27 @@ router.get('/agents/pnl-summary', async (req: Request, res: Response) => {
 })
 
 /**
+ * GET /balances/credit
+ * Returns the authenticated user's credit balance (micro USDT)
+ */
+router.get('/balances/credit', async (req: Request, res: Response) => {
+  try {
+    const { sub } = res.locals.auth as { sub: number; addr: string }
+    if (!sub) return res.status(401).json({ error: 'Unauthorized' })
+
+    const balRes = await query<{ credit_balance: string }>(
+      'SELECT COALESCE(credit_balance, 0)::bigint AS credit_balance FROM balances WHERE user_id = $1 LIMIT 1',
+      [sub]
+    )
+    const credit = BigInt((balRes.rows[0]?.credit_balance as unknown as string) ?? '0')
+    return res.json({ creditBalanceMicro: credit.toString() })
+  } catch (err) {
+    console.error('[balances/credit] error', err)
+    return res.status(500).json({ error: 'Failed to fetch credit balance' })
+  }
+})
+
+/**
  * GET /agents/user/:userAddress
  * Returns active agents for the authenticated user with per-agent PnL progress.
  * - Validates the requested wallet matches the authenticated address

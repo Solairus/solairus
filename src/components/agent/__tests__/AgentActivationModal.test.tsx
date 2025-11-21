@@ -36,12 +36,6 @@ vi.mock('@/utils/agent-error-handler', () => ({
   })
 }));
 
-// Mock the agent retry mechanism
-vi.mock('@/utils/agent-retry-mechanism', () => ({
-  useAgentRetryMechanism: () => ({
-    executeWithRetry: vi.fn((fn) => fn())
-  })
-}));
 
 // Mock the solairus-main lib
 vi.mock('@/lib/solairus-main', () => ({

@@ -39,6 +39,7 @@ import {
   microToUsdt,
 } from '@/services/agent/tiers-backend';
 import { useBalance } from '@/hooks/useBalance';
+import { useAuth } from '@/contexts/auth-context';
 
 // UI metadata per tier (non-data visuals only)
 const TIER_META: Record<string, { name: string; emoji: string; description: string; color: 'cyan' | 'emerald' | 'indigo' | 'amber' }>= {
@@ -110,7 +111,8 @@ function DirectHireModal({
   const [pendingTransaction, setPendingTransaction] = useState<Record<string, unknown> | null>(null);
 
   // USDT on-chain balance via reusable hook (same as license activation page)
-  const { balanceDisplay: usdtBalanceDisplay, isLoading: usdtLoading, error: usdtError, refresh: refreshUsdt } = useBalance();
+  const { balanceDisplay: usdtBalanceDisplay, isLoading: usdtLoading, error: usdtError, refresh: refreshUsdt, balanceMicro: usdtBalanceMicro } = useBalance();
+  const { user: authUser } = useAuth();
 
   const { showError, showSuccess } = useAgentErrorHandler();
   const tierMeta = TIER_META[tierName];
@@ -125,12 +127,10 @@ function DirectHireModal({
 
     try {
       setLoadingBalance(true);
-      // Use existing UserService to read credit balance (micro USDT)
-      // Note: This relies on current contract client until backend endpoint is available.
-      const { UserService } = await import('@/services/user/user-service');
-      const userService = new UserService(anchorProvider);
-      const credit = await userService.getUserCreditBalance(userPublicKey);
-      setCreditBalance(typeof credit === 'number' ? credit : 0);
+      // Prefer AuthContext user; fall back to cached user
+      const raw = (authUser?.credit_balance_micro) ?? (AuthService.getCachedUser()?.credit_balance_micro) ?? '0';
+      const credit = Number(raw);
+      setCreditBalance(Number.isFinite(credit) ? credit : 0);
       // Proactively refresh USDT balance from chain
       await refreshUsdt();
     } catch (e) {
@@ -216,13 +216,60 @@ function DirectHireModal({
       });
       return;
     }
-    // Only USDT payments are supported in this flow
-    if (paymentMethod !== 'usdt') {
-      showError('Credit payment is not available yet. Please use USDT.', 'Agent activation', undefined, {
-        showRetry: false,
-        duration: 5000,
-      });
-      return;
+    // Credit payment path (backend-only; uses cached credit balance)
+    if (paymentMethod === 'credit') {
+      const availableMicro = Number(creditBalance ?? 0);
+      const requestedMicro = Math.floor(investmentAmount * 1_000_000);
+      if (!Number.isFinite(availableMicro) || requestedMicro <= 0 || requestedMicro > availableMicro) {
+        const availUsd = (availableMicro / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        showError(`Insufficient credit balance. Available: $${availUsd}`, 'Agent activation', undefined, { showRetry: false, duration: 5000 });
+        return;
+      }
+
+      try {
+        setStep('processing');
+        setError(null);
+
+        const amountMicro = requestedMicro;
+        const initUrl = `${API_CONFIG.getBaseUrl()}/agents/activate`;
+        const initBody = { amountMicro, paymentMethod: 'credit', tierName };
+        const initRes = await ApiClient.post(initUrl, initBody);
+        const initData = await initRes.json();
+        if (!initRes.ok || !initData?.activated) {
+          throw new Error(initData?.error || 'Credit activation failed');
+        }
+
+        setActivationResult({ success: true });
+        setStep('success');
+        showSuccess('Agent activation successful', {
+          description: getTierSpecificSuccessMessage(tierName, Number.parseFloat(amount || '0').toFixed(2), tierRow),
+          duration: 6000,
+        });
+        onSuccess();
+        return;
+      } catch (e) {
+        console.error('[Hire] Credit activation failed:', e);
+        setError(e);
+        setStep('error');
+        showError(e instanceof Error ? e.message : 'Credit activation failed', 'Agent activation', undefined, { showRetry: true, duration: 6000 });
+        return;
+      }
+    }
+
+    // Validate on-chain USDT balance availability
+    try {
+      const availableMicro = Number(usdtBalanceMicro ?? 0);
+      const requestedMicro = Math.floor(investmentAmount * 1_000_000);
+      if (!Number.isFinite(availableMicro) || requestedMicro > availableMicro) {
+        const availUsd = (availableMicro / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        showError(`Insufficient USDT balance. Available: $${availUsd}`, 'Agent activation', undefined, {
+          showRetry: false,
+          duration: 5000,
+        });
+        return;
+      }
+    } catch (e) {
+      console.warn('[Hire] USDT balance check failed:', e);
     }
 
     // Proceed with backend init → on-chain payment → backend verify
@@ -740,13 +787,13 @@ function DirectHireModal({
 
               {/* Amount Input */}
               <div className="space-y-2">
-                <Label htmlFor="amount" className="text-sm">Investment Amount (USDT)</Label>
+                <Label htmlFor="amount" className="text-sm">Liquidity Amount (USDT)</Label>
                 <div className="relative">
                   <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     id="amount"
                     type="number"
-                    placeholder={tierRow ? `Min: $${microToUsdt(tierRow.min_amount)} • Max: $${microToUsdt(tierRow.max_amount).toLocaleString()}` : 'Enter amount'}
+                    placeholder={tierRow ? `Min: $${microToUsdt(tierRow.min_amount)} • Max: $${microToUsdt(tierRow.max_amount).toLocaleString()}` : 'Enter liquidity'}
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     className="pl-10"
@@ -756,37 +803,43 @@ function DirectHireModal({
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {tierRow ? `Investment range: $${microToUsdt(tierRow.min_amount)} - $${microToUsdt(tierRow.max_amount).toLocaleString()} USDT` : 'Investment range: —'}
+                  {tierRow ? `Liquidity Range: $${microToUsdt(tierRow.min_amount)} - $${microToUsdt(tierRow.max_amount).toLocaleString()} USDT` : 'Liquidity Range: —'}
                 </p>
               </div>
 
               {/* Payment Method Selection */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label className="text-sm">Payment Method</Label>
                   {loadingBalance || usdtLoading ? (
                     <div className="flex items-center gap-1">
                       <Loader2 className="h-3 w-3 animate-spin" />
                       <span className="text-xs text-muted-foreground">Loading...</span>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 overflow-hidden flex-nowrap py-0.5 w-auto">
                       {/* USDT Balance - Always show with clear label */}
-                      <Badge variant="secondary" className="text-xs px-2 py-1">
-                        <Wallet className="h-3 w-3 mr-1" />
-                        {usdtBalanceDisplay}
+                      <Badge
+                        variant="secondary"
+                        className="inline-flex items-center whitespace-nowrap px-1 py-0.5 text-[11px] rounded-[5px] flex-1 min-w-0"
+                      >
+                        <Wallet className="h-3 w-3 mr-1 flex-shrink-0" />
+                        <span className="whitespace-nowrap">USDT Balance: {usdtBalanceDisplay}</span>
                       </Badge>
 
                       {/* Credit Balance - Only show if positive with clear label */}
                       {creditBalance !== null && creditBalance > 0 && (
-                        <Badge variant="default" className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-700">
-                          <CreditCard className="h-3 w-3 mr-1" />
-                          Credit: ${(creditBalance / 1_000_000).toFixed(2)}
+                        <Badge
+                          variant="default"
+                          className="inline-flex items-center whitespace-nowrap px-1 py-0.5 text-[11px] bg-blue-600 hover:bg-blue-700 rounded-[5px] flex-1 min-w-0"
+                        >
+                          <CreditCard className="h-3 w-3 mr-1 flex-shrink-0" />
+                          <span className="whitespace-nowrap">Credit Balance: ${(creditBalance / 1_000_000).toFixed(2)}</span>
                         </Badge>
                       )}
                     </div>
                   )}
                 </div>
+                {/* <Label className="text-[12px] my-[2px]">Payment Method</Label> */}
 
                 {/* Show payment options based on credit balance */}
                 {(() => {

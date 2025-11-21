@@ -372,7 +372,7 @@ export function AgentTiersManagement() {
             <TableHeader>
               <TableRow className="border-gray-800">
                 <TableHead className="text-gray-300">Tier Name</TableHead>
-                <TableHead className="text-gray-300">Investment Range</TableHead>
+                <TableHead className="text-gray-300">Liquidity Range</TableHead>
                 <TableHead className="text-gray-300">Daily Rewards</TableHead>
                 <TableHead className="text-gray-300">Reward Cap</TableHead>
                 <TableHead className="text-gray-300">Actions</TableHead>

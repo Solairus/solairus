@@ -208,7 +208,7 @@ export function BucketManagement() {
       value = parseFloat(raw) / 1_000_000;
     }
     if (!isFinite(value)) value = 0;
-    return value.toFixed(2);
+    return value.toFixed(6);
   };
 
   const displayName = (bucket: BucketType): string => {

@@ -139,7 +139,9 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
   };
 
   const handleMaxAmount = () => {
-    setWithdrawAmount(formattedBalance);
+    const raw = Number.parseFloat(formattedBalance.replace(/[^0-9.\-]/g, ''));
+    const floored = Math.floor((Number.isFinite(raw) ? raw : 0) * 100) / 100;
+    setWithdrawAmount(floored.toFixed(2));
   };
 
   return (
@@ -169,7 +171,14 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
               <DollarSign className="h-5 w-5 text-green-400" />
               <span className="text-sm text-gray-400">Available Balance</span>
             </div>
-            <div className="text-2xl sm:text-3xl font-bold text-white mb-1">
+            <div
+              className="font-bold text-white mb-1"
+              style={{
+                fontSize: `clamp(1.25rem, calc(2.25rem - ${String(formattedBalance).length} * 0.05rem), 2.5rem)`,
+                lineHeight: 1.2,
+                wordBreak: 'break-word',
+              }}
+            >
               {formattedBalance}
             </div>
             <div className="text-sm text-gray-400">
