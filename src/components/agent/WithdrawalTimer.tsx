@@ -2,13 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Clock, Timer, CheckCircle, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AgentData } from '@/services/agent/agent-service';
-import { getContractSecondsPerDay, getContractTimingInfo } from '@/services/agent/contract-timing-service';
-import { Connection } from '@solana/web3.js';
-import * as anchor from '@coral-xyz/anchor';
 
 interface WithdrawalTimerProps {
   agent: AgentData;
-  connection?: Connection | anchor.AnchorProvider;
   className?: string;
   showIcon?: boolean;
   compact?: boolean;
@@ -23,107 +19,44 @@ interface TimeRemaining {
 
 export const WithdrawalTimer: React.FC<WithdrawalTimerProps> = ({
   agent,
-  connection,
   className,
   showIcon = true,
   compact = false
 }) => {
   const [timeRemaining, setTimeRemaining] = useState<TimeRemaining | null>(null);
   const [timerType, setTimerType] = useState<'activation' | 'withdrawal' | 'ready' | 'retired'>('ready');
-  const [contractTiming, setContractTiming] = useState<{
-    secondsPerDay: number;
-    isDebugMode: boolean;
-    displayName: string;
-  } | null>(null);
+  
+  // No contract timing; server provides cooldown via claimed_at + 24h
 
-  // Load contract timing information
-  useEffect(() => {
-    const loadContractTiming = async () => {
-      if (!connection) {
-        // Fallback to production timing if no connection
-        setContractTiming({
-          secondsPerDay: 86400,
-          isDebugMode: false,
-          displayName: '24 hours'
-        });
-        return;
-      }
-
-      try {
-        const timingInfo = await getContractTimingInfo(connection);
-        setContractTiming({
-          secondsPerDay: timingInfo.secondsPerDay,
-          isDebugMode: timingInfo.isDebugMode,
-          displayName: timingInfo.displayName
-        });
-      } catch (error) {
-        console.warn('Could not load contract timing, using fallback:', error);
-        setContractTiming({
-          secondsPerDay: 86400,
-          isDebugMode: false,
-          displayName: '24 hours'
-        });
-      }
-    };
-
-    loadContractTiming();
-  }, [connection]);
-
-  // Calculate time remaining until next withdrawal using contract timing
+  // Calculate time remaining using backend-provided nextWithdrawalAt
   const calculateTimeRemaining = useCallback((): TimeRemaining | null => {
-    if (!contractTiming) return null;
-
     const now = new Date();
-    let targetTime: Date | null = null;
+    const targetTime: Date | null = agent.nextWithdrawalAt ?? (agent.lastRoiWithdrawal ? new Date(agent.lastRoiWithdrawal.getTime() + 24 * 60 * 60 * 1000) : null);
     let type: 'activation' | 'withdrawal' | 'ready' | 'retired' = 'ready';
 
-    // If agent is retired, no withdrawals possible
     if (agent.yieldCapReached) {
       setTimerType('retired');
       return null;
     }
 
-    // Use contract timing instead of hardcoded 24 hours
-    const millisecondsPerDay = contractTiming.secondsPerDay * 1000;
-
-    // Check if contract time has passed since activation
-    const activationDelay = new Date(agent.activatedAt.getTime() + millisecondsPerDay);
-    if (now < activationDelay) {
-      targetTime = activationDelay;
-      type = 'activation';
-    }
-    // Check if contract time has passed since last withdrawal
-    else if (agent.lastRoiWithdrawal) {
-      const withdrawalDelay = new Date(agent.lastRoiWithdrawal.getTime() + millisecondsPerDay);
-      if (now < withdrawalDelay) {
-        targetTime = withdrawalDelay;
-        type = 'withdrawal';
-      }
+    if (targetTime && now < targetTime) {
+      // If lastRoiWithdrawal exists and target equals claimed_at+24h, treat as withdrawal cooldown
+      type = agent.lastRoiWithdrawal ? 'withdrawal' : 'activation';
     }
 
     setTimerType(type);
 
-    if (!targetTime) {
-      return null; // Ready to withdraw
-    }
+    if (!targetTime) return null;
 
     const diff = targetTime.getTime() - now.getTime();
-    
-    if (diff <= 0) {
-      return null; // Time has passed
-    }
+    if (diff <= 0) return null;
 
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((diff % (1000 * 60)) / 1000);
 
-    return {
-      hours,
-      minutes,
-      seconds,
-      totalMs: diff
-    };
-  }, [agent.yieldCapReached, agent.activatedAt, agent.lastRoiWithdrawal, contractTiming]);
+    return { hours, minutes, seconds, totalMs: diff };
+  }, [agent.yieldCapReached, agent.nextWithdrawalAt, agent.lastRoiWithdrawal]);
 
   // Update timer every second
   useEffect(() => {
@@ -165,13 +98,13 @@ export const WithdrawalTimer: React.FC<WithdrawalTimerProps> = ({
 
   // Get status message with dynamic timing
   const getStatusMessage = (): string => {
-    const timingDisplay = contractTiming?.displayName || '24 hours';
+    const displayName = '24 hours';
     
     switch (timerType) {
       case 'activation':
-        return compact ? 'Activation delay' : `Waiting for ${timingDisplay} activation delay`;
+        return compact ? 'Activation delay' : `Waiting for ${displayName} activation delay`;
       case 'withdrawal':
-        return compact ? 'Withdrawal cooldown' : `Waiting for ${timingDisplay} withdrawal cooldown`;
+        return compact ? 'Withdrawal cooldown' : `Waiting for ${displayName} withdrawal cooldown`;
       case 'retired':
         return 'Agent retired';
       case 'ready':
@@ -231,7 +164,7 @@ export const WithdrawalTimer: React.FC<WithdrawalTimerProps> = ({
             "font-mono text-lg font-bold tracking-wider transition-all duration-300",
             styling.color,
             // Add pulsing animation when time is running low (less than 1 hour or 5 minutes in debug)
-            timeRemaining.totalMs < (contractTiming?.isDebugMode ? 60000 : 3600000) && "animate-pulse"
+            timeRemaining.totalMs < 3600000 && "animate-pulse"
           )}>
             {formatTime(timeRemaining)}
           </div>
@@ -278,19 +211,13 @@ export const WithdrawalTimer: React.FC<WithdrawalTimerProps> = ({
         
         {timerType === 'activation' && (
           <div className="text-xs text-muted-foreground">
-            Agents must wait {contractTiming?.displayName || '24 hours'} after activation before first withdrawal
-            {contractTiming?.isDebugMode && (
-              <span className="text-amber-400 ml-1">(Debug Mode)</span>
-            )}
+            Agents must wait 24 hours after activation before first withdrawal
           </div>
         )}
         
         {timerType === 'withdrawal' && (
           <div className="text-xs text-muted-foreground">
-            Each agent has a {contractTiming?.displayName || '24 hours'} cooldown between ROI withdrawals
-            {contractTiming?.isDebugMode && (
-              <span className="text-amber-400 ml-1">(Debug Mode)</span>
-            )}
+            Each agent has a 24 hours cooldown between ROI withdrawals
           </div>
         )}
         
@@ -307,73 +234,28 @@ export const WithdrawalTimer: React.FC<WithdrawalTimerProps> = ({
 // Multi-agent timer component for dashboard overview
 interface MultiAgentTimerProps {
   agents: AgentData[];
-  connection?: Connection | anchor.AnchorProvider;
   className?: string;
 }
 
 export const MultiAgentTimer: React.FC<MultiAgentTimerProps> = ({
   agents,
-  connection,
   className
 }) => {
   const [nextAvailable, setNextAvailable] = useState<{
     agent: AgentData;
     timeRemaining: TimeRemaining;
   } | null>(null);
-  const [contractTiming, setContractTiming] = useState<{
-    secondsPerDay: number;
-    isDebugMode: boolean;
-  } | null>(null);
-
-  // Load contract timing
-  useEffect(() => {
-    const loadContractTiming = async () => {
-      if (!connection) {
-        setContractTiming({ secondsPerDay: 86400, isDebugMode: false });
-        return;
-      }
-
-      try {
-        const timingInfo = await getContractTimingInfo(connection);
-        setContractTiming({
-          secondsPerDay: timingInfo.secondsPerDay,
-          isDebugMode: timingInfo.isDebugMode
-        });
-      } catch (error) {
-        console.warn('Could not load contract timing for multi-agent timer:', error);
-        setContractTiming({ secondsPerDay: 86400, isDebugMode: false });
-      }
-    };
-
-    loadContractTiming();
-  }, [connection]);
+  // No contract timing; rely exclusively on backend nextWithdrawalAt
 
   useEffect(() => {
-    if (!contractTiming) return;
 
     const findNextAvailable = () => {
       let earliest: { agent: AgentData; time: Date } | null = null;
-      const millisecondsPerDay = contractTiming.secondsPerDay * 1000;
 
       for (const agent of agents) {
         if (agent.yieldCapReached) continue;
 
-        const now = new Date();
-        let nextTime: Date | null = null;
-
-        // Check activation delay using contract timing
-        const activationDelay = new Date(agent.activatedAt.getTime() + millisecondsPerDay);
-        if (now < activationDelay) {
-          nextTime = activationDelay;
-        }
-        // Check withdrawal delay using contract timing
-        else if (agent.lastRoiWithdrawal) {
-          const withdrawalDelay = new Date(agent.lastRoiWithdrawal.getTime() + millisecondsPerDay);
-          if (now < withdrawalDelay) {
-            nextTime = withdrawalDelay;
-          }
-        }
-
+        const nextTime: Date | null = agent.nextWithdrawalAt ?? null;
         if (nextTime && (!earliest || nextTime < earliest.time)) {
           earliest = { agent, time: nextTime };
         }
@@ -402,7 +284,7 @@ export const MultiAgentTimer: React.FC<MultiAgentTimerProps> = ({
     findNextAvailable();
     const interval = setInterval(findNextAvailable, 1000);
     return () => clearInterval(interval);
-  }, [agents, contractTiming]);
+  }, [agents]);
 
   if (!nextAvailable) {
     const readyAgents = agents.filter(agent => agent.canWithdraw && !agent.yieldCapReached);

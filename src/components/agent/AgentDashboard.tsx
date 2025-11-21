@@ -9,7 +9,6 @@ import { AgentCard } from './AgentCard';
 import { WithdrawalLimitDisplay as WithdrawalLimitDisplayComponent } from './WithdrawalLimitDisplay';
 import { AgentActivationModal } from './AgentActivationModal';
 import { MultiAgentTimer } from './WithdrawalTimer';
-import { calculateNextWithdrawalTime } from '@/services/agent/contract-timing-service';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/Card';
 import { Loader2, Plus, RefreshCw } from 'lucide-react';
@@ -167,8 +166,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         };
 
         // Compute timing window using contract timing service (60s override supported)
-        const nextTime = await calculateNextWithdrawalTime(connection, activatedAt, null);
-        const canWithdraw = !nextTime && !yieldCapReached && activationAmountUsdt > 0;
+        // Cooldown: prefer backend-provided remaining_ms/next_claim_at over contract timing
+        const remainingMs = typeof row.remaining_ms === 'number' ? Math.max(0, row.remaining_ms) : null;
+        const nextTime = row.next_claim_at ? new Date(row.next_claim_at) : (remainingMs ? new Date(Date.now() + remainingMs) : null);
+        const canWithdraw = Boolean(row.can_claim) && !yieldCapReached && activationAmountUsdt > 0;
 
         return {
           activationId: row.id,
@@ -183,7 +184,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           },
           activationAmount: activationAmountUsdt,
           activatedAt,
-          lastRoiWithdrawal: null,
+          lastRoiWithdrawal: row.claimed_at ? new Date(row.claimed_at) : null,
           totalRoiWithdrawn,
           yieldCapReached,
           yieldCapProgress,
@@ -379,9 +380,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         <WithdrawalLimitDisplayComponent status={state.withdrawalLimitStatus} />
       )}
       {/* Multi-Agent Timer Overview */}
-      {state.agents.length > 0 && (
-        <MultiAgentTimer agents={state.agents} connection={connection} />
-      )}
+        {state.agents.length > 0 && (
+          <MultiAgentTimer agents={state.agents} />
+        )}
       
       {/* Portfolio Header */}
       <Card 

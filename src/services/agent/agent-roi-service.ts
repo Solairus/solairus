@@ -3,7 +3,6 @@ import { Connection, PublicKey, Transaction, VersionedTransaction, TransactionSi
 import { getWithdrawalLimitStatus, canWithdrawAmount } from "./withdrawal-limit-service";
 import { getUserAgent } from "./agent-service";
 import { AgentErrorHandler } from "@/utils/agent-error-handler";
-import { getContractSecondsPerDay } from "./contract-timing-service";
 import { EXTENDED_AGENT_TIER_METADATA } from "@/config/agent-config";
 
 // Helper function to check if ROI withdrawal is possible
@@ -11,7 +10,7 @@ function canWithdrawRoi(agentData: any): { canWithdraw: boolean; reason?: string
   // This is a simplified version - in reality you'd check the actual contract state
   const now = Math.floor(Date.now() / 1000);
   const lastWithdrawal = agentData.lastRoiWithdrawal || 0;
-  const secondsPerDay = 86400; // 24 hours in production
+  const secondsPerDay = 86400; // 24 hours fixed (backend-enforced)
   
   if (now - lastWithdrawal < secondsPerDay) {
     const nextWithdrawalAt = new Date((lastWithdrawal + secondsPerDay) * 1000);
@@ -65,47 +64,22 @@ export async function withdrawAgentRoi(
 ): Promise<WithdrawAgentRoiResult> {
   try {
     console.log('🚀 Starting agent ROI withdrawal for activation ID:', activationId);
-    
-    const {
-      confirmationTimeout = 30000,
-      skipPreflight = false
-    } = options;
-    
+
+    const { confirmationTimeout = 30000, skipPreflight = false } = options;
     const connection = anchorProvider.connection;
     const userPublicKey = anchorProvider.wallet.publicKey;
-    
-    // Step 1: Validate agent exists and get current state
+
+    // Validate agent exists and backend eligibility (no contract timing)
     const agentData = await getUserAgent(connection, userPublicKey, activationId);
     if (!agentData) {
       throw new Error(`Agent with activation ID ${activationId} not found`);
     }
-    
-    console.log('✅ Agent found:', {
-      tier: agentData.tierConfig.name,
-      amount: agentData.activationAmount,
-      yieldCapReached: agentData.yieldCapReached
-    });
-    
-    // Step 2: Check if withdrawal is allowed (timing and yield cap) using contract timing
-    const secondsPerDay = await getContractSecondsPerDay(connection);
-    console.log(`🕒 Using contract timing: ${secondsPerDay} seconds per day`);
-    
-    const withdrawalCheck = canWithdrawRoi(agentData.accountData, Math.floor(Date.now() / 1000), secondsPerDay);
-    if (!withdrawalCheck.canWithdraw) {
-      throw new Error(withdrawalCheck.reason || 'Cannot withdraw ROI at this time');
+
+    if (!agentData.canWithdraw) {
+      throw new Error('Cooldown active or yield cap reached');
     }
-    
-    console.log('✅ Agent withdrawal timing check passed');
-    
-    // Step 3: Check global withdrawal limits
-    const withdrawalLimitStatus = await getWithdrawalLimitStatus(connection, userPublicKey);
-    if (withdrawalLimitStatus.limitReached && !withdrawalLimitStatus.isPrivileged) {
-      throw new Error('Global withdrawal limit reached (200x deposits)');
-    }
-    
-    console.log('✅ Global withdrawal limit check passed');
-    
-    // Step 4: Use backend API for withdrawal instead of direct contract calls
+
+    // Use backend API for withdrawal instead of direct contract calls
     console.log('🚀 Initiating ROI withdrawal via backend API...');
     
     // Call backend withdrawal endpoint
@@ -137,31 +111,14 @@ export async function withdrawAgentRoi(
       userTotalWithdrawn: backendResult.userTotalWithdrawn
     };
     
-    try {
-      // Wait a bit for state to update
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      const updatedAgentData = await getUserAgent(connection, userPublicKey, activationId);
-      if (updatedAgentData && agentData) {
-        const roiAmount = updatedAgentData.totalRoiWithdrawn - agentData.totalRoiWithdrawn;
-        result.roiAmount = roiAmount;
-        result.agentRetired = updatedAgentData.yieldCapReached;
-        result.newTotalWithdrawn = updatedAgentData.totalRoiWithdrawn;
-        
-        console.log('✅ ROI withdrawal successful:', {
-          roiAmount: roiAmount.toFixed(6),
-          agentRetired: result.agentRetired,
-          newTotalWithdrawn: result.newTotalWithdrawn
-        });
-      }
-      
-      // Get updated user withdrawal status
-      const updatedWithdrawalStatus = await getWithdrawalLimitStatus(connection, userPublicKey);
-      result.userTotalWithdrawn = updatedWithdrawalStatus.totalWithdrawn.toNumber() / 1_000_000;
-      
-    } catch (error) {
-      console.warn('⚠️ Could not fetch updated agent state:', error);
-      // Transaction still succeeded, just couldn't get updated state
+    // Optional: wait and refresh simple backend state only
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const updatedAgentData = await getUserAgent(connection, userPublicKey, activationId).catch(() => null);
+    if (updatedAgentData && agentData) {
+      const roiAmount = updatedAgentData.totalRoiWithdrawn - agentData.totalRoiWithdrawn;
+      result.roiAmount = roiAmount;
+      result.agentRetired = updatedAgentData.yieldCapReached;
+      result.newTotalWithdrawn = updatedAgentData.totalRoiWithdrawn;
     }
     
     return result;
@@ -194,47 +151,18 @@ export async function estimateAgentRoi(
   reason?: string;
 }> {
   try {
-    const agentData = await getUserAgent(connection, userPublicKey, activationId);
-    if (!agentData) {
-      throw new Error(`Agent with activation ID ${activationId} not found`);
+    // Call backend placeholder ROI route
+    const res = await fetch(`/api/agents/${activationId}/roi`, { method: 'GET' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      return { minRoi: 0, maxRoi: 0, averageRoi: 0, canWithdraw: false, reason: err.error || 'Failed to fetch ROI' };
     }
-    
-    // Check if withdrawal is possible
-    const withdrawalCheck = canWithdrawRoi(agentData.accountData);
-    if (!withdrawalCheck.canWithdraw) {
-      return {
-        minRoi: 0,
-        maxRoi: 0,
-        averageRoi: 0,
-        canWithdraw: false,
-        reason: withdrawalCheck.reason
-      };
-    }
-    
-    // Calculate ROI range based on tier configuration
-    const tierConfig = agentData.tierConfig;
-    const activationAmount = agentData.activationAmount;
-    
-    // Get the actual tier config with yield basis points from backend-driven config
-    const fullTierConfig = EXTENDED_AGENT_TIER_METADATA.find(t => t.name === agentData.tier);
-    if (!fullTierConfig) {
-      throw new Error(`Tier configuration not found for: ${agentData.tier}`);
-    }
-    
-    const minRoi = (activationAmount * fullTierConfig.minYieldBps) / 10000;
-    const maxRoi = (activationAmount * fullTierConfig.maxYieldBps) / 10000;
-    const averageRoi = (minRoi + maxRoi) / 2;
-    
-    return {
-      minRoi,
-      maxRoi,
-      averageRoi,
-      canWithdraw: true
-    };
-    
+    const data = await res.json();
+    const roi = Number(data?.roi ?? 0);
+    return { minRoi: roi, maxRoi: roi, averageRoi: roi, canWithdraw: true };
   } catch (error) {
     console.error('❌ Error estimating agent ROI:', error);
-    throw error;
+    return { minRoi: 0, maxRoi: 0, averageRoi: 0, canWithdraw: false, reason: 'Error estimating ROI' };
   }
 }
 
@@ -252,41 +180,13 @@ export async function canWithdrawAgentRoi(
   globalLimitReached?: boolean;
 }> {
   try {
-    // Check agent-specific conditions
     const agentData = await getUserAgent(connection, userPublicKey, activationId);
     if (!agentData) {
-      return {
-        canWithdraw: false,
-        reason: 'Agent not found'
-      };
+      return { canWithdraw: false, reason: 'Agent not found' };
     }
-    
-    const agentCheck = canWithdrawRoi(agentData.accountData);
-    if (!agentCheck.canWithdraw) {
-      return {
-        canWithdraw: false,
-        reason: agentCheck.reason,
-        nextWithdrawalAt: agentCheck.nextWithdrawalAt
-      };
-    }
-    
-    // Check global withdrawal limits
-    const withdrawalLimitStatus = await getWithdrawalLimitStatus(connection, userPublicKey);
-    if (withdrawalLimitStatus.limitReached && !withdrawalLimitStatus.isPrivileged) {
-      return {
-        canWithdraw: false,
-        reason: 'Global withdrawal limit reached',
-        globalLimitReached: true
-      };
-    }
-    
-    return { canWithdraw: true };
-    
+    return { canWithdraw: agentData.canWithdraw, nextWithdrawalAt: agentData.nextWithdrawalAt };
   } catch (error) {
     console.error('❌ Error checking agent ROI withdrawal:', error);
-    return {
-      canWithdraw: false,
-      reason: `Error checking withdrawal status: ${getErrorMessage(error)}`
-    };
+    return { canWithdraw: false, reason: `Error checking withdrawal status: ${getErrorMessage(error)}` };
   }
 }

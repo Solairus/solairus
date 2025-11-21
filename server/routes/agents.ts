@@ -119,6 +119,35 @@ router.get('/balances/credit', async (req: Request, res: Response) => {
 })
 
 /**
+ * GET /agents/:activationId/roi
+ * Returns a placeholder ROI value (0) for the specified agent, scoped to the authenticated user.
+ */
+router.get('/agents/:activationId/roi', async (req: Request, res: Response) => {
+  try {
+    const { sub } = res.locals.auth as { sub: number; addr: string }
+    if (!sub) return res.status(401).json({ error: 'Unauthorized' })
+
+    const activationId = Number(req.params.activationId)
+    if (!Number.isFinite(activationId) || activationId <= 0) {
+      return res.status(400).json({ error: 'Invalid activationId' })
+    }
+
+    const row = await query<{ id: number }>(
+      'SELECT id FROM agents WHERE id = $1 AND user_id = $2 LIMIT 1',
+      [activationId, sub]
+    )
+    if (row.rows.length === 0) {
+      return res.status(404).json({ error: 'Agent not found' })
+    }
+
+    return res.json({ activationId, roi: 0 })
+  } catch (err) {
+    console.error('[agents/:activationId/roi] error', err)
+    return res.status(500).json({ error: 'Failed to fetch agent ROI' })
+  }
+})
+
+/**
  * GET /agents/user/:userAddress
  * Returns active agents for the authenticated user with per-agent PnL progress.
  * - Validates the requested wallet matches the authenticated address
@@ -147,6 +176,7 @@ router.get('/agents/user/:userAddress', async (req: Request, res: Response) => {
         a.tier_id,
         a.activated_at,
         a.created_at,
+        a.claimed_at,
         a.metadata,
         t.reward_cap_bp,
         t.tier_name AS tier_name
@@ -167,6 +197,7 @@ router.get('/agents/user/:userAddress', async (req: Request, res: Response) => {
       metadata: Record<string, unknown> | null
       reward_cap_bp: number | null
       tier_name: string | null
+      claimed_at: string | null
     }>(sql, [sub])
 
     const enriched = result.rows.map((row) => {
@@ -178,6 +209,13 @@ router.get('/agents/user/:userAddress', async (req: Request, res: Response) => {
       const progressPctRaw = amountMicro > 0n ? (Number(earnedMicro) / Number(amountMicro)) * 100 : 0
       const yield_cap_progress_pct = Math.min(progressPctRaw, capPct)
       const yield_cap_reached = yield_cap_progress_pct >= capPct
+
+      // Cooldown computation: next claim after 24 hours from claimed_at
+      const claimedAtTs = row.claimed_at ? new Date(row.claimed_at).getTime() : new Date(row.activated_at ?? row.created_at).getTime()
+      const nextClaimAtTs = claimedAtTs + (24 * 60 * 60 * 1000)
+      const nowTs = Date.now()
+      const remainingMs = Math.max(0, nextClaimAtTs - nowTs)
+      const can_claim = remainingMs === 0
 
       return {
         id: row.id,
@@ -192,6 +230,10 @@ router.get('/agents/user/:userAddress', async (req: Request, res: Response) => {
         tier_name: row.tier_name,
         activated_at: row.activated_at,
         created_at: row.created_at,
+        claimed_at: row.claimed_at,
+        next_claim_at: new Date(nextClaimAtTs).toISOString(),
+        remaining_ms: remainingMs,
+        can_claim,
         metadata: row.metadata,
       }
     })

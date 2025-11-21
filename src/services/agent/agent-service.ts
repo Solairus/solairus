@@ -1,6 +1,5 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { fetchUserAgentActivations, type BackendAgentActivation } from "./agent-backend";
-import { calculateNextWithdrawalTime } from "./contract-timing-service";
 
 type TierName = "NOVA" | "VEGA" | "ORION" | "PRIME" | string;
 
@@ -108,12 +107,15 @@ async function mapBackendAgentToAgentData(
   const activatedAtIso = row.activated_at ?? row.created_at;
   const activatedAt = activatedAtIso ? new Date(activatedAtIso) : new Date();
 
-  const nextWithdrawalAt =
-    connection && activationAmount > 0
-      ? await calculateNextWithdrawalTime(connection, activatedAt, undefined)
-      : null;
+  // Prefer backend-provided cooldown info
+  const claimedAtIso = row.claimed_at ?? null;
+  const claimedAt = claimedAtIso ? new Date(claimedAtIso) : null;
+  // Prefer backend-provided cooldown info; fallback to claimed_at + 24h if needed
+  const nextWithdrawalAt = row.next_claim_at
+    ? new Date(row.next_claim_at)
+    : (claimedAt ? new Date(claimedAt.getTime() + 24 * 60 * 60 * 1000) : null);
 
-  const canWithdraw = !yieldCapReached && !nextWithdrawalAt && activationAmount > 0;
+  const canWithdraw = (!yieldCapReached && (row.can_claim ?? (!nextWithdrawalAt)) && activationAmount > 0);
 
   return {
     activationId: row.id,
@@ -124,7 +126,7 @@ async function mapBackendAgentToAgentData(
     },
     activationAmount,
     activatedAt,
-    lastRoiWithdrawal: null,
+    lastRoiWithdrawal: claimedAt,
     totalRoiWithdrawn,
     yieldCapReached,
     yieldCapProgress,
@@ -133,7 +135,7 @@ async function mapBackendAgentToAgentData(
     withdrawalStatus: {
       canWithdraw,
       nextWithdrawalAt: nextWithdrawalAt ?? null,
-      reason: canWithdraw ? undefined : yieldCapReached ? "Yield cap reached" : undefined,
+      reason: canWithdraw ? undefined : yieldCapReached ? "Yield cap reached" : (nextWithdrawalAt ? "Cooldown active" : undefined),
     },
     pda: null,
     accountData: {

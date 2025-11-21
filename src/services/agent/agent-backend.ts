@@ -13,6 +13,7 @@ export interface BackendAgentActivation {
   created_at: string; // ISO timestamp
   status?: string;
   activated_at?: string | null;
+  claimed_at?: string | null;
   metadata?: {
     tier_name?: string;
     [key: string]: unknown;
@@ -22,6 +23,9 @@ export interface BackendAgentActivation {
   reward_cap_bp?: number; // basis points (e.g., 20000 for 200%)
   yield_cap_progress_pct?: number; // 0..capPct
   yield_cap_reached?: boolean;
+  next_claim_at?: string;
+  remaining_ms?: number;
+  can_claim?: boolean;
 }
 
 /**

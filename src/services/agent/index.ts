@@ -1,7 +1,6 @@
 // Agent service exports
 export * from './agent-service';
 export * from './withdrawal-limit-service';
-export * from './agent-roi-service';
 export * from './agent-activation-service';
 
 // Re-export commonly used types and functions
@@ -17,11 +16,6 @@ export type {
   WithdrawalLimitDisplay
 } from './withdrawal-limit-service';
 
-export type {
-  WithdrawAgentRoiOptions,
-  WithdrawAgentRoiResult,
-  WithdrawAgentRoiError
-} from './agent-roi-service';
 
 export type {
   AgentActivationParams,
@@ -42,11 +36,6 @@ export {
   canWithdrawAmount
 } from './withdrawal-limit-service';
 
-export {
-  withdrawAgentRoi,
-  estimateAgentRoi,
-  canWithdrawAgentRoi
-} from './agent-roi-service';
 
 export {
   activateAgent,

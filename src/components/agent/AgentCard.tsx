@@ -229,8 +229,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
         {/* Live Countdown Timer - show when agent is in cooldown */}
         {!agent.canWithdraw && !agent.yieldCapReached && (
           <WithdrawalTimer 
-            agent={agent} 
-            connection={connection}
+            agent={agent}
             compact={true}
             className="justify-center"
           />

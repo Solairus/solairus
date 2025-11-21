@@ -77,7 +77,7 @@ export default function VaultBalanceCard({
     setIsRefreshing(true);
     try {
       const [agentsResult, pnlSummary] = await Promise.all([
-        getUserAgents(provider ?? { connection: provider?.connection }, publicKey),
+        getUserAgents({ connection: provider || undefined }, publicKey),
         fetchGlobalPnlSummary(),
       ]);
 
@@ -217,7 +217,7 @@ export default function VaultBalanceCard({
         {/* Total Amount with refresh */}
         <div className="mt-1 flex items-center gap-2">
           <div className="text-4xl font-bold">
-            ${(bonusBalance || (totalClaimable + affiliateCommission)).toLocaleString('en-US', { 
+            ${Number(bonusBalance || 0).toLocaleString('en-US', { 
               minimumFractionDigits: 2,
               maximumFractionDigits: 2 
             })}
@@ -246,7 +246,7 @@ export default function VaultBalanceCard({
             )}
             {totalClaimable > 0 && (
               <div className="flex justify-between text-xs text-white/70">
-                <span>Agent ROI:</span>
+                <span>Target PnL:</span>
                 <span>${totalClaimable.toLocaleString('en-US', { 
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2 
