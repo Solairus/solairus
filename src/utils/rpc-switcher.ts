@@ -76,14 +76,14 @@ class RpcSwitcher {
         return "" 
       }
     })()
-    const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? "devnet").toLowerCase()
+    const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? "mainnet-beta").toLowerCase()
     const effectiveCluster = override || envCluster
     
     console.log(`🌐 Current network: ${effectiveCluster} (override: ${override || 'none'}, env: ${envCluster})`)
     
     if (effectiveCluster.startsWith("mainnet")) return "mainnet-beta"
     if (effectiveCluster === "testnet") return "testnet"
-    return "devnet"
+    return "mainnet-beta"
   }
 
   private parseRpcUrls(envVar: string | undefined): RpcEndpoint[] {

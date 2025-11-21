@@ -32,13 +32,13 @@ class BackendRpcManager {
    * Determine which cluster to use based on environment
    */
   private determineCluster(): ClusterName {
-    const cluster = (process.env.SOLANA_CLUSTER || 'devnet').toLowerCase()
+    const cluster = (process.env.SOLANA_CLUSTER || 'mainnet-beta').toLowerCase()
     
     if (cluster === 'mainnet' || cluster === 'mainnet-beta') {
       return 'mainnet-beta'
     }
     
-    return 'devnet'
+    return 'mainnet-beta'
   }
 
   /**

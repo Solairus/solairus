@@ -65,7 +65,7 @@ router.post('/withdrawals/init', async (req: Request, res: Response) => {
       mintAddress: parsed.data.mintAddress,
       amountMicro: parsed.data.amountMicro,
       recipientAta: parsed.data.recipientAta,
-      memo: parsed.data.memo,
+      memo: orderId,
       referencePubkey,
     })
   } catch (e) {

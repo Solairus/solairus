@@ -252,7 +252,8 @@ export const RESPONSE_INTERCEPTORS = {
   handleErrors: async (response: Response): Promise<Response> => {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      const serverMsg = (errorData && (errorData.error || errorData.message)) || null;
+      throw new Error(serverMsg || `HTTP ${response.status}: ${response.statusText}`);
     }
     return response;
   },

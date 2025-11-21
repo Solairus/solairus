@@ -57,6 +57,7 @@ export default function VaultBalanceCard({
   const networkColorClass = useMemo(() => {
     return networkLabel === "Mainnet" ? "text-green-400" : networkLabel === "Testnet" ? "text-orange-400" : "text-cyan-400";
   }, [networkLabel]);
+  const isDevEnv = useMemo(() => (import.meta.env.VITE_ENV ?? '').toString().toLowerCase().trim() === 'dev', []);
 
   // Read bonus balance from auth user (micro-USDT -> display USD)
   const bonusBalance = useMemo(() => {
@@ -168,29 +169,31 @@ export default function VaultBalanceCard({
               </button>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className={`text-xs font-medium ${networkColorClass}`}>{networkLabel}</span>
-              <button
-                aria-label="Switch network"
-                onClick={async () => {
-                  const nextLabel = networkLabel === "Mainnet" ? "Devnet" : "Mainnet";
-                  const res = await Swal.fire({
-                    title: "Switch Network?",
-                    text: `Switch from ${networkLabel} to ${nextLabel}?`,
-                    icon: "warning",
-                    showCancelButton: true,
-                    confirmButtonText: "Yes, switch",
-                    cancelButtonText: "Cancel",
-                  });
-                  if (res.isConfirmed) {
-                    await switchNetwork(0);
-                  }
-                }}
-                className="hover:opacity-100 opacity-80 transition"
-              >
-                <RefreshCcw className="w-4 h-4" />
-              </button>
-            </div>
+            {isDevEnv && (
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-medium ${networkColorClass}`}>{networkLabel}</span>
+                <button
+                  aria-label="Switch network"
+                  onClick={async () => {
+                    const nextLabel = networkLabel === "Mainnet" ? "Devnet" : "Mainnet";
+                    const res = await Swal.fire({
+                      title: "Switch Network?",
+                      text: `Switch from ${networkLabel} to ${nextLabel}?`,
+                      icon: "warning",
+                      showCancelButton: true,
+                      confirmButtonText: "Yes, switch",
+                      cancelButtonText: "Cancel",
+                    });
+                    if (res.isConfirmed) {
+                      await switchNetwork(0);
+                    }
+                  }}
+                  className="hover:opacity-100 opacity-80 transition"
+                >
+                  <RefreshCcw className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
 
         {/* Balance label */}

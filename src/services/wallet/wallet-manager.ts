@@ -104,7 +104,7 @@ export class WalletManager {
   }
 
   private selectSolanaNetwork() {
-    const clusterRaw = (import.meta.env.VITE_SOLANA_CLUSTER ?? "devnet").toLowerCase()
+    const clusterRaw = (import.meta.env.VITE_SOLANA_CLUSTER ?? "mainnet-beta").toLowerCase()
     const cluster: ClusterName = clusterRaw === "mainnet" || clusterRaw === "mainnet-beta"
       ? "mainnet-beta"
       : clusterRaw === "testnet"

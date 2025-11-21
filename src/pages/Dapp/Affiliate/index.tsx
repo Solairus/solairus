@@ -102,6 +102,19 @@ export default function AffiliatePage() {
       if (!account || !anchorProvider) throw new Error("Wallet not connected");
       if (!signTransaction) throw new Error("Wallet does not support transaction signing");
 
+      // Ensure backend auth session exists before calling protected endpoint
+      try {
+        const hasJwt = (() => {
+          try { return Boolean(localStorage.getItem('solairus.jwt')); } catch { return false; }
+        })();
+        if (!hasJwt) {
+          const { AuthService } = await import('@/services/auth/auth-service');
+          await AuthService.authenticateWallet(account);
+        }
+      } catch {
+        // proceed; server will respond clearly if unauthorized
+      }
+
       const availableMicro = Number(summary?.available_to_withdraw_micro ?? summary?.bonus_balance_micro ?? 0);
       const requestedUsd = Number(withdrawAmount);
       if (!Number.isFinite(requestedUsd) || requestedUsd <= 0) {

@@ -47,7 +47,7 @@ export const CONFIG = {
   ENV: {
     IS_DEV: import.meta.env.DEV,
     IS_PROD: import.meta.env.PROD,
-    CLUSTER: import.meta.env.VITE_SOLANA_CLUSTER || 'devnet',
+  CLUSTER: import.meta.env.VITE_SOLANA_CLUSTER || 'mainnet-beta',
   },
 } as const;
 

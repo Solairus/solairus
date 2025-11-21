@@ -125,7 +125,7 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
           const overrideCluster = (() => {
             try { return (localStorage.getItem("solana_cluster_override") ?? "").toLowerCase() } catch { return "" }
           })()
-          const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? "devnet").toLowerCase()
+          const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? "mainnet-beta").toLowerCase()
           const effectiveCluster = (overrideCluster || envCluster)
           const normalizedCluster = effectiveCluster.startsWith("mainnet")
             ? "mainnet-beta"
@@ -181,7 +181,7 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
         const overrideCluster = (() => {
           try { return (localStorage.getItem("solana_cluster_override") ?? "").toLowerCase() } catch { return "" }
         })()
-        const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? "devnet").toLowerCase()
+        const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? "mainnet-beta").toLowerCase()
         const effectiveCluster = overrideCluster || envCluster
         const normalizedCluster = effectiveCluster.startsWith("mainnet")
           ? "mainnet-beta"
@@ -416,7 +416,7 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
 
   const switchNetwork = async (_targetChainId: number) => {
     try {
-      const current = (import.meta.env.VITE_SOLANA_CLUSTER ?? "devnet").toLowerCase()
+      const current = (import.meta.env.VITE_SOLANA_CLUSTER ?? "mainnet-beta").toLowerCase()
       const override = (() => {
         try {
           return (localStorage.getItem("solana_cluster_override") ?? "").toLowerCase()
@@ -474,7 +474,7 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
         return ""
       }
     })()
-    const clusterStr = (override || (import.meta.env.VITE_SOLANA_CLUSTER ?? "devnet")).toLowerCase()
+    const clusterStr = (override || (import.meta.env.VITE_SOLANA_CLUSTER ?? "mainnet-beta")).toLowerCase()
     const isMainnet = clusterStr === "mainnet" || clusterStr === "mainnet-beta"
     const isTestnet = clusterStr === "testnet"
     return {
