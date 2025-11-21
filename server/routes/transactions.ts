@@ -235,8 +235,21 @@ async function fetchPaymentEventForSignature(
   if (!tx || !tx.meta) return null
   const parser = new EventParser(programKey, coder)
   const logs = tx.meta.logMessages ?? []
+  // Determine transaction type by signature from DB (no API changes)
+  let desiredEvent: 'PaymentMade' | 'RewardsClaimed' | 'any' = 'any'
+  try {
+    const found = await query<{ type: TransactionType; order_id: string }>(
+      'SELECT type, order_id FROM transactions WHERE signature = $1 LIMIT 1',
+      [signature]
+    )
+    if (found.rows.length) {
+      const t = found.rows[0].type
+      desiredEvent = t === 'license_activation' || t === 'agent_activation' ? 'PaymentMade' : 'RewardsClaimed'
+    }
+  } catch {}
   for (const event of parser.parseLogs(logs)) {
-    if (event.name !== 'PaymentMade') continue
+    if (desiredEvent !== 'any' && event.name !== desiredEvent) continue
+    if (desiredEvent === 'any' && !(event.name === 'PaymentMade' || event.name === 'RewardsClaimed')) continue
     const memoField = event.data?.memo
     let memo: string | undefined
     if (typeof memoField === 'string') memo = memoField
@@ -776,7 +789,7 @@ router.post('/transactions/pending/resolve', async (req: Request, res: Response)
       // If signature exists, reuse shared verifier
       if (record.signature) {
         await verifyAndProcessTransaction(connection, record, {
-          requireOrderIdMatch: record.type === 'license_activation' || record.type === 'agent_activation',
+          requireOrderIdMatch: true,
         })
         continue
       }
