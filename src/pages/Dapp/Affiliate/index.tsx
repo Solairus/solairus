@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
@@ -25,8 +26,17 @@ export default function AffiliatePage() {
   // Helper function to format USDT micro amounts safely
   const formatUsdtMicro = (micro?: number | string) => {
     const n = Number(micro ?? 0);
-    const usd = n / 1_000_000;
-    return usd.toFixed(2);
+    const usd = Math.floor(n) / 1_000_000;
+    return usd.toFixed(6);
+  };
+
+  const formatMicroExact = (micro?: number | string | bigint) => {
+    const m = BigInt(String(micro ?? 0));
+    const sign = m < 0n ? "-" : "";
+    const abs = m < 0n ? -m : m;
+    const whole = abs / 1_000_000n;
+    const frac = abs % 1_000_000n;
+    return `${sign}${whole.toString()}.${frac.toString().padStart(6, "0")}`;
   };
 
   const { account } = useWalletConnection();
@@ -186,6 +196,19 @@ export default function AffiliatePage() {
     }
   };
 
+  // Compute and fill the maximum withdrawable amount safely
+  const handleFillMax = useCallback(() => {
+    const availableMicroNum = Number(summary?.available_to_withdraw_micro ?? summary?.bonus_balance_micro ?? 0);
+    const availableMicro = BigInt(Math.max(0, Math.floor(availableMicroNum)));
+    const feeBpsRaw = Number((import.meta.env as any).VITE_WITHDRAWAL_FEE_BPS ?? 0);
+    const feeBps = Number.isFinite(feeBpsRaw) ? Math.max(0, Math.floor(feeBpsRaw)) : 0;
+    const feeMicro = (availableMicro * BigInt(feeBps)) / 10_000n;
+    const netMicro = availableMicro - feeMicro;
+    const maxStr = formatMicroExact(netMicro);
+    setWithdrawAmount(maxStr);
+    toast.info(`Max amount filled: ${maxStr} USDT`);
+  }, [summary?.available_to_withdraw_micro, summary?.bonus_balance_micro]);
+
   if (!account) {
     return (
       <div className="space-y-4">
@@ -258,7 +281,10 @@ export default function AffiliatePage() {
                 </div>
                 <div className="flex-1">
                   <p className="text-xs text-muted-foreground">Total Earned</p>
-                  <p className="text-sm font-bold">
+                  <p
+                    className="text-sm font-bold"
+                    style={{ fontSize: `clamp(0.95rem, calc(1.4rem - ${String(formatUsdtMicro(summary?.total_earnings_affiliate_micro ?? 0)).length} * 0.03rem), 1.25rem)`, lineHeight: 1.2 }}
+                  >
                     ${formatUsdtMicro(summary?.total_earnings_affiliate_micro ?? 0)}
                   </p>
                 </div>
@@ -274,7 +300,10 @@ export default function AffiliatePage() {
                 </div>
                 <div className="flex-1">
                   <p className="text-xs text-muted-foreground">Available</p>
-                  <p className="text-sm font-bold">
+                  <p
+                    className="text-sm font-bold"
+                    style={{ fontSize: `clamp(0.95rem, calc(1.4rem - ${String(formatUsdtMicro(summary?.available_to_withdraw_micro ?? summary?.bonus_balance_micro ?? 0)).length} * 0.03rem), 1.25rem)`, lineHeight: 1.2 }}
+                  >
                     ${formatUsdtMicro(summary?.available_to_withdraw_micro ?? summary?.bonus_balance_micro ?? 0)}
                   </p>
                 </div>
@@ -290,7 +319,10 @@ export default function AffiliatePage() {
                 </div>
                 <div className="flex-1">
                   <p className="text-xs text-muted-foreground">Total Withdrawn</p>
-                  <p className="text-sm font-bold">
+                  <p
+                    className="text-sm font-bold"
+                    style={{ fontSize: `clamp(0.95rem, calc(1.4rem - ${String(formatUsdtMicro(summary?.total_withdrawn_micro ?? 0)).length} * 0.03rem), 1.25rem)`, lineHeight: 1.2 }}
+                  >
                     ${formatUsdtMicro(summary?.total_withdrawn_micro ?? 0)}
                   </p>
                 </div>
@@ -335,17 +367,27 @@ export default function AffiliatePage() {
                     value={withdrawAmount}
                     onChange={(e) => setWithdrawAmount(e.target.value)}
                     max={availableDisplay}
-                    step="0.01"
+                    step="0.000001"
                     className="flex-1 px-3 py-2 bg-background border border-border rounded-md text-sm"
                   />
-                  <Button
-                    onClick={() => setWithdrawAmount(availableDisplay)}
-                    variant="outline"
-                    size="sm"
-                    className="text-xs"
-                  >
-                    Max
-                  </Button>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          onClick={handleFillMax}
+                          variant="outline"
+                          size="sm"
+                          className="text-xs"
+                          aria-label="Fill maximum withdrawable"
+                        >
+                          Max
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs">
+                        Withdraw full available balance (after any fees)
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
                 <div className="flex gap-2">
                   <Button
