@@ -381,6 +381,21 @@ router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Requ
       memo: parsed.data.memo,
       referencePubkey,
     })
+    // Pre-simulate transaction to avoid sending a failing tx to the client
+    try {
+      const { getCurrentCluster } = await import('../lib/rpc-manager')
+      if (getCurrentCluster() !== 'mainnet-beta') {
+        return res.status(400).json({ error: 'Cluster mismatch: expected mainnet-beta' })
+      }
+      const conn = getConnection()
+      const tx = Transaction.from(Buffer.from(built.txBase64, 'base64'))
+      const sim = await conn.simulateTransaction(tx, { sigVerify: false })
+      if (sim.value.err) {
+        return res.status(400).json({ error: 'simulation_failed', logs: sim.value.logs || [], message: String(sim.value.err) })
+      }
+    } catch (simErr) {
+      return res.status(400).json({ error: 'pre_simulation_error', message: simErr instanceof Error ? simErr.message : String(simErr) })
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
     return res.status(400).json({ error: msg })
@@ -393,6 +408,20 @@ router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Requ
     const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], new PublicKey(PROGRAM_ID))
     const cfgInfo = await connection.getAccountInfo(configPda, 'confirmed')
     if (!cfgInfo) return res.status(400).json({ error: 'Config PDA not initialized on-chain' })
+    // Backend authority sanity check: decode config and compare to server signer
+    try {
+      const { BorshCoder } = await import('@coral-xyz/anchor')
+      const coder = new BorshCoder(solairusPayIdl as any)
+      const decoded = coder.accounts.decode('Config', cfgInfo.data)
+      const backendAuthOnChain = new PublicKey(decoded.backend_authority)
+      const { getAuthorityKeypair } = await import('../lib/authority')
+      const backendSigner = getAuthorityKeypair().publicKey
+      if (!backendAuthOnChain.equals(backendSigner)) {
+        return res.status(400).json({ error: 'Backend authority mismatch with config PDA' })
+      }
+    } catch (e) {
+      return res.status(400).json({ error: 'Failed to validate backend authority in config' })
+    }
     // Decode backend authority on-chain and compare to env
     // Decode backend authority on-chain (for internal comparison if needed)
     // const onChainBackend = new PublicKey(cfgInfo.data.slice(8, 8 + 32)).toBase58()
@@ -513,6 +542,21 @@ router.post('/admin/buckets/:bucketType/withdraw/init', requireAdmin, async (req
       memo: parsed.data.memo,
       referencePubkey,
     })
+    // Pre-simulate transaction to avoid sending a failing tx to the client
+    try {
+      const { getCurrentCluster } = await import('../lib/rpc-manager')
+      if (getCurrentCluster() !== 'mainnet-beta') {
+        return res.status(400).json({ error: 'Cluster mismatch: expected mainnet-beta' })
+      }
+      const conn = getConnection()
+      const tx = Transaction.from(Buffer.from(built.txBase64, 'base64'))
+      const sim = await conn.simulateTransaction(tx, { sigVerify: false })
+      if (sim.value.err) {
+        return res.status(400).json({ error: 'simulation_failed', logs: sim.value.logs || [], message: String(sim.value.err) })
+      }
+    } catch (simErr) {
+      return res.status(400).json({ error: 'pre_simulation_error', message: simErr instanceof Error ? simErr.message : String(simErr) })
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
     return res.status(400).json({ error: msg })
