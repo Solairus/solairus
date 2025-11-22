@@ -129,7 +129,7 @@ export class IntegratedAdminService {
   ): Promise<OperationResult> {
     const context: ErrorContext = {
       operation: 'activate_license_manual',
-      userPubkey: request.userPubkey.toString(),
+      userPubkey: request.userPubkey, // Already a string
       timestamp: new Date(),
       attemptCount: 1,
     };
@@ -161,7 +161,7 @@ export class IntegratedAdminService {
           });
         },
         {
-          id: `manual_license_${request.userPubkey.toString()}_${Date.now()}`,
+          id: `manual_license_${request.userPubkey}_${Date.now()}`,
           confirmationOptions: {
             timeout: options?.timeout || 60000,
             commitment: 'confirmed',

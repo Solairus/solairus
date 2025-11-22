@@ -59,8 +59,8 @@ export interface UserLicenseStatus {
  * Manual License Activation Request
  */
 export interface ManualLicenseActivationRequest {
-  userPubkey: PublicKey;
-  sponsorPubkey: PublicKey;
+  userPubkey: string; // Changed from PublicKey to string for backend operation
+  sponsorPubkey: string; // Changed from PublicKey to string for backend operation
   durationDays: number;
   extendExisting: boolean;
 }

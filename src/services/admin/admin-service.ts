@@ -8,8 +8,8 @@ import { ApiClient, API_CONFIG } from '@/config/service-endpoints';
  */
 export interface ManualLicenseActivationParams {
   provider: anchor.AnchorProvider;
-  userPubkey: PublicKey;
-  sponsorPubkey: PublicKey;
+  userPubkey: string; // Changed from PublicKey to string for backend operation
+  sponsorPubkey: string; // Changed from PublicKey to string for backend operation
   durationDays: number;
   extendExisting: boolean;
   authority: PublicKey;
@@ -20,8 +20,8 @@ export interface ManualLicenseActivationParams {
  */
 export interface ManualLicenseActivationResult {
   txSignature: string;
-  userPubkey: PublicKey;
-  sponsorPubkey: PublicKey;
+  userPubkey: string; // Changed from PublicKey to string for backend operation
+  sponsorPubkey: string; // Changed from PublicKey to string for backend operation
   durationDays: number;
   licenseExpiresAt: Date;
   wasNewUser: boolean;
@@ -110,8 +110,10 @@ export class AdminService {
       throw new Error('Duration days must be greater than 0');
     }
 
+    // Backend operation - addresses are passed as strings
+    // Let the backend handle validation and conversion
     const base = API_CONFIG.getBaseUrl();
-    const url = `${base}/users/${userPubkey.toBase58()}/license`;
+    const url = `${base}/users/${userPubkey}/license`;
     const resp = await ApiClient.post(url, { durationDays, extendExisting });
     if (!resp.ok) {
       const text = await resp.text();
@@ -120,10 +122,12 @@ export class AdminService {
     const payload = await resp.json() as { success: boolean; new_expiration: string; transaction_id?: number };
     const licenseExpiresAt = new Date(payload.new_expiration);
 
+    // Backend operation - no PublicKey validation needed
+    // Return strings to maintain consistency with backend approach
     return {
       txSignature: payload.transaction_id ? `BACKEND-LICENSE-${payload.transaction_id}` : 'BACKEND-LICENSE',
-      userPubkey,
-      sponsorPubkey,
+      userPubkey: userPubkey as string, // Pass as string, no conversion
+      sponsorPubkey: sponsorPubkey as string, // Pass as string, no conversion
       durationDays,
       licenseExpiresAt,
       wasNewUser: false,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,7 +12,8 @@ import { ApiClient, API_CONFIG } from '@/config/service-endpoints';
 export interface UserProfile {
   credit_balance?: number;
   principal_balance?: number;
-  ref_by?: string;
+  ref_by?: string; // Database ID (deprecated - use sponsor_address instead)
+  sponsor_address?: string; // Wallet address of the sponsor
   license_status?: 'active' | 'expired' | 'near-expiry' | 'none';
   license_expiration?: string;
   days_remaining?: number;
@@ -26,7 +27,7 @@ export interface UserInfo {
   profile?: UserProfile;
   balance?: number; // Credit balance in USDT (not micro)
   principalBalance?: number; // Principal balance in USDT
-  sponsor?: string; // Public key as string
+  sponsor?: string; // Wallet address of sponsor (from sponsor_address field)
   licenseStatus?: 'active' | 'expired' | 'near-expiry' | 'none';
   licenseExpiresAt?: string; // ISO date string
   daysRemaining?: number;
@@ -47,6 +48,7 @@ export function UserLookup({ onUserFound, showCreateOption = false, className, m
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentSponsorAddress, setCurrentSponsorAddress] = useState<string>('');
 
   const validateAddress = (address: string): boolean => {
     try {
@@ -56,6 +58,13 @@ export function UserLookup({ onUserFound, showCreateOption = false, className, m
       return false;
     }
   };
+
+  // Update sponsor address when userInfo changes
+  useEffect(() => {
+    setCurrentSponsorAddress(userInfo?.sponsor || '');
+  }, [userInfo?.sponsor]);
+
+
 
   const lookupUser = async () => {
     if (!userAddress.trim()) {
@@ -83,7 +92,7 @@ export function UserLookup({ onUserFound, showCreateOption = false, className, m
         profile: userData,
         balance: userData?.credit_balance || 0,
         principalBalance: userData?.principal_balance || 0,
-        sponsor: userData?.ref_by,
+        sponsor: userData?.sponsor_address, // Use sponsor_address instead of ref_by
         licenseStatus: userData?.license_status,
         licenseExpiresAt: userData?.license_expiration,
         daysRemaining: userData?.days_remaining,
@@ -301,11 +310,11 @@ export function UserLookup({ onUserFound, showCreateOption = false, className, m
                 ) : null}
 
                 {/* Sponsor Information */}
-                {(userInfo.sponsor ?? '').toString().trim() !== '' && (
+                {currentSponsorAddress.trim() !== '' && (
                   <div className="flex items-center justify-between">
                     <span className="text-gray-400 text-sm">Sponsor:</span>
                     <span className="text-xs text-gray-300 font-mono">
-                      {mode === 'sponsor' ? userInfo.sponsor.toString() : `${userInfo.sponsor.toString().slice(0, 8)}...${userInfo.sponsor.toString().slice(-8)}`}
+                      {mode === 'sponsor' ? currentSponsorAddress : `${currentSponsorAddress.slice(0, 8)}...${currentSponsorAddress.slice(-8)}`}
                     </span>
                   </div>
                 )}

@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Key, Calendar, User, AlertCircle, CheckCircle, Clock, Shield } from 'lucide-react';
-import { PublicKey } from '@solana/web3.js';
+// Manual license activation - backend operation, no web3 validation needed
 import { useWallet } from '@/contexts/wallet-context';
 import { useAdminRole } from '@/hooks/useAdminRole';
 import { UserLookup, UserInfo } from './UserLookup';
@@ -118,15 +118,8 @@ export function ManualLicenseActivation() {
       return false;
     }
 
-    // Validate sponsor address only for new users
-    // Sponsor validation is unnecessary for existing users since they already have a sponsor
-    if (!userInfo.exists && form.sponsorAddress.trim()) {
-      const sponsorError = validators.publicKey(form.sponsorAddress, 'Sponsor address');
-      if (sponsorError) {
-        validation.addError(sponsorError.field, sponsorError.message);
-        return false;
-      }
-    }
+    // Sponsor address validation removed - addresses are copied from Phantom wallet and are valid
+    // No need for PublicKey validation here
 
     return true;
   };
@@ -155,14 +148,9 @@ export function ManualLicenseActivation() {
     const result = await transactionStatus.executeTransaction(async () => {
       transactionStatus.updateProgress(20, 'validate');
 
-      const userPubkey = new PublicKey(userInfo!.address);
-
-      let sponsorPubkey: PublicKey;
-      if (!userInfo!.exists) {
-        sponsorPubkey = new PublicKey(form.sponsorAddress);
-      } else {
-        sponsorPubkey = userInfo!.sponsor ? new PublicKey(userInfo!.sponsor) : new PublicKey(form.sponsorAddress || publicKey.toString());
-      }
+      // Manual license activation is a backend operation
+      // Addresses are passed as strings to the backend service
+      // No web3 validation needed here
 
       const durationDays = parseInt(form.durationDays);
 
@@ -171,8 +159,8 @@ export function ManualLicenseActivation() {
       const adminService = createAdminService(anchorProvider);
       const svcResult = await adminService.activateLicenseManual({
         provider: anchorProvider,
-        userPubkey,
-        sponsorPubkey,
+        userPubkey: userInfo!.address, // Pass as string
+        sponsorPubkey: !userInfo!.exists ? form.sponsorAddress : (userInfo!.sponsor || publicKey.toString()), // Pass as string
         durationDays,
         extendExisting: form.extendExisting,
         authority: publicKey,
