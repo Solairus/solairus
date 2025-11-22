@@ -118,8 +118,9 @@ export function ManualLicenseActivation() {
       return false;
     }
 
-    // Validate sponsor address if provided
-    if (form.sponsorAddress.trim()) {
+    // Validate sponsor address only for new users
+    // Sponsor validation is unnecessary for existing users since they already have a sponsor
+    if (!userInfo.exists && form.sponsorAddress.trim()) {
       const sponsorError = validators.publicKey(form.sponsorAddress, 'Sponsor address');
       if (sponsorError) {
         validation.addError(sponsorError.field, sponsorError.message);
