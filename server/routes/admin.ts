@@ -388,7 +388,8 @@ router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Requ
 
   // Preflight: config PDA and vault funding
   try {
-    const connection = getConnection()
+    const { getWorkingConnection } = await import('../lib/rpc-manager')
+    const connection = await getWorkingConnection()
     const mint = new PublicKey(parsed.data.mintAddress)
     const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], new PublicKey(PROGRAM_ID))
     const cfgInfo = await connection.getAccountInfo(configPda, 'confirmed')

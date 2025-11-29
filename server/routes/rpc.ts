@@ -19,8 +19,8 @@ function collectEnvUrls(prefix: string): string[] {
 async function ping(url: string) {
   try {
     const conn = new Connection(url, 'confirmed')
-    const bh = await conn.getLatestBlockhash()
-    return { url, ok: true, blockhash: bh.blockhash }
+    const v = await conn.getVersion()
+    return { url, ok: true, version: v['solana-core'] || String(v) }
   } catch (e) {
     const msg = (e instanceof Error ? e.message : String(e)) || 'unknown'
     return { url, ok: false, error: msg }

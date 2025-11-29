@@ -1,6 +1,6 @@
 import { pool } from '../db'
 import type { Transaction } from '../types'
-import { getConnection } from '../lib/rpc-manager'
+import { getWorkingConnection } from '../lib/rpc-manager'
 import { PublicKey } from '@solana/web3.js'
 import solairusPayIdl from '../idl/solairus_pay.json'
 import { deriveReference, findSignatureByReference, verifyTokenDelta, finalizeRecovery, finalizeRefund } from './withdrawal_verifier'
@@ -31,7 +31,7 @@ export async function attemptExpiredBucketWithdrawalRefund(orderId: string): Pro
     const PROGRAM_ID = process.env.SOLAIRUS_PAY_PROGRAM_ID || (solairusPayIdl as { address?: string }).address!
     const referenceStr = (record.metadata && (record.metadata as any)['reference']) as string | undefined
     const reference = referenceStr ? new PublicKey(referenceStr) : deriveReference(orderId, PROGRAM_ID)
-    const conn = await getConnection()
+    const conn = await getWorkingConnection()
     const sig = await findSignatureByReference(conn, reference)
     if (sig) {
       const decimals = record.decimals || 6

@@ -20,6 +20,8 @@ class RpcSwitcher {
   private readonly HEALTH_CHECK_TIMEOUT = 5000 // 5 seconds
   private readonly CACHE_DURATION = 300000 // 5 minutes (increased from 1 minute)
   private readonly RATE_LIMIT_CACHE_DURATION = 60000 // 1 minute for rate limited endpoints
+  private readonly SELECT_TTL_MS = 60_000
+  private endpointCooldownUntil: Map<string, number> = new Map()
 
   constructor() {
     this.initializeEndpoints()
@@ -83,6 +85,7 @@ class RpcSwitcher {
     
     if (effectiveCluster.startsWith("mainnet")) return "mainnet-beta"
     if (effectiveCluster === "testnet") return "testnet"
+    if (effectiveCluster === "devnet") return "devnet"
     return "mainnet-beta"
   }
 
@@ -215,7 +218,7 @@ class RpcSwitcher {
   }
 
   public async getHealthyConnection(cluster: ClusterName): Promise<Connection> {
-    // Validate that we're connecting to the correct network
+    // Validate cluster
     const currentCluster = this.getCurrentCluster()
     if (cluster !== currentCluster) {
       console.warn(`⚠️ Requested ${cluster} but current network is ${currentCluster}. Using ${currentCluster} instead.`)
@@ -223,38 +226,31 @@ class RpcSwitcher {
     }
 
     const endpoints = this.currentEndpoints.get(cluster) || []
-    
-    if (endpoints.length === 0) {
-      throw new Error(`No RPC endpoints configured for ${cluster}`)
-    }
+    if (endpoints.length === 0) throw new Error(`No RPC endpoints configured for ${cluster}`)
 
-    // Check if we have a cached healthy connection - just return it without health check
-    const cachedConnection = this.activeConnections.get(cluster)
-    if (cachedConnection) {
-      console.log(`♻️ Reusing cached ${cluster} RPC connection: ${cachedConnection.rpcEndpoint}`)
-      return cachedConnection
-    }
+    // TTL reuse
+    const cached = this.activeConnections.get(cluster)
+    if (cached) return cached
 
-    // No cached connection - try endpoints in order without health checks
-    // We'll only discover if they're working when we actually use them
-    for (const endpoint of endpoints) {
+    const now = Date.now()
+    // Probe sequentially with lightweight call and short timeout
+    for (let i = 0; i < endpoints.length; i++) {
+      const ep = endpoints[i]
+      const cooldownUntil = this.endpointCooldownUntil.get(ep.url) || 0
+      if (now < cooldownUntil) continue
       try {
-        console.log(`🔗 Connecting to ${cluster}: ${endpoint.name}`)
-        const connection = new Connection(endpoint.url, {
-          commitment: 'confirmed',
-          httpHeaders: endpoint.headers,
-        })
-        this.activeConnections.set(cluster, connection)
-        
-        // this.showRpcNotification('success', `Connected to ${endpoint.name} (${cluster})`, cluster)
-        return connection
-      } catch (error) {
-        console.warn(`❌ Failed to create connection to ${endpoint.name}:`, error)
+        const conn = new Connection(ep.url, { commitment: 'confirmed', httpHeaders: ep.headers })
+        await withTimeout(conn.getVersion(), 1200)
+        this.activeConnections.set(cluster, conn)
+        return conn
+      } catch (probeErr) {
+        const estr = String(probeErr).toLowerCase()
+        if (estr.includes('402') || estr.includes('payment required') || estr.includes('out of cu')) {
+          this.endpointCooldownUntil.set(ep.url, now + 180_000)
+        }
         continue
       }
     }
-
-    // If we can't create any connections, show error and throw
     await this.showRpcFailureAlert(cluster, endpoints)
     throw new Error(`Failed to create connection to any RPC endpoint for ${cluster}`)
   }
@@ -276,7 +272,7 @@ class RpcSwitcher {
       }
     }
 
-    // Try endpoints starting from the next one - no health checks, just try to connect
+    // Try endpoints starting from the next one - probe lightly before selecting
     const startIndex = (currentIndex + 1) % endpoints.length
     for (let i = 0; i < endpoints.length; i++) {
       const index = (startIndex + i) % endpoints.length
@@ -286,17 +282,16 @@ class RpcSwitcher {
       if (index === currentIndex) continue
       
       try {
-        console.log(`🔄 Switching to: ${endpoint.name}`)
-        const connection = new Connection(endpoint.url, {
-          commitment: 'confirmed',
-          httpHeaders: endpoint.headers,
-        })
+        const connection = new Connection(endpoint.url, { commitment: 'confirmed', httpHeaders: endpoint.headers })
+        await withTimeout(connection.getVersion(), 1200)
         this.activeConnections.set(cluster, connection)
-        
-        // this.showRpcNotification('info', `Switched to ${endpoint.name}`, cluster)
         return connection
       } catch (error) {
         console.warn(`❌ Failed to switch to ${endpoint.name}:`, error)
+        const estr = String(error).toLowerCase()
+        if (estr.includes('402') || estr.includes('payment required') || estr.includes('out of cu')) {
+          this.endpointCooldownUntil.set(endpoint.url, Date.now() + 180_000)
+        }
         continue
       }
     }
@@ -452,6 +447,7 @@ export async function handleRpcError(error: unknown, cluster: ClusterName = 'mai
   
   // Check for various RPC failure conditions that warrant switching
   const shouldSwitch = 
+    errorStr.includes('402') || errorStr.includes('payment required') || errorStr.includes('out of cu') || // Plan/CU limits
     errorStr.includes('429') || errorStr.includes('too many requests') || // Rate limits
     errorStr.includes('403') || errorStr.includes('forbidden') || // Access denied
     errorStr.includes('plan upgrade') || errorStr.includes('requires plan') || // Plan limits (Chainstack)
@@ -482,4 +478,12 @@ export async function handleRpcError(error: unknown, cluster: ClusterName = 'mai
   
   // For other errors, just throw the original error
   throw error
+}
+
+// Internal timeout helper
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const to = setTimeout(() => reject(new Error('timeout')), ms)
+    p.then((v) => { clearTimeout(to); resolve(v) }).catch((e) => { clearTimeout(to); reject(e) })
+  })
 }

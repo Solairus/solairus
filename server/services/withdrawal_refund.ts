@@ -16,7 +16,7 @@
 import { pool, query } from '../db'
 import type { Transaction } from '../types'
 import { applyBalanceBucketChange, getOrCreateBalanceId } from './balance'
-import { getConnection } from '../lib/rpc-manager'
+import { getWorkingConnection } from '../lib/rpc-manager'
 import { PublicKey } from '@solana/web3.js'
 import solairusPayIdl from '../idl/solairus_pay.json'
 import { deriveReference, findSignatureByReference, verifyTokenDelta, finalizeRecovery, finalizeRefund } from './withdrawal_verifier'
@@ -58,7 +58,7 @@ export async function attemptExpiredWithdrawalRefund(orderId: string): Promise<{
     const PROGRAM_ID = process.env.SOLAIRUS_PAY_PROGRAM_ID || (solairusPayIdl as { address?: string }).address!
     const referenceStr = (record.metadata && (record.metadata as Record<string, unknown>)['reference']) as string | undefined
     const reference = referenceStr ? new PublicKey(referenceStr) : deriveReference(orderId, PROGRAM_ID)
-    const conn = await getConnection()
+    const conn = await getWorkingConnection()
     const sig = await findSignatureByReference(conn, reference)
     if (sig) {
       const decimals = record.decimals || 6
@@ -83,9 +83,12 @@ export async function attemptExpiredWithdrawalRefund(orderId: string): Promise<{
 
     // Resolve or create balance row and credit the provisional debit back (single final action)
     const balanceId = await getOrCreateBalanceId(client, user.id)
-    const decimals = record.decimals || 6
-    const amtNum = typeof record.amount === 'string' ? Number(record.amount) : (record.amount as unknown as number)
-    const amountMicro = BigInt(Math.round(amtNum * Math.pow(10, decimals)))
+    // Refund into balances uses micro units exactly as stored in transactions.amount
+    // Do NOT rescale by decimals; transactions.amount is already micro (integer)
+    const rawAmount = record.amount as unknown
+    const amountMicro = typeof rawAmount === 'number'
+      ? BigInt(Math.round(rawAmount))
+      : BigInt(String(rawAmount))
     await applyBalanceBucketChange(
       client,
       balanceId,

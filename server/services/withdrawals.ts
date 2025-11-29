@@ -20,7 +20,7 @@
 import { PublicKey, Transaction, TransactionInstruction, SystemProgram, ParsedAccountData } from '@solana/web3.js'
 import solairusPayIdl from '../idl/solairus_pay.json'
 import { getAuthorityKeypair } from '../lib/authority'
-import { getConnection } from '../lib/rpc-manager'
+import { getWorkingConnection } from '../lib/rpc-manager'
 
 // Program IDs and constants from IDL
 const PROGRAM_ID = new PublicKey(
@@ -78,8 +78,8 @@ export async function buildClaimRewardsTx(params: {
   memo?: string
   referencePubkey: string
 }): Promise<{ referencePubkey: string; txBase64: string; ttlMs: number }> {
-  // Use RPC manager for automatic failover
-  const connection = getConnection()
+  // Preflight-select a working RPC connection
+  const connection = await getWorkingConnection()
 
   const initiator = new PublicKey(params.initiatorWallet)
   const recipient = new PublicKey(params.recipient)

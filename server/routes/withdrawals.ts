@@ -15,7 +15,7 @@ import { PublicKey } from '@solana/web3.js'
 import { z } from 'zod'
 import crypto from 'crypto'
 import solairusPayIdl from '../idl/solairus_pay.json'
-import { getConnection } from '../lib/rpc-manager'
+import { getWorkingConnection } from '../lib/rpc-manager'
 import { query, pool } from '../db'
 import { buildClaimRewardsTx } from '../services/withdrawals'
 
@@ -75,7 +75,7 @@ router.post('/withdrawals/init', async (req: Request, res: Response) => {
 
   // Preflight: config authority and vault funding
   try {
-    const connection = getConnection()
+    const connection = await getWorkingConnection()
     const mint = new PublicKey(parsed.data.mintAddress)
     const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], new PublicKey(PROGRAM_ID))
     const cfgInfo = await connection.getAccountInfo(configPda, 'confirmed')

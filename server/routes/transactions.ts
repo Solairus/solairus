@@ -416,7 +416,8 @@ async function createTransactionHandler(req: Request, res: Response) {
       record.id,
     ])
 
-    const connection = getConnection()
+    const { getWorkingConnection } = await import('../lib/rpc-manager')
+    const connection = await getWorkingConnection()
     const statusResp = await connection.getSignatureStatuses([record.signature], { searchTransactionHistory: true })
     const status = statusResp.value[0]
     const isConfirmed = status && !status.err && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')
@@ -502,7 +503,8 @@ router.post('/transactions/verify', async (req: Request, res: Response) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
 
   const signature = parsed.data.signature
-  const connection = getConnection()
+  const { getWorkingConnection } = await import('../lib/rpc-manager')
+  const connection = await getWorkingConnection()
 
   // Find record by signature
   const { rows } = await query<Transaction>('SELECT * FROM transactions WHERE signature = $1', [signature])
@@ -777,7 +779,8 @@ router.post('/transactions/pending/resolve', async (req: Request, res: Response)
     if (!pending.rows.length) return res.status(200).end()
 
     // Base connection for verification path; recovery calls rotate RPCs
-    const connection = getConnection()
+    const { getWorkingConnection } = await import('../lib/rpc-manager')
+    const connection = await getWorkingConnection()
     const solairusPayProgramId =
       process.env.SOLAIRUS_PAY_PROGRAM_ID ?? (solairusPayIdl as { address?: string }).address ?? ''
 
@@ -1055,7 +1058,8 @@ router.get('/transactions/:orderId([0-9a-fA-F-]{36})', async (req: Request, res:
       const m = record.metadata as Record<string, unknown> | null
       const ref = m && (m['reference'] as string | undefined)
       if (ref) {
-        const connection = getConnection()
+        const { getWorkingConnection } = await import('../lib/rpc-manager')
+        const connection = await getWorkingConnection()
         const refPub = new PublicKey(ref)
         // Search recent signatures for the reference account
         const sigs = await connection.getSignaturesForAddress(refPub, { limit: 25 })
@@ -1181,7 +1185,8 @@ async function createOrResumeLicenseActivationHandler(req: Request, res: Respons
   }
 
   const initiator = parsed.data.initiatorWallet
-  const connection = getConnection()
+  const { getWorkingConnection } = await import('../lib/rpc-manager')
+  const connection = await getWorkingConnection()
 
   // Check for existing pending transactions (max 1 for license activation)
   const pendingCheck = await checkExistingPendingTransactions('license_activation', initiator, 1)

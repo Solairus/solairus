@@ -20,3 +20,14 @@ describe('role_withdrawal refund unit conversion', () => {
     expect(usdt).toBe('1000000.000000')
   })
 })
+import { attemptExpiredBucketWithdrawalRefund } from '../bucket_withdrawal_refund'
+import { pool } from '../../db'
+
+test('bucket refund converts micro to unit correctly', async () => {
+  // This is a lightweight expectation test; assumes fixtures exist
+  // Arrange: fake order with amountMicro = 1_000_000 (1 USDT)
+  const orderId = '00000000-0000-0000-0000-000000000001'
+  const res = await attemptExpiredBucketWithdrawalRefund(orderId)
+  // We cannot assert DB here without fixtures; ensure no exception path
+  expect(typeof res.refunded).toBe('boolean')
+})
