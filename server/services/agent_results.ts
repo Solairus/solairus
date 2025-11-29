@@ -1,15 +1,25 @@
 import { pool } from '../db'
 import crypto from 'crypto'
 
-const MAX_HIT_PROB = Number(process.env.AGENT_MAX_HIT_PROB ?? '0.10')
+const MAX_HIT_PROB = Number(process.env.AGENT_MAX_HIT_PROB ?? '0.05')
+const MIN_HIT_PROB = Number(process.env.AGENT_MIN_HIT_PROB ?? '0.65')
 
 function randomBp(min: number, max: number): number {
-  // max has ~10% probability; other values uniform over [min, max-1]
   if (min >= max) return min
-  const p1000 = crypto.randomInt(0, 1000)
-  const p = p1000 / 1000
-  if (p < MAX_HIT_PROB) return max
-  return crypto.randomInt(min, max) // upper bound exclusive, so returns [min, max-1]
+  const pUnitsTotal = 10000
+  let minUnits = Math.round(MIN_HIT_PROB * pUnitsTotal)
+  const maxUnits = Math.round(MAX_HIT_PROB * pUnitsTotal)
+  let midUnits = pUnitsTotal - minUnits - maxUnits
+  const hasMid = (max - min) > 1
+  if (!hasMid) { minUnits += midUnits; midUnits = 0 }
+  const r = crypto.randomInt(0, pUnitsTotal)
+  if (r < minUnits) return min
+  if (r < minUnits + midUnits) {
+    const midCount = max - min - 1
+    const idx = crypto.randomInt(0, midCount)
+    return min + 1 + idx
+  }
+  return max
 }
 
 export async function runDailyAgentEarnings(): Promise<{ processed: number; credited: number; skipped: number }> {
@@ -37,7 +47,7 @@ export async function runDailyAgentEarnings(): Promise<{ processed: number; cred
 
       // Try to insert result for today (UTC); skip if already exists
       const ins = await client.query(
-        `INSERT INTO agent_results(agent_id, result_micro, bp_used, claimed)
+        `INSERT INTO agent_results(agent_id, result_micro, percent_bp, claimed)
          VALUES ($1, $2, $3, FALSE)
          ON CONFLICT (agent_id, (timezone('UTC', created_at)::date)) DO NOTHING`,
         [row.agent_id, resultMicro.toString(), bp]
