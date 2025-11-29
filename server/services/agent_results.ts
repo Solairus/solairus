@@ -37,10 +37,10 @@ export async function runDailyAgentEarnings(): Promise<{ processed: number; cred
 
       // Try to insert result for today (UTC); skip if already exists
       const ins = await client.query(
-        `INSERT INTO agent_results(agent_id, result_micro, claimed)
-         VALUES ($1, $2, FALSE)
+        `INSERT INTO agent_results(agent_id, result_micro, bp_used, claimed)
+         VALUES ($1, $2, $3, FALSE)
          ON CONFLICT (agent_id, (timezone('UTC', created_at)::date)) DO NOTHING`,
-        [row.agent_id, resultMicro.toString()]
+        [row.agent_id, resultMicro.toString(), bp]
       )
 
       if (ins.rowCount === 1) {
@@ -65,4 +65,3 @@ export async function runDailyAgentEarnings(): Promise<{ processed: number; cred
     client.release()
   }
 }
-
