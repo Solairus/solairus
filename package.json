@@ -14,7 +14,8 @@
     "test": "vitest --run",
     "test:watch": "vitest",
     "migrate": "node server/scripts/migrate.js",
-    "check-profile": "node scripts/check-user-profile-simple.mjs"
+    "check-profile": "node scripts/check-user-profile-simple.mjs",
+    "cron:agents": "tsx server/scripts/cron-agent-earnings.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

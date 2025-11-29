@@ -18,6 +18,7 @@ import { getAuthorityPublicKeyBase58 } from './lib/authority'
 import agentsRouter from './routes/agents'
 import adminRouter from './routes/admin'
 import rpcRouter from './routes/rpc'
+import { runDailyAgentEarnings } from './services/agent_results'
 
 const app = express()
 app.use(express.json())
@@ -70,6 +71,21 @@ app.use('/api', requireAuth, withdrawalsRouter)
 app.use('/api', requireAuth, agentsRouter)
 app.use('/api', requireAuth, adminRouter)
 app.use('/api', requireAuth, rpcRouter)
+
+// Secured cron trigger (optional): requires X-Cron-Secret header matching env CRON_SECRET
+app.post('/api/cron/agents/daily', async (req: Request, res: Response) => {
+  const secret = req.header('X-Cron-Secret') || req.header('x-cron-secret')
+  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  try {
+    const out = await runDailyAgentEarnings()
+    res.json({ ok: true, ...out })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Unknown error'
+    res.status(500).json({ error: msg })
+  }
+})
 
 // Start server
 const port = Number(process.env.PORT || 4000)
