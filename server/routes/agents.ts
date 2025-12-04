@@ -48,6 +48,16 @@ router.get('/agents/pnl-summary', async (req: Request, res: Response) => {
     )
     const totalWithdrawnMicro = BigInt((balRes.rows[0]?.total_earnings as unknown as string) ?? '0')
 
+    // Unclaimed agent_results sum (micro)
+    const unclaimedRes = await query<{ total: string }>(
+      `SELECT COALESCE(SUM(ar.result_micro), 0)::bigint AS total
+         FROM agent_results ar
+         JOIN agents a ON a.id = ar.agent_id
+        WHERE a.user_id = $1 AND ar.claimed = FALSE`,
+      [sub]
+    )
+    const unclaimedMicro = BigInt((unclaimedRes.rows[0]?.total as unknown as string) ?? '0')
+
     const maxWithdrawableMicro = totalDepositsMicro * 2n
     const remainingMicro = maxWithdrawableMicro > totalWithdrawnMicro ? maxWithdrawableMicro - totalWithdrawnMicro : 0n
 
@@ -85,6 +95,7 @@ router.get('/agents/pnl-summary', async (req: Request, res: Response) => {
       totalWithdrawn: toUsdString(totalWithdrawnMicro),
       maxWithdrawable: isPrivileged ? 'Unlimited' : toUsdString(maxWithdrawableMicro),
       remainingWithdrawable: isPrivileged ? 'Unlimited' : toUsdString(remainingMicro),
+      unclaimedAgentResults: toUsdString(unclaimedMicro),
       usagePercentage,
       limitReached,
       isPrivileged,
@@ -165,7 +176,7 @@ router.get('/agents/user/:userAddress', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Forbidden: wallet mismatch' })
     }
 
-    // Pull active agents for this user, including tier cap
+    // Pull active agents for this user, including tier cap and claimed/unclaimed stats
     const sql = `
       SELECT 
         a.id,
@@ -179,10 +190,14 @@ router.get('/agents/user/:userAddress', async (req: Request, res: Response) => {
         a.claimed_at,
         a.metadata,
         t.reward_cap_bp,
-        t.tier_name AS tier_name
+        t.tier_name AS tier_name,
+        COALESCE(SUM(CASE WHEN ar.claimed = TRUE THEN ar.result_micro ELSE 0 END), 0)::bigint AS total_claimed,
+        COALESCE(SUM(CASE WHEN ar.claimed = FALSE THEN ar.result_micro ELSE 0 END), 0)::bigint AS unclaimed_amount
       FROM agents a
       LEFT JOIN agent_tiers t ON t.id = a.tier_id
+      LEFT JOIN agent_results ar ON ar.agent_id = a.id
       WHERE a.user_id = $1 AND a.status = 'active'
+      GROUP BY a.id, t.reward_cap_bp, t.tier_name
       ORDER BY a.created_at DESC
     `
     const result = await query<{
@@ -198,17 +213,26 @@ router.get('/agents/user/:userAddress', async (req: Request, res: Response) => {
       reward_cap_bp: number | null
       tier_name: string | null
       claimed_at: string | null
+      total_claimed: string
+      unclaimed_amount: string
     }>(sql, [sub])
 
     const enriched = result.rows.map((row) => {
       const amountMicro = BigInt((row.amount as unknown as string) ?? '0')
       const earnedMicro = BigInt((row.total_earned as unknown as string) ?? '0')
+      const claimedMicro = BigInt((row.total_claimed as unknown as string) ?? '0')
+      const unclaimedMicro = BigInt((row.unclaimed_amount as unknown as string) ?? '0')
+
       const capBp = row.reward_cap_bp ?? 20000 // default 200% if tier missing
       const capPct = capBp / 100
 
-      const progressPctRaw = amountMicro > 0n ? (Number(earnedMicro) / Number(amountMicro)) * 100 : 0
-      const yield_cap_progress_pct = Math.min(progressPctRaw, capPct)
-      const yield_cap_reached = yield_cap_progress_pct >= capPct
+      // PnL Progress based on TOTAL EARNED (per user request)
+      const earnedProgressPctRaw = amountMicro > 0n ? (Number(earnedMicro) / Number(amountMicro)) * 100 : 0
+      const yield_cap_progress_pct = Math.min(earnedProgressPctRaw, capPct)
+
+      // Cap Reached based on TOTAL EARNED (actual contract logic)
+      // earnedProgressPctRaw already calculated above
+      const yield_cap_reached = earnedProgressPctRaw >= capPct
 
       // Cooldown computation: next claim after 24 hours from claimed_at
       const claimedAtTs = row.claimed_at ? new Date(row.claimed_at).getTime() : new Date(row.activated_at ?? row.created_at).getTime()
@@ -223,6 +247,8 @@ router.get('/agents/user/:userAddress', async (req: Request, res: Response) => {
         status: row.status,
         amount: Number(amountMicro) / 1_000_000,
         total_earned: Number(earnedMicro) / 1_000_000,
+        total_claimed: Number(claimedMicro) / 1_000_000,
+        unclaimed_amount: Number(unclaimedMicro) / 1_000_000,
         reward_cap_bp: capBp,
         yield_cap_progress_pct,
         yield_cap_reached,
@@ -349,3 +375,4 @@ router.post('/agents/activate', async (req: Request, res: Response) => {
 })
 
 export default router
+

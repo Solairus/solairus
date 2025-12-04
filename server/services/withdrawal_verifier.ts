@@ -10,7 +10,13 @@ export function deriveReference(orderId: string, programId: string): PublicKey {
 
 export async function findSignatureByReference(conn: Connection, ref: PublicKey): Promise<string | null> {
   const sigs = await conn.getSignaturesForAddress(ref, { limit: 20 })
-  if (sigs && sigs.length > 0) return sigs[0].signature
+  if (!sigs || sigs.length === 0) return null
+
+  // Iterate through all found signatures to find a successful one
+  for (const sigInfo of sigs) {
+    if (sigInfo.err) continue // Skip failed transactions
+    return sigInfo.signature
+  }
   return null
 }
 

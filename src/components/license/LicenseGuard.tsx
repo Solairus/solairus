@@ -1,10 +1,8 @@
 import React, { ReactNode } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
-import { useLicense } from "@/contexts/license-context";
 import { useWallet } from "@/contexts/wallet-context";
 import { Card, CardContent } from "@/components/ui/card";
-import LicenseExpiryNotification from "./LicenseExpiryNotification";
 import { isSpecialAccount } from "@/utils/admin-roles";
 import { useAuth } from '@/contexts/auth-context'
 
@@ -21,39 +19,33 @@ interface LicenseGuardProps {
  * - Environment-controlled license enforcement (VITE_ENABLE_LICENSE_GUARD)
  * - Special account bypass (admin/dev/marketers skip license validation)
  * - Automatic redirection to license activation for unlicensed users
- * - Proper React Hook usage (no conditional calling)
- * - Loading states during license validation
- * - Error handling with retry options
- * - License expiry notifications for near-expiry licenses
+ * - Backend-only validation (no on-chain checks)
  * 
  * Behavior:
  * - If license guard disabled: Always allows access
  * - If user not connected: Lets WalletGate handle wallet connection
  * - If on license activation page: Always allows access (prevents redirect loops)
  * - If user is special account (admin/dev/marketer): Bypasses license check
- * - If user has valid license: Renders children with optional expiry warning
+ * - If user has valid backend license: Renders children
  * - If user has invalid/no license: Redirects to /dapp/license-activation
- * 
- * Fixed Issues:
- * - Removed early return that bypassed license checking
- * - Fixed React Hook conditional usage error
- * - Proper useEffect dependency management for redirection
  */
 export default function LicenseGuard({ children }: LicenseGuardProps) {
   const { isConnected } = useWalletConnection();
   const { publicKey } = useWallet();
-  const {
-    licenseInfo,
-    isLoading,
-    error,
-    refreshLicenseStatus
-  } = useLicense();
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   // Check if the connected wallet is a special account (admin/dev/marketer)
   const isSpecialWallet = isSpecialAccount(publicKey);
+
+  // Debug logging for special wallet detection
+  React.useEffect(() => {
+    if (publicKey) {
+      console.log('[LicenseGuard] Checking wallet:', publicKey.toString());
+      console.log('[LicenseGuard] Is special wallet:', isSpecialWallet);
+    }
+  }, [publicKey, isSpecialWallet]);
 
   // Backend license status (JWT session)
   const backendHasValidLicense = user?.license_status === 'active';
@@ -73,14 +65,13 @@ export default function LicenseGuard({ children }: LicenseGuardProps) {
   // Skip license check for special accounts (admin/dev/marketers)
   // Preserve current path to redirect back after license activation
   React.useEffect(() => {
-    const hasValid = backendHasValidLicense || licenseInfo.isValid;
-    if (licenseGuardEnabled && isConnected && !isSpecialWallet && !hasValid && !isLoading && !isLicenseActivationPage) {
-      navigate('/dapp/license-activation', { 
+    if (licenseGuardEnabled && isConnected && !isSpecialWallet && !backendHasValidLicense && !authLoading && !isLicenseActivationPage) {
+      navigate('/dapp/license-activation', {
         replace: true,
         state: { returnPath: location.pathname }
       });
     }
-  }, [backendHasValidLicense, licenseGuardEnabled, isConnected, isSpecialWallet, licenseInfo.isValid, isLoading, isLicenseActivationPage, navigate, location.pathname]);
+  }, [backendHasValidLicense, licenseGuardEnabled, isConnected, isSpecialWallet, authLoading, isLicenseActivationPage, navigate, location.pathname]);
 
   // If license guard is disabled, always allow access
   if (!licenseGuardEnabled) {
@@ -102,8 +93,8 @@ export default function LicenseGuard({ children }: LicenseGuardProps) {
     return <>{children}</>;
   }
 
-  // Show loading state while checking license
-  if (isLoading) {
+  // Show loading state while checking auth
+  if (authLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <Card className="w-full max-w-md">
@@ -119,47 +110,9 @@ export default function LicenseGuard({ children }: LicenseGuardProps) {
     );
   }
 
-  // Show error state
-  if (error) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Card className="w-full max-w-md border-red-200 bg-red-50">
-          <CardContent className="p-6 text-center space-y-4">
-            <div className="text-red-600">
-              <svg className="w-8 h-8 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h3 className="text-lg font-semibold text-red-800">License Check Failed</h3>
-            <p className="text-sm text-red-600">{error}</p>
-            <button
-              onClick={refreshLicenseStatus}
-              className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
-            >
-              Retry
-            </button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  // If license is valid (backend or on-chain), render children with optional expiry notification
-  if (backendHasValidLicense || licenseInfo.isValid) {
-    return (
-      <>
-        {/* Show expiry notification for near-expiry licenses */}
-        {licenseInfo.status === 'near-expiry' && (
-          <div className="mb-4">
-            <LicenseExpiryNotification
-              licenseInfo={licenseInfo}
-              onRenew={() => navigate('/dapp/license-activation')}
-            />
-          </div>
-        )}
-        {children}
-      </>
-    );
+  // If license is valid (backend only), render children
+  if (backendHasValidLicense) {
+    return <>{children}</>;
   }
 
   // If license is invalid, this should have triggered a redirect

@@ -9,7 +9,7 @@ import { toMicroBigInt, microBigIntToDecimalString } from './amount'
 export async function attemptExpiredBucketWithdrawalRefund(orderId: string): Promise<{ refunded: boolean; reason?: string }> {
   const client = await pool.connect()
   try {
-    const txRes = await client.query<Transaction>('SELECT * FROM transactions WHERE order_id = $1 LIMIT 1', [orderId])
+    const txRes = await client.query<Transaction>('SELECT * FROM transactions WHERE order_id = $1 LIMIT 1 FOR UPDATE', [orderId])
     const record = txRes.rows[0]
     if (!record) return { refunded: false, reason: 'record_not_found' }
     if (record.type !== 'role_withdrawal') return { refunded: false, reason: 'not_bucket_withdrawal' }
@@ -81,7 +81,7 @@ export async function attemptExpiredBucketWithdrawalRefund(orderId: string): Pro
       if (Number.isFinite(asNum) && asNum > 1_000_000) {
         console.warn(`[Refund Monitor] Unusually large role_withdrawal refund: ${amountUsdt} USDT for order ${orderId}`)
       }
-    } catch {}
+    } catch { }
 
     await finalizeRefund(client, record.id, {
       refund: true,
@@ -97,7 +97,7 @@ export async function attemptExpiredBucketWithdrawalRefund(orderId: string): Pro
     await client.query('COMMIT')
     return { refunded: true }
   } catch (e) {
-    await client.query('ROLLBACK').catch(() => {})
+    await client.query('ROLLBACK').catch(() => { })
     return { refunded: false, reason: e instanceof Error ? e.message : 'unknown_error' }
   } finally {
     client.release()

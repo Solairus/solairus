@@ -106,6 +106,7 @@ export interface WithdrawalLimitDisplay {
   totalWithdrawn: string; // Formatted USDT amount
   maxWithdrawable: string; // Formatted USDT amount
   remainingWithdrawable: string; // Formatted USDT amount
+  unclaimedAgentResults?: string; // Formatted USDT amount of unclaimed agent_results
   usagePercentage: number; // 0-100
   limitReached: boolean;
   isPrivileged: boolean;

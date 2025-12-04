@@ -97,8 +97,8 @@ interface AgentDashboardState {
   refreshing: boolean;
 }
 
-export const AgentDashboard: React.FC<AgentDashboardProps> = ({ 
-  userPublicKey, 
+export const AgentDashboard: React.FC<AgentDashboardProps> = ({
+  userPublicKey,
   connection,
   anchorProvider,
   onActivateAgent,
@@ -145,7 +145,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         }
 
         // Withdrawal totals and progress from backend, with safe fallbacks
-        const totalRoiWithdrawn = row.total_earned ?? 0;
+        const totalRoiWithdrawn = row.total_claimed ?? 0; // Use actual claimed amount
+        const unclaimedAmount = row.unclaimed_amount ?? 0;
+        const totalEarned = row.total_earned ?? 0;
         const capBp = row.reward_cap_bp ?? 20000; // default 200%
         const capPct = capBp / 100;
         const computedProgress = activationAmountUsdt > 0
@@ -186,6 +188,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           activatedAt,
           lastRoiWithdrawal: row.claimed_at ? new Date(row.claimed_at) : null,
           totalRoiWithdrawn,
+          unclaimedAmount, // Pass through to AgentData (need to add to type first if missing)
           yieldCapReached,
           yieldCapProgress,
           canWithdraw,
@@ -257,19 +260,19 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const handleAgentWithdrawal = async (activationId: number): Promise<void> => {
     try {
       console.log('🚀 Starting ROI withdrawal for agent:', activationId);
-      
+
       if (!anchorProvider) {
         throw new Error('Anchor provider not available. Please ensure your wallet is properly connected.');
       }
-      
+
       // Import the withdrawal service dynamically to avoid circular dependencies
       const { withdrawAgentRoi } = await import('@/services/agent/agent-roi-service');
-      
+
       // Execute ROI withdrawal
       const result = await withdrawAgentRoi(anchorProvider, activationId);
-      
+
       console.log('✅ ROI withdrawal successful:', result);
-      
+
       // Refresh the dashboard to show updated data
       await loadDashboardData(true);
     } catch (error) {
@@ -355,12 +358,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
                 Activate your first AI trading agent to start earning daily ROI
               </p>
             </div>
-            
+
             <Button onClick={handleActivateAgent} className="mb-4">
               <Plus className="h-4 w-4 mr-2" />
               Activate First Agent
             </Button>
-            
+
             <div className="text-xs text-muted-foreground">
               <p>Choose from 4 agent tiers with different yield ranges:</p>
               <p>🪶 NOVA • 🔮 VEGA • ⚡ ORION • 🧠 PRIME</p>
@@ -380,13 +383,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
         <WithdrawalLimitDisplayComponent status={state.withdrawalLimitStatus} />
       )}
       {/* Multi-Agent Timer Overview */}
-        {state.agents.length > 0 && (
-          <MultiAgentTimer agents={state.agents} />
-        )}
-      
+      {state.agents.length > 0 && (
+        <MultiAgentTimer agents={state.agents} />
+      )}
+
       {/* Portfolio Header */}
-      <Card 
-        title="Agent Portfolio" 
+      <Card
+        title="Agent Portfolio"
         subtitle={`${state.totalCount} agent${state.totalCount !== 1 ? 's' : ''} activated`}
       >
         <div className="flex items-center justify-between mb-4">

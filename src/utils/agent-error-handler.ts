@@ -45,7 +45,7 @@ export const AGENT_ERROR_CODES = {
   GLOBAL_WITHDRAWAL_LIMIT_REACHED: 6018, // GlobalWithdrawalLimitReached
   AGENT_NOT_FOUND: 6019, // AgentNotFound
   INSUFFICIENT_SYSTEM_RESERVE: 6020, // InsufficientSystemReserve
-  
+
   // Common Anchor errors
   UNAUTHORIZED: 6000,
   MATH_OVERFLOW: 6003,
@@ -59,18 +59,27 @@ export class AgentErrorHandler {
    * Parse and categorize agent-related errors
    */
   static parseError(error: unknown, context?: string, agent?: AgentData): AgentError {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    let errorMessage = '';
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    } else if (typeof error === 'object' && error !== null && 'message' in error) {
+      errorMessage = String((error as Record<string, unknown>).message);
+    } else if (typeof error === 'object' && error !== null && 'error' in error) {
+      errorMessage = String((error as Record<string, unknown>).error);
+    } else {
+      errorMessage = String(error);
+    }
     const lowerMessage = errorMessage.toLowerCase();
 
     // Extract error codes from Anchor errors
     const errorCode = this.extractErrorCode(errorMessage);
 
     // Network errors
-    if (lowerMessage.includes('network') || 
-        lowerMessage.includes('connection') ||
-        lowerMessage.includes('timeout') ||
-        lowerMessage.includes('fetch') ||
-        lowerMessage.includes('rpc')) {
+    if (lowerMessage.includes('network') ||
+      lowerMessage.includes('connection') ||
+      lowerMessage.includes('timeout') ||
+      lowerMessage.includes('fetch') ||
+      lowerMessage.includes('rpc')) {
       return {
         type: 'network',
         message: 'Network connection error. Please check your internet connection.',
@@ -83,9 +92,9 @@ export class AgentErrorHandler {
     }
 
     // RPC rate limiting
-    if (lowerMessage.includes('429') || 
-        lowerMessage.includes('rate limit') ||
-        lowerMessage.includes('too many requests')) {
+    if (lowerMessage.includes('429') ||
+      lowerMessage.includes('rate limit') ||
+      lowerMessage.includes('too many requests')) {
       return {
         type: 'network',
         code: 429,
@@ -100,11 +109,11 @@ export class AgentErrorHandler {
     }
 
     // Agent-specific errors
-    
+
     // Invalid tier (Anchor Error Code 6015)
-    if (errorCode === AGENT_ERROR_CODES.INVALID_TIER || 
-        lowerMessage.includes('invalid tier') ||
-        lowerMessage.includes('invalidtier')) {
+    if (errorCode === AGENT_ERROR_CODES.INVALID_TIER ||
+      lowerMessage.includes('invalid tier') ||
+      lowerMessage.includes('invalidtier')) {
       return {
         type: 'validation',
         code: errorCode,
@@ -118,10 +127,10 @@ export class AgentErrorHandler {
     }
 
     // Agent retired (Anchor Error Code 6016)
-    if (errorCode === AGENT_ERROR_CODES.AGENT_RETIRED || 
-        lowerMessage.includes('agent retired') ||
-        lowerMessage.includes('agentretired') ||
-        lowerMessage.includes('yield cap')) {
+    if (errorCode === AGENT_ERROR_CODES.AGENT_RETIRED ||
+      lowerMessage.includes('agent retired') ||
+      lowerMessage.includes('agentretired') ||
+      lowerMessage.includes('yield cap')) {
       const tierName = agent?.tierConfig?.name || 'agent';
       const yieldCap = agent?.tierConfig?.yieldCapPct || '175-250';
       return {
@@ -137,16 +146,16 @@ export class AgentErrorHandler {
     }
 
     // Withdrawal too early (Anchor Error Code 6017)
-    if (errorCode === AGENT_ERROR_CODES.WITHDRAWAL_TOO_EARLY || 
-        lowerMessage.includes('withdrawal too early') ||
-        lowerMessage.includes('withdrawaltooearly') ||
-        lowerMessage.includes('24 hour') ||
-        lowerMessage.includes('cooldown')) {
+    if (errorCode === AGENT_ERROR_CODES.WITHDRAWAL_TOO_EARLY ||
+      lowerMessage.includes('withdrawal too early') ||
+      lowerMessage.includes('withdrawaltooearly') ||
+      lowerMessage.includes('24 hour') ||
+      lowerMessage.includes('cooldown')) {
       const isFirstWithdrawal = !agent?.lastRoiWithdrawal;
-      const baseMessage = isFirstWithdrawal 
+      const baseMessage = isFirstWithdrawal
         ? 'New agents must wait 24 hours after activation before the first ROI withdrawal.'
         : 'Each agent has a 24-hour cooldown between ROI withdrawals.';
-      
+
       let retryDelay = 0;
       if (agent?.nextWithdrawalAt) {
         retryDelay = Math.max(0, Math.ceil((agent.nextWithdrawalAt.getTime() - Date.now()) / 1000));
@@ -157,7 +166,7 @@ export class AgentErrorHandler {
         code: errorCode,
         message: baseMessage,
         originalError: error,
-        suggestedAction: retryDelay > 0 
+        suggestedAction: retryDelay > 0
           ? `Wait ${Math.ceil(retryDelay / 60)} minutes and try again`
           : 'Check the withdrawal timer and try again when available',
         context,
@@ -168,10 +177,10 @@ export class AgentErrorHandler {
     }
 
     // Global withdrawal limit reached (Anchor Error Code 6018)
-    if (errorCode === AGENT_ERROR_CODES.GLOBAL_WITHDRAWAL_LIMIT_REACHED || 
-        lowerMessage.includes('global withdrawal limit') ||
-        lowerMessage.includes('globalwithdrawallimitreached') ||
-        lowerMessage.includes('200x deposits')) {
+    if (errorCode === AGENT_ERROR_CODES.GLOBAL_WITHDRAWAL_LIMIT_REACHED ||
+      lowerMessage.includes('global withdrawal limit') ||
+      lowerMessage.includes('globalwithdrawallimitreached') ||
+      lowerMessage.includes('200x deposits')) {
       return {
         type: 'limits',
         code: errorCode,
@@ -185,9 +194,9 @@ export class AgentErrorHandler {
     }
 
     // Agent not found (Anchor Error Code 6019)
-    if (errorCode === AGENT_ERROR_CODES.AGENT_NOT_FOUND || 
-        lowerMessage.includes('agent not found') ||
-        lowerMessage.includes('agentnotfound')) {
+    if (errorCode === AGENT_ERROR_CODES.AGENT_NOT_FOUND ||
+      lowerMessage.includes('agent not found') ||
+      lowerMessage.includes('agentnotfound')) {
       return {
         type: 'validation',
         code: errorCode,
@@ -201,9 +210,9 @@ export class AgentErrorHandler {
     }
 
     // Insufficient system reserve (Anchor Error Code 6020)
-    if (errorCode === AGENT_ERROR_CODES.INSUFFICIENT_SYSTEM_RESERVE || 
-        lowerMessage.includes('insufficient system reserve') ||
-        lowerMessage.includes('insufficientsystemreserve')) {
+    if (errorCode === AGENT_ERROR_CODES.INSUFFICIENT_SYSTEM_RESERVE ||
+      lowerMessage.includes('insufficient system reserve') ||
+      lowerMessage.includes('insufficientsystemreserve')) {
       return {
         type: 'contract',
         code: errorCode,
@@ -220,9 +229,9 @@ export class AgentErrorHandler {
     // Common Anchor errors
 
     // Unauthorized (Anchor Error Code 6000)
-    if (errorCode === AGENT_ERROR_CODES.UNAUTHORIZED || 
-        lowerMessage.includes('unauthorized') ||
-        lowerMessage.includes('access denied')) {
+    if (errorCode === AGENT_ERROR_CODES.UNAUTHORIZED ||
+      lowerMessage.includes('unauthorized') ||
+      lowerMessage.includes('access denied')) {
       return {
         type: 'validation',
         code: errorCode,
@@ -236,8 +245,8 @@ export class AgentErrorHandler {
     }
 
     // Math overflow (Anchor Error Code 6003)
-    if (errorCode === AGENT_ERROR_CODES.MATH_OVERFLOW || 
-        lowerMessage.includes('math overflow')) {
+    if (errorCode === AGENT_ERROR_CODES.MATH_OVERFLOW ||
+      lowerMessage.includes('math overflow')) {
       return {
         type: 'validation',
         code: errorCode,
@@ -251,8 +260,8 @@ export class AgentErrorHandler {
     }
 
     // Invalid amount (Anchor Error Code 6004)
-    if (errorCode === AGENT_ERROR_CODES.INVALID_AMOUNT || 
-        lowerMessage.includes('invalid amount')) {
+    if (errorCode === AGENT_ERROR_CODES.INVALID_AMOUNT ||
+      lowerMessage.includes('invalid amount')) {
       return {
         type: 'validation',
         code: errorCode,
@@ -267,9 +276,9 @@ export class AgentErrorHandler {
 
     // Insufficient funds
     if (errorCode === AGENT_ERROR_CODES.INSUFFICIENT_FUNDS ||
-        lowerMessage.includes('insufficient') ||
-        lowerMessage.includes('not enough') ||
-        lowerMessage.includes('balance')) {
+      lowerMessage.includes('insufficient') ||
+      lowerMessage.includes('not enough') ||
+      lowerMessage.includes('balance')) {
       return {
         type: 'validation',
         code: errorCode,
@@ -284,9 +293,9 @@ export class AgentErrorHandler {
 
     // User rejection
     if (lowerMessage.includes('user rejected') ||
-        lowerMessage.includes('user denied') ||
-        lowerMessage.includes('cancelled') ||
-        lowerMessage.includes('rejected by user')) {
+      lowerMessage.includes('user denied') ||
+      lowerMessage.includes('cancelled') ||
+      lowerMessage.includes('rejected by user')) {
       return {
         type: 'transaction',
         message: 'Transaction was cancelled by user.',
@@ -300,8 +309,8 @@ export class AgentErrorHandler {
 
     // Seeds constraint violation (Anchor Error Code 2006)
     if (errorCode === AGENT_ERROR_CODES.SEEDS_CONSTRAINT ||
-        lowerMessage.includes('constraintseeds') ||
-        lowerMessage.includes('seeds constraint')) {
+      lowerMessage.includes('constraintseeds') ||
+      lowerMessage.includes('seeds constraint')) {
       return {
         type: 'contract',
         code: errorCode,
@@ -316,8 +325,8 @@ export class AgentErrorHandler {
 
     // Transaction errors
     if (lowerMessage.includes('transaction') ||
-        lowerMessage.includes('signature') ||
-        lowerMessage.includes('blockhash')) {
+      lowerMessage.includes('signature') ||
+      lowerMessage.includes('blockhash')) {
       return {
         type: 'transaction',
         message: 'Transaction failed. This may be a temporary network issue.',
@@ -331,9 +340,9 @@ export class AgentErrorHandler {
 
     // Smart contract errors
     if (lowerMessage.includes('program') ||
-        lowerMessage.includes('instruction') ||
-        lowerMessage.includes('account') ||
-        lowerMessage.includes('anchor')) {
+      lowerMessage.includes('instruction') ||
+      lowerMessage.includes('account') ||
+      lowerMessage.includes('anchor')) {
       return {
         type: 'contract',
         code: errorCode,
@@ -342,6 +351,21 @@ export class AgentErrorHandler {
         suggestedAction: 'Try again in a few moments',
         context,
         isRetryable: true,
+        agent,
+      };
+    }
+
+    // Account restricted/banned (Generic message)
+    if (lowerMessage.includes('withdrawal unavailable') ||
+      lowerMessage.includes('withdrawals are disabled') ||
+      lowerMessage.includes('unable to process withdrawal')) {
+      return {
+        type: 'validation',
+        message: 'Unable to process withdrawal.',
+        originalError: error,
+        suggestedAction: 'Please contact support',
+        context,
+        isRetryable: false,
         agent,
       };
     }
@@ -435,8 +459,8 @@ export class AgentErrorHandler {
   /**
    * Show error toast with appropriate styling and actions
    */
-  static showErrorToast(error: AgentError, options?: { 
-    showRetry?: boolean; 
+  static showErrorToast(error: AgentError, options?: {
+    showRetry?: boolean;
     onRetry?: () => void;
     duration?: number;
   }) {
@@ -482,7 +506,7 @@ export class AgentErrorHandler {
   }) {
     let description = options?.description;
     const uiConfig = getAgentUIConfig();
-    
+
     // Add agent context to success messages
     if (options?.agent && !description) {
       const tierName = options.agent.tierConfig?.name || 'Agent';
@@ -503,7 +527,7 @@ export class AgentErrorHandler {
     duration?: number;
   }) {
     const uiConfig = getAgentUIConfig();
-    
+
     toast.info(message, {
       description: options?.description,
       duration: options?.duration || uiConfig.toastDurations.info,
@@ -618,7 +642,7 @@ function getErrorTitle(error: AgentError): string {
         return 'Withdrawal Cooldown Active';
       }
       return 'Timing Restriction';
-    
+
     case 'limits':
       if (error.code === AGENT_ERROR_CODES.AGENT_RETIRED) {
         return 'Agent Retired';
@@ -627,13 +651,13 @@ function getErrorTitle(error: AgentError): string {
         return 'Withdrawal Limit Reached';
       }
       return 'Limit Exceeded';
-    
+
     case 'network':
       if (error.code === 429) {
         return 'Network Busy';
       }
       return 'Connection Error';
-    
+
     case 'contract':
       if (error.code === AGENT_ERROR_CODES.INSUFFICIENT_SYSTEM_RESERVE) {
         return 'System Reserves Low';
@@ -642,10 +666,10 @@ function getErrorTitle(error: AgentError): string {
         return 'Account Verification Failed';
       }
       return 'Smart Contract Error';
-    
+
     case 'transaction':
       return 'Transaction Failed';
-    
+
     case 'validation':
       if (error.code === AGENT_ERROR_CODES.INVALID_TIER) {
         return 'Invalid Tier';
@@ -660,7 +684,7 @@ function getErrorTitle(error: AgentError): string {
         return 'Access Denied';
       }
       return 'Validation Error';
-    
+
     default:
       return 'Unexpected Error';
   }
@@ -673,31 +697,31 @@ function getErrorSeverity(error: AgentError): 'low' | 'medium' | 'high' | 'criti
   switch (error.type) {
     case 'timing':
       return 'low'; // Expected behavior, just need to wait
-    
+
     case 'limits':
       if (error.code === AGENT_ERROR_CODES.AGENT_RETIRED) {
         return 'medium'; // Expected end-of-life
       }
       return 'high'; // Limit reached, needs action
-    
+
     case 'network':
       return 'medium'; // Usually temporary
-    
+
     case 'contract':
       if (error.code === AGENT_ERROR_CODES.INSUFFICIENT_SYSTEM_RESERVE) {
         return 'medium'; // Temporary system issue
       }
       return 'high'; // Contract issues need attention
-    
+
     case 'transaction':
       return 'medium'; // Usually retryable
-    
+
     case 'validation':
       if (error.code === AGENT_ERROR_CODES.UNAUTHORIZED) {
         return 'high'; // Security issue
       }
       return 'medium'; // User input issue
-    
+
     default:
       return 'critical'; // Unknown errors are concerning
   }
@@ -742,7 +766,7 @@ function getErrorColor(error: AgentError): {
         background: 'bg-amber-500/10',
         border: 'border-amber-500/30'
       };
-    
+
     case 'limits':
       return {
         primary: 'text-red-500',
@@ -750,7 +774,7 @@ function getErrorColor(error: AgentError): {
         background: 'bg-red-500/10',
         border: 'border-red-500/30'
       };
-    
+
     case 'network':
       return {
         primary: 'text-orange-500',
@@ -758,7 +782,7 @@ function getErrorColor(error: AgentError): {
         background: 'bg-orange-500/10',
         border: 'border-orange-500/30'
       };
-    
+
     case 'contract':
       return {
         primary: 'text-blue-500',
@@ -766,7 +790,7 @@ function getErrorColor(error: AgentError): {
         background: 'bg-blue-500/10',
         border: 'border-blue-500/30'
       };
-    
+
     case 'transaction':
       return {
         primary: 'text-purple-500',
@@ -774,7 +798,7 @@ function getErrorColor(error: AgentError): {
         background: 'bg-purple-500/10',
         border: 'border-purple-500/30'
       };
-    
+
     case 'validation':
       return {
         primary: 'text-red-500',
@@ -782,7 +806,7 @@ function getErrorColor(error: AgentError): {
         background: 'bg-red-500/10',
         border: 'border-red-500/30'
       };
-    
+
     default:
       return {
         primary: 'text-gray-500',

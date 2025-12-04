@@ -13,9 +13,9 @@ import { useAgentRetryMechanism } from '@/utils/agent-retry-mechanism';
 import { AgentErrorDisplay } from './AgentErrorDisplay';
 import { getTierStyling } from '@/services/agent/tiers-ui';
 import { useLiveRoi } from '@/services/agent/live-roi-service';
-import { 
-  TrendingUp, 
-  DollarSign, 
+import {
+  TrendingUp,
+  DollarSign,
   Calendar,
   Zap,
   Info
@@ -34,24 +34,24 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
   const { error, validateWithdrawal, clearError, setError } = useWithdrawalValidation(agent);
   const { showError, showSuccess, formatErrorForUI } = useAgentErrorHandler();
   const { executeWithRetry } = useAgentRetryMechanism('withdrawal');
-  
+
   // Live ROI tracking (updates every minute)
   const { liveRoi } = useLiveRoi();
 
   // Handle ROI withdrawal with enhanced error handling and retry logic
   const handleWithdraw = async () => {
     if (withdrawing) return;
-    
+
     // Clear any previous errors
     clearError();
     setLastError(null);
-    
+
     // Validate withdrawal before attempting
     const isValid = await validateWithdrawal();
     if (!isValid) return;
-    
+
     setWithdrawing(true);
-    
+
     try {
       // Use retry mechanism for withdrawal operation
       const result = await executeWithRetry(
@@ -81,7 +81,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
           description: `Withdrew ROI from ${agent.tierConfig.name} agent`,
           agent
         });
-        
+
         // Clear any previous errors
         clearError();
         setLastError(null);
@@ -90,7 +90,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
         const errorInfo = formatErrorForUI(result.error || 'Withdrawal failed', 'ROI withdrawal', agent);
         setLastError(result.error);
         setError(errorInfo.message);
-        
+
         // Show error toast for immediate feedback
         showError(result.error || 'Withdrawal failed', 'ROI withdrawal', agent, {
           showRetry: errorInfo.isRetryable,
@@ -99,14 +99,14 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
       }
     } catch (error) {
       console.error('❌ Error withdrawing ROI:', error);
-      
+
       // Handle unexpected errors
       setLastError(error);
       const agentError = showError(error, 'ROI withdrawal', agent, {
         showRetry: true,
         onRetry: handleWithdraw
       });
-      
+
       setError(agentError.message);
     } finally {
       setWithdrawing(false);
@@ -115,10 +115,13 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
 
   // Format date for display
   const formatDate = (date: Date): string => {
-    return date.toLocaleDateString('en-US', {
+    return date.toLocaleString('en-US', {
       month: 'short',
       day: 'numeric',
-      year: 'numeric'
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
     });
   };
 
@@ -146,9 +149,9 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
             </p>
           </div>
         </div>
-        
+
         {/* Status Badge */}
-        <Badge 
+        <Badge
           variant={agent.yieldCapReached ? "destructive" : "default"}
           className="text-xs"
         >
@@ -165,9 +168,9 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
             <span>Active Liquidity</span>
           </div>
           <span className="font-semibold">
-            ${agent.activationAmount.toLocaleString('en-US', { 
+            ${agent.activationAmount.toLocaleString('en-US', {
               minimumFractionDigits: 2,
-              maximumFractionDigits: 2 
+              maximumFractionDigits: 2
             })}
           </span>
         </div>
@@ -203,15 +206,15 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
             {agent.yieldCapProgress.toFixed(1)}% / {agent.tierConfig.yieldCapPct}%
           </span>
         </div>
-        <Progress 
-          value={Math.min(agent.yieldCapProgress, 100)} 
+        <Progress
+          value={Math.min(agent.yieldCapProgress, 100)}
           className="h-2"
         />
         <div className="flex items-center justify-between text-xs">
           <span className="text-muted-foreground">
-            Withdrawn: ${agent.totalRoiWithdrawn.toLocaleString('en-US', { 
+            Claimed: ${(agent.totalClaimed ?? agent.totalRoiWithdrawn).toLocaleString('en-US', {
               minimumFractionDigits: 2,
-              maximumFractionDigits: 2 
+              maximumFractionDigits: 2
             })}
           </span>
           {agent.yieldCapReached && (
@@ -228,49 +231,46 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
 
         {/* Live Countdown Timer - show when agent is in cooldown */}
         {!agent.canWithdraw && !agent.yieldCapReached && (
-          <WithdrawalTimer 
+          <WithdrawalTimer
             agent={agent}
             compact={true}
             className="justify-center"
           />
         )}
 
-        {/* Withdrawal Button */}
-        <Button
-          onClick={handleWithdraw}
-          disabled={!agent.canWithdraw || withdrawing || agent.yieldCapReached}
-          className={cn(
-            "w-full text-xs h-8",
-            agent.canWithdraw && !agent.yieldCapReached && "hover:shadow-lg"
-          )}
-          variant={agent.canWithdraw && !agent.yieldCapReached ? "default" : "outline"}
-        >
-          {withdrawing ? (
-            <>
-              <Zap className="h-3 w-3 mr-1 animate-pulse" />
-              Processing...
-            </>
-          ) : agent.yieldCapReached ? (
-            "Agent Retired"
-          ) : agent.canWithdraw ? (
-            <>
-              <TrendingUp className="h-3 w-3 mr-1" />
-              Claim PnL Now {liveRoi && liveRoi.currentWithdrawableAmount > 0 
-                ? `$${liveRoi.currentWithdrawableAmount.toLocaleString('en-US', { 
+        {/* Withdrawal Button - only show when ready to claim or retired */}
+        {(agent.canWithdraw || agent.yieldCapReached) && (
+          <Button
+            onClick={handleWithdraw}
+            disabled={!agent.canWithdraw || withdrawing || agent.yieldCapReached}
+            className={cn(
+              "w-full text-xs h-8",
+              agent.canWithdraw && !agent.yieldCapReached && "hover:shadow-lg"
+            )}
+            variant={agent.canWithdraw && !agent.yieldCapReached ? "default" : "outline"}
+          >
+            {withdrawing ? (
+              <>
+                <Zap className="h-3 w-3 mr-1 animate-pulse" />
+                Processing...
+              </>
+            ) : agent.yieldCapReached ? (
+              "Agent Retired"
+            ) : (
+              <>
+                <TrendingUp className="h-3 w-3 mr-1" />
+                Claim PnL Now {agent.unclaimedAmount !== undefined && agent.unclaimedAmount > 0
+                  ? `$${agent.unclaimedAmount.toLocaleString('en-US', {
                     minimumFractionDigits: 2,
-                    maximumFractionDigits: 2 
+                    maximumFractionDigits: 2
                   })}`
-                : ''
-              }
-            </>
-          ) : (
-            <>
-              <Calendar className="h-3 w-3 mr-1" />
-              Next Withdrawal
-            </>
-          )}
-        </Button>
-        
+                  : ''
+                }
+              </>
+            )}
+          </Button>
+        )}
+
         {/* Enhanced Error Display */}
         {lastError && (
           <div className="mt-2">
@@ -284,12 +284,12 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
             />
           </div>
         )}
-        
+
         {/* Only show validation feedback for actual errors, not timing issues */}
         {!lastError && error && agent.yieldCapReached && (
           <div className="mt-2">
-            <WithdrawalValidationFeedback 
-              agent={agent} 
+            <WithdrawalValidationFeedback
+              agent={agent}
               error={error}
               onRetry={handleWithdraw}
               className="text-xs"
@@ -302,7 +302,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
       {agent.lastRoiWithdrawal && (
         <div className="mt-3 pt-3 border-t border-border/30">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Last withdrawal:</span>
+            <span>Last Claimed at:</span>
             <span>{formatDate(agent.lastRoiWithdrawal)}</span>
           </div>
         </div>

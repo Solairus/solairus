@@ -42,10 +42,10 @@ export default function LicenseActivationPage() {
   const [successInfo, setSuccessInfo] = useState<{ status: BackendLicenseStatus; expirationDate?: Date; isValid: boolean } | null>(null);
   const [backendStatus, setBackendStatus] = useState<BackendLicenseStatus>('none');
   const [termDays, setTermDays] = useState<number>(365);
-  
+
   // Get the return path from navigation state, default to /dapp
   const returnPath = location.state?.returnPath || '/dapp';
-  
+
   const [licenseFee, setLicenseFee] = useState<string>('');
   const [licenseFeeMicro, setLicenseFeeMicro] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -193,6 +193,9 @@ export default function LicenseActivationPage() {
         const backendStatusComputed: BackendLicenseStatus = (info.license_status || user?.license_status || 'none') as BackendLicenseStatus;
         setBackendStatus(backendStatusComputed);
         if (isActiveStatus(backendStatusComputed)) {
+          // IMPORTANT: Refresh session to ensure AuthContext has the latest status
+          // before redirecting, otherwise LicenseGuard might send us back here.
+          await refreshSession();
           navigate(returnPath, { replace: true });
           return;
         }
@@ -429,7 +432,7 @@ export default function LicenseActivationPage() {
         <div className="flex items-center justify-start">
           <BackButton to="/dapp" />
         </div>
-        
+
         <WelcomeHeader />
         <Card className="border-yellow-200 bg-yellow-50">
           <CardContent className="p-3 text-center">
@@ -450,7 +453,7 @@ export default function LicenseActivationPage() {
     <div className="max-w-sm mx-auto space-y-3 p-3">
       {/* Back Button, Network Switcher, and Wallet Disconnect */}
       <HeaderControls disconnect={disconnect} />
-      
+
       {/* Welcome Header */}
       <WelcomeHeader />
       {/* Cost and Balance Badges */}
@@ -459,12 +462,22 @@ export default function LicenseActivationPage() {
           <Badge variant="secondary" className="text-xs px-2 py-1">
             Cost: {licenseFee} USDT
           </Badge>
-          <Badge 
-            variant="destructive" 
-            className="text-xs px-2 py-1"
-          >
-            Balance: {usdtBalance}
-          </Badge>
+          {usdtBalance && (
+            <Badge
+              variant="destructive"
+              className="text-xs px-2 py-1"
+            >
+              Balance: {usdtBalance}
+            </Badge>
+          )}
+          {user?.credit_balance_micro && user.credit_balance_micro !== '0' && (
+            <Badge
+              variant="outline"
+              className="text-xs px-2 py-1 border-green-500 text-green-700 bg-green-50"
+            >
+              Credit: ${formatUsdtMicro(user.credit_balance_micro)}
+            </Badge>
+          )}
         </div>
       )}
 
@@ -477,7 +490,7 @@ export default function LicenseActivationPage() {
           <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto">
             <Shield className="w-6 h-6 text-blue-600" />
           </div>
-          
+
           {!showOrderSummary ? (
             <>
               {/* License Status */}
@@ -599,7 +612,7 @@ export default function LicenseActivationPage() {
       <FeaturesOverview />
 
       {/* License Activation Modal */}
-      <Dialog open={isActivating} onOpenChange={() => {}}>
+      <Dialog open={isActivating} onOpenChange={() => { }}>
         <DialogContent className="max-w-sm mx-auto [&>button]:hidden">
           <DialogHeader>
             <div className="flex flex-col items-center space-y-4 pt-2">

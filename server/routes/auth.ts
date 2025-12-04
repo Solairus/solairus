@@ -49,6 +49,8 @@ async function getBonusBalanceMicro(userId: number): Promise<string> {
   }
 }
 
+import { isExemptAdmin } from '../lib/admin-exemption'
+
 async function sanitizeUser(row: UserRow) {
   const bonus_balance_micro = await getBonusBalanceMicro(row.id)
   const credit_balance_micro = await (async () => {
@@ -60,13 +62,27 @@ async function sanitizeUser(row: UserRow) {
       return '0'
     }
   })()
+
+  // Force active license for admins
+  const isAdmin = isExemptAdmin(row.user_address)
+  const license_status = isAdmin ? 'active' : row.license_status
+
   return {
     user_address: row.user_address,
-    license_status: row.license_status,
+    license_status,
     license_expiration: row.license_expiration,
     ref_by: row.ref_by ?? null,
     bonus_balance_micro,
     credit_balance_micro,
+    reward_balance_micro: await (async () => {
+      try {
+        const res = await query<{ reward_balance: string | number }>('SELECT reward_balance FROM balances WHERE user_id = $1 LIMIT 1', [row.id])
+        const raw = res.rows[0]?.reward_balance ?? 0
+        return typeof raw === 'number' ? String(raw) : (raw ?? '0')
+      } catch (_e) {
+        return '0'
+      }
+    })(),
   }
 }
 

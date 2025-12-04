@@ -17,6 +17,7 @@ export async function fetchGlobalPnlSummary(): Promise<WithdrawalLimitDisplay> {
     totalWithdrawn: String(data.totalWithdrawn ?? '0.00'),
     maxWithdrawable: String(data.maxWithdrawable ?? '0.00'),
     remainingWithdrawable: String(data.remainingWithdrawable ?? '0.00'),
+    unclaimedAgentResults: String(data.unclaimedAgentResults ?? '0.00'),
     usagePercentage: Number(data.usagePercentage ?? 0),
     limitReached: Boolean(data.limitReached ?? false),
     isPrivileged: Boolean(data.isPrivileged ?? false),

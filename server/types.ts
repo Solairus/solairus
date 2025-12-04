@@ -10,6 +10,7 @@ export type TransactionType =
   | 'admin_debit'
   | 'transfer_in'
   | 'transfer_out'
+  | 'agent_claim'
 
 export type TransactionStatus = 'pending' | 'confirmed' | 'completed' | 'failed'
 

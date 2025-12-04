@@ -25,7 +25,7 @@ export async function attemptExpiredWithdrawalRefund(orderId: string): Promise<{
   const client = await pool.connect()
   try {
     const txRes = await client.query<Transaction>(
-      'SELECT * FROM transactions WHERE order_id = $1 LIMIT 1',
+      'SELECT * FROM transactions WHERE order_id = $1 LIMIT 1 FOR UPDATE',
       [orderId]
     )
     const record = txRes.rows[0]
@@ -63,7 +63,8 @@ export async function attemptExpiredWithdrawalRefund(orderId: string): Promise<{
     if (sig) {
       const decimals = record.decimals || 6
       const amtNum = typeof record.amount === 'string' ? Number(record.amount) : (record.amount as unknown as number)
-      const amtMicro = BigInt(Math.round(amtNum * Math.pow(10, decimals)))
+      // FIX: record.amount is already in micro-units (integer). Do NOT multiply by 10^decimals.
+      const amtMicro = BigInt(Math.round(amtNum))
       const valid = await verifyTokenDelta(conn, sig, record.initiator_wallet, record.mint_address, amtMicro, decimals)
       if (valid) {
         await finalizeRecovery(client, record.id, sig, { recoveredVia: 'reference', recoveredAt: new Date().toISOString() })
@@ -109,7 +110,7 @@ export async function attemptExpiredWithdrawalRefund(orderId: string): Promise<{
     await client.query('COMMIT')
     return { refunded: true }
   } catch (e) {
-    await client.query('ROLLBACK').catch(() => {})
+    await client.query('ROLLBACK').catch(() => { })
     return { refunded: false, reason: e instanceof Error ? e.message : 'unknown_error' }
   } finally {
     client.release()

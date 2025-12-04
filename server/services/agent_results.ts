@@ -26,19 +26,47 @@ export async function runDailyAgentEarnings(): Promise<{ processed: number; cred
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
-    // Load agents with tiers in one go
+    // Load agents with tiers and their last reward time
     const agentsRes = await client.query(
-      `SELECT a.id AS agent_id, a.amount AS amount_micro, a.total_earned AS total_earned_micro, a.tier_id,
-              t.daily_reward_min_bp AS min_bp, t.daily_reward_max_bp AS max_bp
+      `SELECT a.id AS agent_id, a.amount AS amount_micro, a.total_earned AS total_earned_micro, a.created_at AS agent_created_at,
+              a.tier_id, t.daily_reward_min_bp AS min_bp, t.daily_reward_max_bp AS max_bp,
+              (SELECT created_at FROM agent_results ar WHERE ar.agent_id = a.id ORDER BY created_at DESC LIMIT 1) as last_reward_at
          FROM agents a
-         JOIN agent_tiers t ON a.tier_id = t.id`
+         JOIN agent_tiers t ON a.tier_id = t.id
+        WHERE a.status = 'active'`
     )
     let processed = 0
     let credited = 0
     let skipped = 0
 
-    for (const row of agentsRes.rows as Array<{ agent_id: number; amount_micro: string | number; total_earned_micro: string | number; tier_id: number; min_bp: number; max_bp: number }>) {
+    const now = Date.now()
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000
+
+    for (const row of agentsRes.rows as Array<{
+      agent_id: number
+      amount_micro: string | number
+      total_earned_micro: string | number
+      agent_created_at: string | Date
+      tier_id: number
+      min_bp: number
+      max_bp: number
+      last_reward_at: string | Date | null
+    }>) {
       processed++
+
+      // Check 24h cooldown
+      const lastRewardTime = row.last_reward_at ? new Date(row.last_reward_at).getTime() : null
+      const agentCreatedTime = new Date(row.agent_created_at).getTime()
+
+      // If never rewarded, use creation time as baseline
+      const baselineTime = lastRewardTime ?? agentCreatedTime
+      const nextEligibleTime = baselineTime + ONE_DAY_MS
+
+      if (now < nextEligibleTime) {
+        skipped++
+        continue
+      }
+
       const min = Number(row.min_bp)
       const max = Number(row.max_bp)
       const bp = randomBp(min, max)
@@ -69,7 +97,7 @@ export async function runDailyAgentEarnings(): Promise<{ processed: number; cred
     await client.query('COMMIT')
     return { processed, credited, skipped }
   } catch (e) {
-    await client.query('ROLLBACK').catch(() => {})
+    await client.query('ROLLBACK').catch(() => { })
     throw e
   } finally {
     client.release()

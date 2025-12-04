@@ -11,6 +11,7 @@ import { AdminUsersTable } from './AdminUsersTable';
 import { MarketerDashboard } from './MarketerDashboard';
 import { AdminErrorBoundary } from './AdminErrorBoundary';
 import { ResponsiveCard, InfoCard, ActionCard } from './ResponsiveCard';
+import { WithdrawalManagement } from './WithdrawalManagement';
 import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
 import {
@@ -147,6 +148,17 @@ export const AdminDashboard: React.FC = () => {
                 onClick={() => setActiveTab('sponsors')}
                 variant="default"
               />
+
+              {(role === 'admin' || role === 'dev') && (
+                <ActionCard
+                  title="Withdrawal Mgmt"
+                  description="Limit or ban user withdrawals"
+                  icon={Shield}
+                  onClick={() => setActiveTab('withdrawals')}
+                  variant="default"
+                  className="border-red-500/20 hover:border-red-500/40"
+                />
+              )}
             </>
           )}
 
@@ -296,8 +308,8 @@ export const AdminDashboard: React.FC = () => {
       </div>
       <AdminUsersTable />
     </div>
-  );  
-const renderCreditsContent = () => (
+  );
+  const renderCreditsContent = () => (
     <AdminErrorBoundary>
       <UserCreditManagement />
     </AdminErrorBoundary>
@@ -339,6 +351,12 @@ const renderCreditsContent = () => (
         return renderSponsorsContent();
       case 'licenses':
         return renderLicensesContent();
+      case 'withdrawals':
+        return (
+          <AdminErrorBoundary>
+            <WithdrawalManagement />
+          </AdminErrorBoundary>
+        );
       default:
         return renderOverviewContent();
     }

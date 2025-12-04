@@ -16,25 +16,25 @@ export const API_CONFIG = {
     production: (import.meta.env.VITE_API_BASE_URL || '/api'), // Allow explicit backend URL on Railway
     staging: 'https://staging-api.solairus.com/api'
   },
-  
+
   // Get current base URL
   getBaseUrl(): string {
     if (import.meta.env.VITE_API_BASE_URL) {
       return import.meta.env.VITE_API_BASE_URL;
     }
-    
+
     if (import.meta.env.DEV) {
       return this.baseUrls.development;
     }
-    
+
     return this.baseUrls.production;
   },
-  
+
   // Request configuration
   timeout: 30000, // 30 seconds
   retryAttempts: 3,
   retryDelay: 1000,
-  
+
   // Headers
   defaultHeaders: {
     'Content-Type': 'application/json',
@@ -48,30 +48,30 @@ export const AGENT_ENDPOINTS = {
   getUserAgents: '/agents/user/:userAddress',
   getAgentDetails: '/agents/:activationId',
   getAgentStatistics: '/agents/user/:userAddress/statistics',
-  
+
   // Agent operations endpoints
   activateAgent: '/agents/activate',
   withdrawRoi: '/agents/:activationId/withdraw',
-  
+
   // Withdrawal limit endpoints
   getWithdrawalLimits: '/agents/user/:userAddress/limits',
   checkWithdrawalEligibility: '/agents/:activationId/eligibility',
   // PnL summary (backend computed)
   getPnlSummary: '/agents/pnl-summary',
-  
+
   // Agent tier endpoints
   getTierConfigurations: '/agents/tiers',
   getTierStatistics: '/agents/tiers/statistics',
-  
+
   // Build full URL for endpoint
   buildUrl(endpoint: string, params: Record<string, string> = {}): string {
     let url = `${API_CONFIG.getBaseUrl()}${endpoint}`;
-    
+
     // Replace path parameters
     Object.entries(params).forEach(([key, value]) => {
       url = url.replace(`:${key}`, encodeURIComponent(value));
     });
-    
+
     return url;
   }
 };
@@ -97,11 +97,11 @@ export const ERROR_REPORTING_ENDPOINTS = {
   // Error reporting
   reportError: '/errors/report',
   reportAgentError: '/errors/agent',
-  
+
   // Error analytics
   getErrorStatistics: '/errors/statistics',
   getErrorTrends: '/errors/trends',
-  
+
   // Build full URL for endpoint
   buildUrl(endpoint: string): string {
     return `${API_CONFIG.getBaseUrl()}${endpoint}`;
@@ -116,7 +116,7 @@ export const EXTERNAL_ENDPOINTS = {
     simplePrices: '/simple/price',
     coinList: '/coins/list'
   },
-  
+
   // Solana blockchain data
   solana: {
     // These are handled by RPC configuration
@@ -125,7 +125,7 @@ export const EXTERNAL_ENDPOINTS = {
     devnet: 'https://api.devnet.solana.com',
     testnet: 'https://api.testnet.solana.com'
   },
-  
+
   // Analytics and monitoring
   analytics: {
     // Would be configured for production analytics
@@ -139,10 +139,10 @@ export const WEBSOCKET_ENDPOINTS = {
   // Agent real-time updates
   agentUpdates: '/ws/agents',
   withdrawalUpdates: '/ws/withdrawals',
-  
+
   // System status updates
   systemStatus: '/ws/system',
-  
+
   // Build WebSocket URL
   buildWsUrl(endpoint: string): string {
     const baseUrl = API_CONFIG.getBaseUrl();
@@ -159,16 +159,16 @@ export const SERVICE_CONFIG = {
     enableCaching: true,
     cacheTimeout: 60000, // 1 minute
     maxCacheSize: 1000,
-    
+
     // Polling configuration when WebSocket is not available
     pollingInterval: parseInt(import.meta.env.VITE_AGENT_REFRESH_INTERVAL || '30000'),
     withdrawalPollingInterval: parseInt(import.meta.env.VITE_WITHDRAWAL_STATUS_REFRESH_INTERVAL || '5000'),
-    
+
     // Batch operations
     enableBatchOperations: true,
     maxBatchSize: 50
   },
-  
+
   // Error reporting configuration
   errorReporting: {
     enabled: import.meta.env.VITE_ENABLE_ERROR_REPORTING === 'true',
@@ -176,12 +176,12 @@ export const SERVICE_CONFIG = {
     includeUserAgent: true,
     includeBrowserInfo: true,
     includeStackTrace: import.meta.env.DEV,
-    
+
     // Rate limiting for error reports
     maxErrorsPerMinute: 10,
     maxErrorsPerHour: 100
   },
-  
+
   // External API configuration
   external: {
     coinGecko: {
@@ -190,7 +190,7 @@ export const SERVICE_CONFIG = {
       rateLimit: 50, // requests per minute for free tier
       cacheTtl: 300000 // 5 minutes
     },
-    
+
     analytics: {
       enabled: import.meta.env.VITE_ENABLE_ANALYTICS === 'true',
       endpoint: EXTERNAL_ENDPOINTS.analytics.endpoint,
@@ -220,7 +220,7 @@ export const REQUEST_INTERCEPTORS = {
     }
     return config;
   },
-  
+
   // Add request ID for tracking
   addRequestId: (config: RequestInit): RequestInit => {
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -232,7 +232,7 @@ export const REQUEST_INTERCEPTORS = {
       }
     };
   },
-  
+
   // Add user agent information
   addUserAgent: (config: RequestInit): RequestInit => {
     return {
@@ -252,12 +252,15 @@ export const RESPONSE_INTERCEPTORS = {
   handleErrors: async (response: Response): Promise<Response> => {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      const serverMsg = (errorData && (errorData.error || errorData.message)) || null;
+      let serverMsg = (errorData && (errorData.error || errorData.message)) || null;
+      if (typeof serverMsg === 'object') {
+        serverMsg = JSON.stringify(serverMsg);
+      }
       throw new Error(serverMsg || `HTTP ${response.status}: ${response.statusText}`);
     }
     return response;
   },
-  
+
   // Log response times for monitoring
   logResponseTime: (response: Response, startTime: number): Response => {
     const responseTime = Date.now() - startTime;
@@ -271,11 +274,11 @@ export const RESPONSE_INTERCEPTORS = {
 // Helper functions for making API requests
 export class ApiClient {
   private static async makeRequest(
-    url: string, 
+    url: string,
     options: RequestInit = {}
   ): Promise<Response> {
     const startTime = Date.now();
-    
+
     // Apply request interceptors
     const mergedHeaders: HeadersInit = {
       ...(API_CONFIG.defaultHeaders as HeadersInit),
@@ -285,25 +288,25 @@ export class ApiClient {
       ...options,
       headers: mergedHeaders,
     };
-    
+
     config = REQUEST_INTERCEPTORS.addRequestId(config);
     config = REQUEST_INTERCEPTORS.addUserAgent(config);
     config = REQUEST_INTERCEPTORS.addAuth(config);
-    
+
     // Make the request
     const response = await fetch(url, config);
-    
+
     // Apply response interceptors
     const processedResponse = await RESPONSE_INTERCEPTORS.handleErrors(response);
     RESPONSE_INTERCEPTORS.logResponseTime(processedResponse, startTime);
-    
+
     return processedResponse;
   }
-  
+
   static async get(url: string, options: RequestInit = {}): Promise<Response> {
     return this.makeRequest(url, { ...options, method: 'GET' });
   }
-  
+
   static async post(url: string, data?: unknown, options: RequestInit = {}): Promise<Response> {
     return this.makeRequest(url, {
       ...options,
@@ -311,7 +314,7 @@ export class ApiClient {
       body: data ? JSON.stringify(data) : undefined
     });
   }
-  
+
   static async put(url: string, data?: unknown, options: RequestInit = {}): Promise<Response> {
     return this.makeRequest(url, {
       ...options,
@@ -319,7 +322,7 @@ export class ApiClient {
       body: data ? JSON.stringify(data) : undefined
     });
   }
-  
+
   static async delete(url: string, options: RequestInit = {}): Promise<Response> {
     return this.makeRequest(url, { ...options, method: 'DELETE' });
   }
@@ -334,7 +337,7 @@ export function validateEndpointConfig(): boolean {
       console.error('No base URL configured for API');
       return false;
     }
-    
+
     // Validate required environment variables
     if (import.meta.env.PROD) {
       if (SERVICE_CONFIG.errorReporting.enabled && !ERROR_REPORTING_ENDPOINTS.reportError) {
@@ -342,7 +345,7 @@ export function validateEndpointConfig(): boolean {
         return false;
       }
     }
-    
+
     return true;
   } catch (error) {
     console.error('Error validating endpoint configuration:', error);

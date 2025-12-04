@@ -41,7 +41,7 @@ export default function AffiliatePage() {
 
   const { account } = useWalletConnection();
   const { anchorProvider, signTransaction } = useWallet();
-  
+
   // Referral count not provided via backend summary yet; default to 0
   const [referralCount, setReferralCount] = useState<number>(0);
   const [summary, setSummary] = useState<AffiliateSummary | null>(null);
@@ -154,6 +154,7 @@ export default function AffiliatePage() {
       const baseUrl = API_CONFIG.getBaseUrl();
       const initUrl = `${baseUrl}/withdrawals/init`;
       const initResp = await ApiClient.post(initUrl, {
+        type: 'balance',
         mintAddress: mint.toBase58(),
         amountMicro,
         recipientAta: recipientAta.toBase58(),
@@ -233,7 +234,7 @@ export default function AffiliatePage() {
       <div className="flex items-center justify-start">
         <BackButton to="/dapp" />
       </div>
-      
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -451,8 +452,8 @@ export default function AffiliatePage() {
         </TabsContent>
 
         <TabsContent value="referrals" className="space-y-4">
-          <MyReferralsCard 
-            userPublicKey={userPubkey} 
+          <MyReferralsCard
+            userPublicKey={userPubkey}
             referralCount={referralCount}
           />
         </TabsContent>

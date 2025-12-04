@@ -327,8 +327,8 @@ router.get('/admin/buckets', requireAdmin, async (req: Request, res: Response) =
 })
 
 // Helper to filter bucket object by accessible buckets
-function filterBucketsByAccess(row: Record<string, any>, accessible: BucketType[]) {
-  const base: Record<string, any> = {}
+function filterBucketsByAccess(row: Record<string, string | number>, accessible: BucketType[]) {
+  const base: Record<string, string | number> = {}
   // Always include id if present
   if (typeof row.id !== 'undefined') base.id = row.id
 
@@ -663,6 +663,8 @@ router.get('/users/:address', requireAdmin, async (req: Request, res: Response) 
         u.license_status,
         u.license_expiration,
         u.ref_by,
+        u.agent_pnl_withdrawal_limit,
+        u.agent_pnl_withdrawal_enabled,
         s.user_address AS sponsor_address,
         u.created_at AS user_created_at,
         b.bonus_balance,
@@ -684,6 +686,39 @@ router.get('/users/:address', requireAdmin, async (req: Request, res: Response) 
   } catch (error) {
     console.error('Error fetching user:', error)
     res.status(500).json({ error: 'Failed to fetch user' })
+  }
+})
+
+const WithdrawalSettingsSchema = z.object({
+  enabled: z.boolean(),
+  limit: z.number().int().min(0).nullable(), // Limit in micro-USDT, null = unlimited
+})
+
+router.post('/users/:address/withdrawal-settings', requireAdmin, async (req: Request, res: Response) => {
+  const parsed = WithdrawalSettingsSchema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
+
+  const address = req.params.address
+  const { enabled, limit } = parsed.data
+
+  try {
+    const { rows } = await query(`
+      UPDATE users
+      SET agent_pnl_withdrawal_enabled = $1,
+          agent_pnl_withdrawal_limit = $2,
+          updated_at = NOW()
+      WHERE user_address = $3
+      RETURNING *
+    `, [enabled, limit, address])
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' })
+    }
+
+    res.json(rows[0])
+  } catch (error) {
+    console.error('Error updating withdrawal settings:', error)
+    res.status(500).json({ error: 'Failed to update withdrawal settings' })
   }
 })
 

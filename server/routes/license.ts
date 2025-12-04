@@ -10,6 +10,8 @@ import { getBackendAuthorityPublicKey } from '../lib/solana'
 import { applyBalanceBucketChange, getOrCreateBalanceId } from '../services/balance'
 import { distributeAffiliateBonuses } from '../services/affiliate'
 
+import { isExemptAdmin } from '../lib/admin-exemption'
+
 const router = Router()
 
 /**
@@ -27,7 +29,10 @@ router.get('/license/info', async (_req: Request, res: Response) => {
     const userSql = 'SELECT license_status, license_expiration FROM users WHERE id = $1'
     const userRes = await query<{ license_status: string | null; license_expiration: string | null }>(userSql, [auth.sub])
     const { license_status: rawStatus, license_expiration } = userRes.rows[0] || { license_status: 'none', license_expiration: null }
-    const license_status = rawStatus || 'none'
+
+    // Check admin exemption
+    const isAdmin = isExemptAdmin(auth.addr)
+    const license_status = isAdmin ? 'active' : (rawStatus || 'none')
 
     // Fetch settings for license cost (USDT, whole tokens) and term (days)
     const settingsSql = "SELECT key, value, type FROM settings WHERE key IN ('license.fee_usdt','license.term_days')"

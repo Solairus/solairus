@@ -18,6 +18,7 @@ import { getAuthorityPublicKeyBase58 } from './lib/authority'
 import agentsRouter from './routes/agents'
 import adminRouter from './routes/admin'
 import rpcRouter from './routes/rpc'
+import unclaimedRouter from './routes/unclaimed'
 import { runDailyAgentEarnings } from './services/agent_results'
 
 const app = express()
@@ -71,6 +72,7 @@ app.use('/api', requireAuth, withdrawalsRouter)
 app.use('/api', requireAuth, agentsRouter)
 app.use('/api', requireAuth, adminRouter)
 app.use('/api', requireAuth, rpcRouter)
+app.use('/api', requireAuth, unclaimedRouter)
 
 // Secured cron trigger (optional): requires X-Cron-Secret header matching env CRON_SECRET
 app.post('/api/cron/agents/daily', async (req: Request, res: Response) => {
@@ -104,8 +106,8 @@ async function startServer() {
       console.log(`Frontend served at http://localhost:${port}`)
     }
     console.log(`API available at http://localhost:${port}/api`)
-    setTimeout(() => { pingAllRpcEndpoints().catch(() => {}) }, 5000)
-    setInterval(() => { pingAllRpcEndpoints().catch(() => {}) }, 24 * 60 * 60 * 1000)
+    setTimeout(() => { pingAllRpcEndpoints().catch(() => { }) }, 5000)
+    setInterval(() => { pingAllRpcEndpoints().catch(() => { }) }, 24 * 60 * 60 * 1000)
   })
 }
 

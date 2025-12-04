@@ -15,10 +15,10 @@ export interface AdminContext {
  */
 export const getAdminAddresses = () => {
   return {
-    admin: import.meta.env.VITE_ADMIN_ADDRESS,
-    dev: import.meta.env.VITE_DEV_ADDRESS,
-    marketer1: import.meta.env.VITE_MARKETER1_ADDRESS,
-    marketer2: import.meta.env.VITE_MARKETER2_ADDRESS,
+    admin: import.meta.env.VITE_ADMIN_ADDRESS?.trim(),
+    dev: import.meta.env.VITE_DEV_ADDRESS?.trim(),
+    marketer1: import.meta.env.VITE_MARKETER1_ADDRESS?.trim(),
+    marketer2: import.meta.env.VITE_MARKETER2_ADDRESS?.trim(),
   };
 };
 
@@ -27,7 +27,7 @@ export const getAdminAddresses = () => {
  */
 export const validateAdminAddresses = (): boolean => {
   const addresses = getAdminAddresses();
-  
+
   return !!(
     addresses.admin &&
     addresses.dev &&
@@ -41,26 +41,26 @@ export const validateAdminAddresses = (): boolean => {
  */
 export const detectUserRole = (walletAddress: PublicKey | null): UserRole => {
   if (!walletAddress) return null;
-  
+
   const addresses = getAdminAddresses();
   const walletString = walletAddress.toString();
-  
+
   if (addresses.admin && walletString === addresses.admin) {
     return 'admin';
   }
-  
+
   if (addresses.dev && walletString === addresses.dev) {
     return 'dev';
   }
-  
+
   if (addresses.marketer1 && walletString === addresses.marketer1) {
     return 'marketer1';
   }
-  
+
   if (addresses.marketer2 && walletString === addresses.marketer2) {
     return 'marketer2';
   }
-  
+
   return null;
 };
 
@@ -77,7 +77,7 @@ export const getAdminContext = (role: UserRole): AdminContext => {
         canViewAllBuckets: false,
         accessibleBuckets: ['admin', 'trader', 'systemreserve'],
       };
-    
+
     case 'dev':
       return {
         role,
@@ -86,7 +86,7 @@ export const getAdminContext = (role: UserRole): AdminContext => {
         canViewAllBuckets: true,
         accessibleBuckets: ['admin', 'dev', 'marketer1', 'marketer2', 'trader', 'systemreserve'],
       };
-    
+
     case 'marketer1':
       return {
         role,
@@ -95,7 +95,7 @@ export const getAdminContext = (role: UserRole): AdminContext => {
         canViewAllBuckets: false,
         accessibleBuckets: ['marketer1'],
       };
-    
+
     case 'marketer2':
       return {
         role,
@@ -104,7 +104,7 @@ export const getAdminContext = (role: UserRole): AdminContext => {
         canViewAllBuckets: false,
         accessibleBuckets: ['marketer2'],
       };
-    
+
     default:
       return {
         role: null,
@@ -128,7 +128,7 @@ export const hasAdminAccess = (role: UserRole): boolean => {
  */
 export const canPerformAction = (role: UserRole, action: string): boolean => {
   const context = getAdminContext(role);
-  
+
   switch (action) {
     case 'config':
       return context.canAccessConfig;

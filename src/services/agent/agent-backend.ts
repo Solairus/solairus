@@ -20,6 +20,8 @@ export interface BackendAgentActivation {
   } | null;
   // Enriched PnL fields
   total_earned?: number; // USDT decimal
+  total_claimed?: number; // USDT decimal
+  unclaimed_amount?: number; // USDT decimal
   reward_cap_bp?: number; // basis points (e.g., 20000 for 200%)
   yield_cap_progress_pct?: number; // 0..capPct
   yield_cap_reached?: boolean;

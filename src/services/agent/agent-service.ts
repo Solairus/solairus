@@ -17,6 +17,8 @@ export interface AgentData {
   activatedAt: Date;
   lastRoiWithdrawal: Date | null;
   totalRoiWithdrawn: number;
+  totalClaimed?: number;
+  unclaimedAmount?: number;
   yieldCapReached: boolean;
   yieldCapProgress: number;
   canWithdraw: boolean;
@@ -128,6 +130,8 @@ async function mapBackendAgentToAgentData(
     activatedAt,
     lastRoiWithdrawal: claimedAt,
     totalRoiWithdrawn,
+    totalClaimed: typeof row.total_claimed === "number" ? row.total_claimed : Number(row.total_claimed ?? 0),
+    unclaimedAmount: typeof row.unclaimed_amount === "number" ? row.unclaimed_amount : Number(row.unclaimed_amount ?? 0),
     yieldCapReached,
     yieldCapProgress,
     canWithdraw,
@@ -161,30 +165,30 @@ export async function getUserAgents(
   );
 
   mappedAgents.sort((a, b) => {
-      let comparison = 0;
-      switch (sortBy) {
+    let comparison = 0;
+    switch (sortBy) {
       case "activatedAt":
-          comparison = a.activatedAt.getTime() - b.activatedAt.getTime();
-          break;
+        comparison = a.activatedAt.getTime() - b.activatedAt.getTime();
+        break;
       case "tier":
         comparison = String(a.tier).localeCompare(String(b.tier));
-          break;
+        break;
       case "activationAmount":
-          comparison = a.activationAmount - b.activationAmount;
-          break;
-        default:
-          comparison = a.activatedAt.getTime() - b.activatedAt.getTime();
-      }
+        comparison = a.activationAmount - b.activationAmount;
+        break;
+      default:
+        comparison = a.activatedAt.getTime() - b.activatedAt.getTime();
+    }
     return sortOrder === "desc" ? -comparison : comparison;
-    });
+  });
 
   const totalCount = mappedAgents.length;
   const sliced = mappedAgents.slice(offset, offset + limit);
-    const hasMore = offset + limit < totalCount;
+  const hasMore = offset + limit < totalCount;
 
-    return {
+  return {
     agents: sliced,
-      totalCount,
+    totalCount,
     hasMore,
   };
 }
@@ -213,12 +217,12 @@ export async function getUserAgentStatistics(
   userPublicKey: PublicKey
 ): Promise<AgentStatistics> {
   const { agents } = await getUserAgents(connection, userPublicKey);
-    const totalAgents = agents.length;
+  const totalAgents = agents.length;
   const activeAgents = agents.filter((agent) => !agent.yieldCapReached).length;
   const retiredAgents = totalAgents - activeAgents;
-    
-    const totalInvested = agents.reduce((sum, agent) => sum + agent.activationAmount, 0);
-    const totalWithdrawn = agents.reduce((sum, agent) => sum + agent.totalRoiWithdrawn, 0);
+
+  const totalInvested = agents.reduce((sum, agent) => sum + agent.activationAmount, 0);
+  const totalWithdrawn = agents.reduce((sum, agent) => sum + agent.totalRoiWithdrawn, 0);
   const averageYieldProgress = totalAgents > 0 ? agents.reduce((sum, agent) => sum + agent.yieldCapProgress, 0) / totalAgents : 0;
 
   const baseTiers: Record<TierName, number> = {
@@ -231,14 +235,14 @@ export async function getUserAgentStatistics(
     acc[agent.tier] = (acc[agent.tier] ?? 0) + 1;
     return acc;
   }, { ...baseTiers });
-    
-    return {
-      totalAgents,
-      activeAgents,
-      retiredAgents,
-      totalInvested,
-      totalWithdrawn,
-      averageYieldProgress,
+
+  return {
+    totalAgents,
+    activeAgents,
+    retiredAgents,
+    totalInvested,
+    totalWithdrawn,
+    averageYieldProgress,
     agentsByTier,
-    };
+  };
 }

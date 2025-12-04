@@ -4,6 +4,7 @@ import { getWithdrawalLimitStatus, canWithdrawAmount } from "./withdrawal-limit-
 import { getUserAgent } from "./agent-service";
 import { AgentErrorHandler } from "@/utils/agent-error-handler";
 import { EXTENDED_AGENT_TIER_METADATA } from "@/config/agent-config";
+import { confirmAndRecord } from "@/services/transactions/confirmAndRecord";
 
 // Helper function to check if ROI withdrawal is possible
 function canWithdrawRoi(agentData: any): { canWithdraw: boolean; reason?: string; nextWithdrawalAt?: Date } {
@@ -11,7 +12,7 @@ function canWithdrawRoi(agentData: any): { canWithdraw: boolean; reason?: string
   const now = Math.floor(Date.now() / 1000);
   const lastWithdrawal = agentData.lastRoiWithdrawal || 0;
   const secondsPerDay = 86400; // 24 hours fixed (backend-enforced)
-  
+
   if (now - lastWithdrawal < secondsPerDay) {
     const nextWithdrawalAt = new Date((lastWithdrawal + secondsPerDay) * 1000);
     return {
@@ -20,14 +21,14 @@ function canWithdrawRoi(agentData: any): { canWithdraw: boolean; reason?: string
       nextWithdrawalAt
     };
   }
-  
+
   if (agentData.yieldCapReached) {
     return {
       canWithdraw: false,
       reason: 'Yield cap reached'
     };
   }
-  
+
   return { canWithdraw: true };
 }
 
@@ -70,66 +71,91 @@ export async function withdrawAgentRoi(
     const userPublicKey = anchorProvider.wallet.publicKey;
 
     // Validate agent exists and backend eligibility (no contract timing)
-    const agentData = await getUserAgent(connection, userPublicKey, activationId);
-    if (!agentData) {
-      throw new Error(`Agent with activation ID ${activationId} not found`);
-    }
+    // OPTIMIZATION: Skip client-side fetch; rely on backend validation to reduce network calls
+    // const agentData = await getUserAgent(connection, userPublicKey, activationId);
+    // if (!agentData) {
+    //   throw new Error(`Agent with activation ID ${activationId} not found`);
+    // }
+    // if (!agentData.canWithdraw) {
+    //   throw new Error('Cooldown active or yield cap reached');
+    // }
 
-    if (!agentData.canWithdraw) {
-      throw new Error('Cooldown active or yield cap reached');
-    }
-
-    // Use backend API for withdrawal instead of direct contract calls
+    // Use unified backend API for withdrawal
     console.log('🚀 Initiating ROI withdrawal via backend API...');
-    
-    // Call backend withdrawal endpoint
-    const response = await fetch('/api/withdrawals/agent-roi', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        activationId,
-        walletAddress: userPublicKey.toString()
-      })
+
+    // Import ApiClient dynamically to ensure we get the auth headers
+    const { ApiClient, API_CONFIG } = await import("@/config/service-endpoints");
+
+    // Call unified withdrawal endpoint
+    const response = await ApiClient.post(`${API_CONFIG.getBaseUrl()}/withdrawals/init`, {
+      type: 'agent_roi',
+      activationId: Number(activationId),
+      // mintAddress, amountMicro, recipientAta are handled by backend for agent_roi
     });
-    
+
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
       throw new Error(`Backend withdrawal failed: ${errorData.error || response.statusText}`);
     }
-    
+
     const backendResult = await response.json();
     console.log('✅ Backend withdrawal successful:', backendResult);
-    
-    // Step 8: Prepare result from backend response
-    const result: WithdrawAgentRoiResult = { 
-      signature: backendResult.signature || 'backend-withdrawal',
+
+    // Step 8: Sign and Send Transaction
+    const { txBase64, orderId } = backendResult;
+    if (!txBase64) {
+      throw new Error('Backend did not return a transaction to sign');
+    }
+
+    // Deserialize transaction
+    const txBuffer = Buffer.from(txBase64, 'base64');
+    const transaction = Transaction.from(txBuffer);
+
+    // Sign and Confirm using shared utility (handles backend recording)
+    // Note: We need to cast the transaction to any because confirmAndRecord expects a specific type
+    // but Transaction.from returns a Transaction object which is compatible.
+    // Also we need to sign it first if using anchorProvider.wallet
+
+    // Sign the transaction
+    const signedTx = await anchorProvider.wallet.signTransaction(transaction);
+
+    // Send and confirm
+    const { signature } = await confirmAndRecord({
+      connection: anchorProvider.connection,
+      signedTx: signedTx,
+      orderId: orderId, // Pass orderId to ensure signature is recorded
+    });
+
+    console.log('✅ Transaction confirmed:', signature);
+
+    // Step 9: Prepare result
+    const result: WithdrawAgentRoiResult = {
+      signature: signature,
       roiAmount: backendResult.roiAmount,
       agentRetired: backendResult.agentRetired,
       newTotalWithdrawn: backendResult.newTotalWithdrawn,
       userTotalWithdrawn: backendResult.userTotalWithdrawn
     };
-    
+
     // Optional: wait and refresh simple backend state only
     await new Promise(resolve => setTimeout(resolve, 1000));
     const updatedAgentData = await getUserAgent(connection, userPublicKey, activationId).catch(() => null);
-    if (updatedAgentData && agentData) {
-      const roiAmount = updatedAgentData.totalRoiWithdrawn - agentData.totalRoiWithdrawn;
-      result.roiAmount = roiAmount;
+    if (updatedAgentData) {
+      // Update result with fresh data from backend
       result.agentRetired = updatedAgentData.yieldCapReached;
       result.newTotalWithdrawn = updatedAgentData.totalRoiWithdrawn;
+      // Note: result.roiAmount is already set from backend response
     }
-    
+
     return result;
-    
+
   } catch (error) {
     console.error('❌ Agent ROI withdrawal failed:', error);
-    
+
     // Use the agent error handler to parse and format the error
     const agentData = await getUserAgent(anchorProvider.connection, anchorProvider.wallet.publicKey, activationId).catch(() => null);
     const agentError = AgentErrorHandler.parseError(error, 'ROI withdrawal', agentData || undefined);
-    
+
     // Throw the user-friendly error message
     throw new Error(agentError.message);
   }

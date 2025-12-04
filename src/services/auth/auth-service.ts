@@ -13,6 +13,8 @@ export interface BackendUser {
   bonus_balance_micro?: string;
   // Credit balance from backend DB (micro-USDT, string)
   credit_balance_micro?: string;
+  // Reward balance from backend DB (micro-USDT, string)
+  reward_balance_micro?: string;
 }
 
 export interface AuthResponse {
