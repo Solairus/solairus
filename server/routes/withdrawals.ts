@@ -63,19 +63,53 @@ router.post('/withdrawals/init', async (req: Request, res: Response) => {
     // --- LOGIC BRANCHING BASED ON TYPE ---
 
     if (type === 'agent_roi') {
-      // 1. Validate Inputs
-      if (!parsed.data.activationId) {
-        throw new Error('activationId is required for agent_roi withdrawal')
+      const activationId = parsed.data.activationId
+      if (!activationId) return res.status(400).json({ error: 'Missing activationId' })
+
+      // Check for existing pending transaction for this agent
+      const pendingTx = await client.query(
+        `SELECT id, order_id, created_at, metadata FROM transactions 
+         WHERE type = 'agent_claim' 
+           AND status = 'pending' 
+           AND (metadata->>'activationId')::int = $1
+         LIMIT 1`,
+        [activationId]
+      )
+
+      if (pendingTx.rows.length > 0) {
+        const tx = pendingTx.rows[0]
+        // Check if expired (TTL 2 mins)
+        const createdAt = new Date(tx.created_at).getTime()
+        const now = Date.now()
+        const ttl = 120000 // 2 minutes
+
+        if (now - createdAt > ttl) {
+          console.log(`[Withdrawal] Found expired pending transaction ${tx.id}, attempting refund/revert...`)
+          const { attemptExpiredWithdrawalRefund } = await import('../services/withdrawal_refund')
+          const refundResult = await attemptExpiredWithdrawalRefund(tx.order_id)
+
+          if (refundResult.refunded) {
+            console.log(`[Withdrawal] Successfully reverted expired transaction ${tx.id}`)
+          } else {
+            console.warn(`[Withdrawal] Failed to revert expired transaction ${tx.id}: ${refundResult.reason}`)
+            // If we couldn't revert, we probably shouldn't proceed with a new one immediately
+            // But for now, let's let the user try again if it's really stuck
+          }
+        } else {
+          return res.status(400).json({ error: 'Pending withdrawal in progress. Please wait.' })
+        }
       }
 
-      // 2. Fetch Agent & Verify Ownership
+      // Fetch agent and calculate ROI
       const agentRes = await client.query(
-        `SELECT id, user_id, status, claimed_at, activated_at, created_at, amount 
-         FROM agents WHERE id = $1 AND user_id = $2 FOR UPDATE`,
-        [parsed.data.activationId, auth.sub]
+        `SELECT a.id, a.user_id, a.status, a.claimed_at, a.activated_at, a.created_at, a.tier_id, t.daily_reward_min_bp, t.daily_reward_max_bp 
+         FROM agents a
+         JOIN agent_tiers t ON a.tier_id = t.id
+         WHERE a.id = $1 AND a.user_id = $2 FOR UPDATE`,
+        [activationId, auth.sub]
       )
       const agent = agentRes.rows[0]
-      if (!agent) throw new Error('Agent not found')
+      if (!agent) return res.status(404).json({ error: 'Agent not found' })
       if (agent.status !== 'active') throw new Error('Agent is not active')
 
       // 3. Check Cooldown (24h)
@@ -86,15 +120,20 @@ router.post('/withdrawals/init', async (req: Request, res: Response) => {
         throw new Error('Cooldown active: please wait 24h between claims')
       }
 
-      // 4. Calculate Unclaimed Amount
-      const resultsRes = await client.query<{ total_micro: string }>(
-        `SELECT COALESCE(SUM(result_micro), 0)::text as total_micro 
+      // Calculate unclaimed ROI from agent_results
+      const resultsRes = await client.query(
+        `SELECT id, result_micro 
          FROM agent_results 
          WHERE agent_id = $1 AND claimed = FALSE`,
-        [agent.id]
+        [activationId]
       )
-      amountMicro = BigInt(resultsRes.rows[0]?.total_micro ?? '0')
-      if (amountMicro <= 0n) throw new Error('No unclaimed rewards available')
+
+      const claimedResultIds = resultsRes.rows.map(r => r.id)
+      const totalRoiMicro = resultsRes.rows.reduce((sum, r) => sum + BigInt(r.result_micro), 0n)
+
+      if (totalRoiMicro <= 0n) {
+        return res.status(400).json({ error: 'No ROI available to withdraw' })
+      }
 
       // 4b. Check User Withdrawal Limits
       const userLimitRes = await client.query(

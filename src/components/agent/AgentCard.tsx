@@ -93,7 +93,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
 
         // Show error toast for immediate feedback
         showError(result.error || 'Withdrawal failed', 'ROI withdrawal', agent, {
-          showRetry: errorInfo.isRetryable,
+          showRetry: false,
           onRetry: handleWithdraw
         });
       }
@@ -103,7 +103,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
       // Handle unexpected errors
       setLastError(error);
       const agentError = showError(error, 'ROI withdrawal', agent, {
-        showRetry: true,
+        showRetry: false,
         onRetry: handleWithdraw
       });
 

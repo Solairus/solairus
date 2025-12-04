@@ -30,7 +30,7 @@ export async function attemptExpiredWithdrawalRefund(orderId: string): Promise<{
     )
     const record = txRes.rows[0]
     if (!record) return { refunded: false, reason: 'record_not_found' }
-    if (!(record.type === 'user_withdrawal' || record.type === 'role_withdrawal')) return { refunded: false, reason: 'not_withdrawal' }
+    if (!(record.type === 'user_withdrawal' || record.type === 'role_withdrawal' || record.type === 'agent_claim')) return { refunded: false, reason: 'not_withdrawal' }
     if (record.status !== 'pending') return { refunded: false, reason: 'not_pending' }
 
     // If refund already finalized, do not process again
@@ -82,27 +82,53 @@ export async function attemptExpiredWithdrawalRefund(orderId: string): Promise<{
 
     await client.query('BEGIN')
 
-    // Resolve or create balance row and credit the provisional debit back (single final action)
-    const balanceId = await getOrCreateBalanceId(client, user.id)
-    // Refund into balances uses micro units exactly as stored in transactions.amount
-    // Do NOT rescale by decimals; transactions.amount is already micro (integer)
-    const rawAmount = record.amount as unknown
-    const amountMicro = typeof rawAmount === 'number'
-      ? BigInt(Math.round(rawAmount))
-      : BigInt(String(rawAmount))
-    await applyBalanceBucketChange(
-      client,
-      balanceId,
-      'bonus_balance',
-      'credit',
-      amountMicro,
-      record.id,
-      {
-        reason: 'withdrawal_refund',
-        order_id: orderId,
-        action_source: 'auto_refund_on_expiry',
+    if (record.type === 'agent_claim') {
+      // Revert agent claim state
+      const meta = record.metadata as Record<string, unknown>
+      const activationId = meta['activationId'] as number
+      const claimedResultIds = meta['claimed_result_ids'] as number[] | undefined
+      const previousClaimedAt = meta['previous_claimed_at'] as string | null
+
+      if (activationId) {
+        // 1. Revert agent_results claimed status
+        if (claimedResultIds && claimedResultIds.length > 0) {
+          await client.query(
+            `UPDATE agent_results SET claimed = FALSE WHERE id = ANY($1::int[])`,
+            [claimedResultIds]
+          )
+        }
+
+        // 2. Revert agent last_claimed_at
+        // If previousClaimedAt is null, set it to NULL, otherwise set to the date
+        await client.query(
+          `UPDATE agents SET last_claimed_at = $2 WHERE id = $1`,
+          [activationId, previousClaimedAt]
+        )
       }
-    )
+    } else {
+      // Standard user/role withdrawal refund logic
+      // Resolve or create balance row and credit the provisional debit back (single final action)
+      const balanceId = await getOrCreateBalanceId(client, user.id)
+      // Refund into balances uses micro units exactly as stored in transactions.amount
+      // Do NOT rescale by decimals; transactions.amount is already micro (integer)
+      const rawAmount = record.amount as unknown
+      const amountMicro = typeof rawAmount === 'number'
+        ? BigInt(Math.round(rawAmount))
+        : BigInt(String(rawAmount))
+      await applyBalanceBucketChange(
+        client,
+        balanceId,
+        'bonus_balance',
+        'credit',
+        amountMicro,
+        record.id,
+        {
+          reason: 'withdrawal_refund',
+          order_id: orderId,
+          action_source: 'auto_refund_on_expiry',
+        }
+      )
+    }
 
     // Mark transaction failed + refunded in metadata
     await finalizeRefund(client, record.id, { refund: true, refund_finalized: true, failureReason: 'Expired; no on-chain signature found', refundAt: now.toISOString(), reference: reference.toBase58() })

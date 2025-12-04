@@ -56,7 +56,7 @@ export const RETRY_CONFIGS: Record<string, RetryConfig> = {
 
   // ROI withdrawal - conservative retry
   withdrawal: {
-    maxAttempts: 3,
+    maxAttempts: 1, // Disable automatic retry
     baseDelay: 2000, // 2 seconds
     maxDelay: 60000, // 1 minute
     backoffMultiplier: 2,
@@ -96,7 +96,7 @@ export class AgentRetryMechanism {
       ...RETRY_CONFIGS[operationType] || RETRY_CONFIGS.query,
       ...customConfig
     };
-    
+
     this.retryState = {
       attempt: 0,
       maxAttempts: this.config.maxAttempts,
@@ -122,10 +122,10 @@ export class AgentRetryMechanism {
     while (this.retryState.attempt < this.config.maxAttempts) {
       try {
         this.retryState.attempt++;
-        
+
         // Execute the operation
         const result = await operation();
-        
+
         // Success - reset retry state
         this.resetRetryState();
         return {
@@ -237,7 +237,7 @@ export class AgentRetryMechanism {
       const agentError = AgentErrorHandler.parseError(error, context, agent);
       this.retryState.lastError = agentError;
       this.retryState.isRetrying = false;
-      
+
       return {
         success: false,
         error: agentError,
@@ -264,7 +264,7 @@ export class AgentRetryMechanism {
       AGENT_ERROR_CODES.UNAUTHORIZED
     ];
 
-    if (typeof error.code === 'number' && nonRetryableCodes.includes(error.code)) {
+    if (typeof error.code === 'number' && (nonRetryableCodes as number[]).includes(error.code)) {
       return false;
     }
 
