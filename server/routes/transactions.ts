@@ -12,91 +12,20 @@ import { Transaction, TransactionStatus, TransactionType } from '../types'
 import { z } from 'zod'
 import { Connection, PublicKey, ParsedInstruction, PartiallyDecodedInstruction } from '@solana/web3.js'
 import { BorshCoder, EventParser, Idl, utils } from '@coral-xyz/anchor'
-import { findPaymentSignatureByOrderId as findSignatureUnified } from '../services/onchain_verifier'
+import { findPaymentSignatureByOrderId as findSignatureUnified, verifyTransactionMatchesOnChain } from '../services/onchain_verifier'
 import solairusPayIdl from '../idl/solairus_pay.json'
-import { getConnection, getCurrentCluster, getRpcManager } from '../lib/rpc-manager'
-import { attemptExpiredWithdrawalRefund } from '../services/withdrawal_refund'
-import { attemptExpiredBucketWithdrawalRefund } from '../services/bucket_withdrawal_refund'
-import { deriveReference, findSignatureByReference } from '../services/withdrawal_verifier'
+import { getConnection, getCurrentCluster, getRpcManager, getWorkingConnection } from '../lib/rpc-manager'
+import { attemptExpiredWithdrawalRefund, attemptExpiredBucketWithdrawalRefund } from '../services/refund_manager'
+
 import { distributeAffiliateBonuses } from '../services/affiliate'
 import { applyBucketChange } from '../services/bucket'
 import { pool } from '../db'
 
 /**
- * Resolve mainnet RPC URL using the same logic as scripts/find-payment-event.mjs
- * Always uses mainnet endpoints regardless of SOLANA_CLUSTER setting
- */
-function resolveMainnetRpcUrl(): string {
-  const RPC_ENV_KEYS = [
-    'SOLANA_RPC_URL_MAINNET',
-    'SOLANA_RPC_URL_MAINNET_2',
-    'SOLANA_RPC_URL_MAINNET_3',
-    'SOLANA_RPC_URL_MAINNET_4',
-    'SOLANA_RPC_URL_MAINNET_5',
-    'VITE_SOLANA_RPC_URL_MAINNET',
-    'VITE_SOLANA_RPC_URL_MAINNET_2',
-    'VITE_SOLANA_RPC_URL_MAINNET_3',
-    'VITE_SOLANA_RPC_URL_MAINNET_4',
-    'VITE_SOLANA_RPC_URL_MAINNET_5',
-  ];
-
-  for (const key of RPC_ENV_KEYS) {
-    const value = process.env[key];
-    if (value) {
-      return value.endsWith('/') ? value : `${value}/`;
-    }
-  }
-  throw new Error('No mainnet RPC endpoint provided. Set SOLANA_RPC_URL_MAINNET or similar environment variable.');
-}
-
-/**
- * Return all configured RPC URLs for mainnet-beta, in order.
- */
-function getAllMainnetRpcUrls(): string[] {
-  const keys = [
-    'SOLANA_RPC_URL_MAINNET',
-    'SOLANA_RPC_URL_MAINNET_2',
-    'SOLANA_RPC_URL_MAINNET_3',
-    'SOLANA_RPC_URL_MAINNET_4',
-    'SOLANA_RPC_URL_MAINNET_5',
-    'VITE_SOLANA_RPC_URL_MAINNET',
-    'VITE_SOLANA_RPC_URL_MAINNET_2',
-    'VITE_SOLANA_RPC_URL_MAINNET_3',
-    'VITE_SOLANA_RPC_URL_MAINNET_4',
-    'VITE_SOLANA_RPC_URL_MAINNET_5',
-  ]
-  const urls = keys.map((k) => process.env[k]).filter((v): v is string => Boolean(v)).map((u) => (u!.endsWith('/') ? u! : `${u!}/`))
-  return urls.length ? urls : [resolveMainnetRpcUrl()]
-}
-
-// Simplified resolver helpers: use single healthy connection per check; no multi-RPC scans
-
-/**
  * Reusable function to find transaction signature by PaymentMade events
  * Uses mainnet RPC and standard search parameters for consistency
  */
-async function findTransactionSignature(
-  orderId: string,
-  payerPublicKey: PublicKey,
-  _solairusPayProgramId: string
-): Promise<ParsedPaymentEvent | null> {
-  const connection = new Connection(resolveMainnetRpcUrl(), 'confirmed')
-  const found = await findSignatureUnified(connection, payerPublicKey, orderId, { types: ['payment'], maxSignatures: 100 })
-  if (!found) return null
-  return {
-    signature: found.signature,
-    slot: found.slot,
-    event: {
-      payer: found.event.payer,
-      recipient: found.event.recipient,
-      mint: found.event.mint,
-      amount: found.event.amount,
-      decimals: found.event.decimals,
-      reference: found.event.reference,
-      memo: found.event.memo,
-    },
-  }
-}
+
 
 const router = Router()
 
@@ -142,150 +71,7 @@ function mapToDb(input: z.infer<typeof TransactionCreateSchema>) {
 /**
  * Verify that on-chain transaction matches expected amount/mint/initiator/recipient.
  */
-async function verifyOnChainMatchesRecord(
-  connection: Connection,
-  record: Transaction
-): Promise<{ ok: boolean; reason?: string }> {
-  if (!record.signature) return { ok: false, reason: 'No signature' }
-  const parsed = await connection.getParsedTransaction(record.signature, {
-    commitment: 'confirmed',
-    maxSupportedTransactionVersion: 0,
-  })
-  if (!parsed) return { ok: false, reason: 'Parsed transaction not found' }
 
-  const pre = parsed.meta?.preTokenBalances ?? []
-  const post = parsed.meta?.postTokenBalances ?? []
-  const accountKeys = parsed.transaction.message.accountKeys
-
-  const toBigInt = (s: string | number) => BigInt(typeof s === 'string' ? s : String(s))
-  const preInitiatorSum = pre
-    .filter((b) => b.owner === record.initiator_wallet && b.mint === record.mint_address)
-    .reduce((acc, b) => acc + toBigInt(b.uiTokenAmount.amount), 0n)
-  const postInitiatorSum = post
-    .filter((b) => b.owner === record.initiator_wallet && b.mint === record.mint_address)
-    .reduce((acc, b) => acc + toBigInt(b.uiTokenAmount.amount), 0n)
-  const initiatorDelta = preInitiatorSum - postInitiatorSum
-
-  const preRecipientSum = record.recipient_wallet
-    ? pre
-        .filter((b) => b.owner === record.recipient_wallet && b.mint === record.mint_address)
-        .reduce((acc, b) => acc + toBigInt(b.uiTokenAmount.amount), 0n)
-    : 0n
-  const postRecipientSum = record.recipient_wallet
-    ? post
-        .filter((b) => b.owner === record.recipient_wallet && b.mint === record.mint_address)
-        .reduce((acc, b) => acc + toBigInt(b.uiTokenAmount.amount), 0n)
-    : 0n
-  const recipientDelta = postRecipientSum - preRecipientSum
-  const expected = toBigInt(record.amount)
-
-  const decimalsOk = pre
-    .concat(post)
-    .some((b) => b.owner === record.initiator_wallet && b.mint === record.mint_address && Number(b.uiTokenAmount.decimals) === record.decimals)
-
-  let recipientOk = true
-  if (record.recipient_wallet) {
-    const recipientAccountMatch = post.some((b) => accountKeys[b.accountIndex]?.pubkey?.toBase58() === record.recipient_wallet)
-    const recipientOwnerMatch = post.some((b) => b.owner === record.recipient_wallet)
-    recipientOk = recipientAccountMatch || recipientOwnerMatch
-  }
-
-  const foundMint = pre.concat(post).some((b) => b.mint === record.mint_address)
-
-  // Enforce presence of expected reference account if provided in metadata
-  const refFromMeta = (() => {
-    const m = record.metadata as Record<string, unknown> | null
-    const r = m && (m['reference'] as string | undefined)
-    return typeof r === 'string' ? r : null
-  })()
-  let referenceOk = true
-  if (refFromMeta) {
-    referenceOk = accountKeys.some((k) => k?.pubkey?.toBase58() === refFromMeta)
-  }
-  // For withdrawals, the recipient should be credited by expected amount.
-  // For payments, the initiator should be debited by expected amount.
-  const isWithdrawal = record.type === 'user_withdrawal' || record.type === 'role_withdrawal'
-  const amountOk = isWithdrawal ? recipientDelta === expected : initiatorDelta === expected
-  const ok = amountOk && decimalsOk && recipientOk && foundMint && referenceOk
-
-  return ok
-    ? { ok: true }
-    : {
-        ok: false,
-        reason: `Mismatch: amountOk=${amountOk}, decimalsOk=${decimalsOk}, recipientOk=${recipientOk}, foundMint=${foundMint}, referenceOk=${referenceOk}`,
-      }
-}
-
-function metadataToObject(meta: unknown): Record<string, unknown> {
-  if (!meta || typeof meta !== 'object') return {}
-  return meta as Record<string, unknown>
-}
-
-async function fetchPaymentEventForSignature(
-  connection: Connection,
-  signature: string,
-  solairusPayProgramId: string
-): Promise<ParsedPaymentEvent | null> {
-  const coder = new BorshCoder(solairusPayIdl as Idl)
-  const programKey = new PublicKey(solairusPayProgramId)
-  const tx = await connection.getParsedTransaction(signature, {
-    commitment: 'confirmed',
-    maxSupportedTransactionVersion: 0,
-  })
-  if (!tx || !tx.meta) return null
-  const parser = new EventParser(programKey, coder)
-  const logs = tx.meta.logMessages ?? []
-  // Determine transaction type by signature from DB (no API changes)
-  let desiredEvent: 'PaymentMade' | 'RewardsClaimed' | 'any' = 'any'
-  try {
-    const found = await query<{ type: TransactionType; order_id: string }>(
-      'SELECT type, order_id FROM transactions WHERE signature = $1 LIMIT 1',
-      [signature]
-    )
-    if (found.rows.length) {
-      const t = found.rows[0].type
-      desiredEvent = t === 'license_activation' || t === 'agent_activation' ? 'PaymentMade' : 'RewardsClaimed'
-    }
-  } catch {}
-  for (const event of parser.parseLogs(logs)) {
-    if (desiredEvent !== 'any' && event.name !== desiredEvent) continue
-    if (desiredEvent === 'any' && !(event.name === 'PaymentMade' || event.name === 'RewardsClaimed')) continue
-    const memoField = event.data?.memo
-    let memo: string | undefined
-    if (typeof memoField === 'string') memo = memoField
-    else if (memoField instanceof Uint8Array) memo = Buffer.from(memoField).toString('utf8')
-    else if (memoField && typeof memoField === 'object' && 'toString' in memoField) {
-      memo = (memoField as { toString(): string }).toString()
-    }
-    const normalizeKey = (value: unknown): PublicKey | undefined => {
-      try {
-        if (value instanceof PublicKey) return value
-        if (value instanceof Uint8Array) return new PublicKey(value)
-        if (typeof value === 'string') return new PublicKey(value)
-        if (value && typeof value === 'object' && 'toString' in value) {
-          return new PublicKey((value as { toString(): string }).toString())
-        }
-      } catch {
-        return undefined
-      }
-      return undefined
-    }
-    return {
-      signature,
-      slot: tx.slot,
-      event: {
-        payer: normalizeKey(event.data?.payer),
-        recipient: normalizeKey(event.data?.recipient),
-        mint: normalizeKey(event.data?.mint),
-        amount: event.data?.amount ? BigInt(event.data.amount.toString()) : undefined,
-        decimals: typeof event.data?.decimals === 'number' ? event.data.decimals : undefined,
-        reference: normalizeKey(event.data?.reference),
-        memo,
-      },
-    }
-  }
-  return null
-}
 
 async function verifyAndProcessTransaction(
   connection: Connection,
@@ -316,7 +102,7 @@ async function verifyAndProcessTransaction(
   }
 
   console.log(`[verifyAndProcessTransaction] Signature confirmed, checking on-chain match`)
-  const match = await verifyOnChainMatchesRecord(connection, record)
+  const match = await verifyTransactionMatchesOnChain(connection, record)
   let verified = match.ok
   let failureReason = match.reason
 
@@ -328,7 +114,8 @@ async function verifyAndProcessTransaction(
       process.env.SOLAIRUS_PAY_PROGRAM_ID ?? (solairusPayIdl as { address?: string }).address ?? ''
     if (solairusPayProgramId) {
       console.log(`[verifyAndProcessTransaction] Fetching payment event for signature ${record.signature}`)
-      const paymentEvent = await fetchPaymentEventForSignature(connection, record.signature, solairusPayProgramId)
+      console.log(`[verifyAndProcessTransaction] Fetching payment event for signature ${record.signature}`)
+      const paymentEvent = await findSignatureUnified(connection, new PublicKey(record.initiator_wallet), record.order_id!, { types: ['payment', 'withdrawal'] })
       const memo = paymentEvent?.event.memo
       console.log(`[verifyAndProcessTransaction] Payment event found: ${!!paymentEvent}, memo: "${memo}", expected order_id: "${record.order_id}"`)
 
@@ -348,10 +135,10 @@ async function verifyAndProcessTransaction(
   const metaUpdate = verified
     ? { phase: 'verifying_complete', verified: true, failureReason: null }
     : {
-        phase: 'verification_failed',
-        verified: false,
-        failureReason: failureReason ?? 'Verification mismatch',
-      }
+      phase: 'verification_failed',
+      verified: false,
+      failureReason: failureReason ?? 'Verification mismatch',
+    }
 
   console.log(`[verifyAndProcessTransaction] Updating database: status=${dbStatus}, verified=${verified}`)
   const update = await query<Transaction>(
@@ -423,7 +210,7 @@ async function createTransactionHandler(req: Request, res: Response) {
     const isConfirmed = status && !status.err && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')
 
     if (isConfirmed) {
-      const match = await verifyOnChainMatchesRecord(connection, record)
+      const match = await verifyTransactionMatchesOnChain(connection, record)
       const dbStatus: TransactionStatus = match.ok ? 'confirmed' : 'failed'
       const update = await query<Transaction>(
         'UPDATE transactions SET status = $1, metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
@@ -524,7 +311,7 @@ router.post('/transactions/verify', async (req: Request, res: Response) => {
   let dbStatus: TransactionStatus = 'failed'
   let reason: string | undefined
   if (isConfirmed) {
-    const match = await verifyOnChainMatchesRecord(connection, record)
+    const match = await verifyTransactionMatchesOnChain(connection, record)
     dbStatus = match.ok ? 'confirmed' : 'failed'
     reason = match.reason
   } else {
@@ -550,7 +337,7 @@ async function lastConfirmedHandlerGeneric(transactionType: TransactionType, req
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
 
   const { initiatorWallet } = parsed.data
-  const connection = new Connection(resolveMainnetRpcUrl(), 'confirmed')
+  const connection = await getWorkingConnection()
   const solairusPayProgramId =
     process.env.SOLAIRUS_PAY_PROGRAM_ID ?? (solairusPayIdl as { address?: string }).address ?? ''
 
@@ -575,7 +362,7 @@ async function lastConfirmedHandlerGeneric(transactionType: TransactionType, req
   ) {
     try {
       const payerKey = new PublicKey(initiatorWallet)
-      const found = await findTransactionSignature(record.order_id, payerKey, solairusPayProgramId)
+      const found = await findSignatureUnified(connection, payerKey, record.order_id, { types: ['payment'] })
       if (found) {
         const metaPatch = {
           recoveredVia: 'order_id',
@@ -612,89 +399,7 @@ async function lastConfirmedHandler(req: Request, res: Response) {
  * Helper: Find transaction signature by searching for PaymentMade events from solairus_pay program
  * that contain the orderId in the memo field.
  */
-type ParsedPaymentEvent = {
-  signature: string
-  slot: number
-  event: {
-    payer?: PublicKey
-    recipient?: PublicKey
-    mint?: PublicKey
-    amount?: bigint
-    decimals?: number
-    reference?: PublicKey
-    memo?: string
-  }
-}
 
-async function findSignatureByPaymentEvent(
-  connection: Connection,
-  orderId: string,
-  payerPublicKey: PublicKey,
-  solairusPayProgramId: string
-): Promise<ParsedPaymentEvent | null> {
-  const coder = new BorshCoder(solairusPayIdl as Idl)
-  const parser = new EventParser(new PublicKey(solairusPayProgramId), coder)
-
-  const signatures = await connection.getSignaturesForAddress(payerPublicKey, { limit: 100 })
-
-  for (const sig of signatures) {
-    try {
-      const tx = await connection.getParsedTransaction(sig.signature, {
-        commitment: 'confirmed',
-        maxSupportedTransactionVersion: 0,
-      })
-
-      if (!tx || !tx.meta) continue
-
-      const normalizeKey = (value: unknown): PublicKey | undefined => {
-        try {
-          if (value instanceof PublicKey) return value
-          if (value instanceof Uint8Array) return new PublicKey(value)
-          if (typeof value === 'string') return new PublicKey(value)
-          if (value && typeof value === 'object' && 'toString' in value) {
-            return new PublicKey((value as { toString(): string }).toString())
-          }
-        } catch {
-          return undefined
-        }
-        return undefined
-      }
-
-      for (const event of parser.parseLogs(tx.meta.logMessages || [])) {
-        if (event.name !== 'PaymentMade') continue
-        const memoField = event.data?.memo
-        const memo =
-          typeof memoField === 'string'
-            ? memoField
-            : memoField instanceof Uint8Array
-            ? Buffer.from(memoField).toString('utf8')
-            : memoField && typeof memoField === 'object' && 'toString' in memoField
-            ? (memoField as { toString(): string }).toString()
-            : undefined
-
-        if (memo === orderId) {
-          return {
-            signature: sig.signature,
-            slot: tx.slot,
-            event: {
-              payer: normalizeKey(event.data?.payer),
-              recipient: normalizeKey(event.data?.recipient),
-              mint: normalizeKey(event.data?.mint),
-              amount: event.data?.amount ? BigInt(event.data.amount.toString()) : undefined,
-              decimals: typeof event.data?.decimals === 'number' ? event.data.decimals : undefined,
-              reference: normalizeKey(event.data?.reference),
-              memo,
-            },
-          }
-        }
-      }
-    } catch (err) {
-      console.warn(`Failed to parse transaction ${sig.signature}:`, err)
-    }
-  }
-
-  return null
-}
 
 /**
  * Convenience wrappers for specific types (payments and withdrawals)
@@ -787,7 +492,7 @@ router.post('/transactions/pending/resolve', async (req: Request, res: Response)
     // Process at most 5 per call to reduce RPC load
     for (const record of pending.rows.slice(0, 5)) {
       // Skip if refund already finalized
-      if (record.metadata && (record.metadata as any)['refund_finalized'] === true) continue
+      if (record.metadata && record.metadata['refund_finalized'] === true) continue
 
       // If signature exists, reuse shared verifier
       if (record.signature) {
@@ -801,7 +506,7 @@ router.post('/transactions/pending/resolve', async (req: Request, res: Response)
       if (record.type === 'license_activation' || record.type === 'agent_activation') {
         // Recover by PaymentMade event memo (orderId)
         if (record.order_id && solairusPayProgramId) {
-          const found = await findTransactionSignature(record.order_id, new PublicKey(walletAddress), solairusPayProgramId)
+          const found = await findSignatureUnified(connection, new PublicKey(walletAddress), record.order_id, { types: ['payment'] })
           if (found?.signature) {
             // Patch signature and verify
             await query('UPDATE transactions SET signature = $1 WHERE id = $2', [found.signature, record.id])
@@ -927,7 +632,7 @@ async function reapplyHandlerGeneric(transactionType: TransactionType, req: Requ
   if (record.type !== transactionType) return res.status(400).json({ error: 'Invalid transaction type' })
 
   // Allow both confirmed and pending transactions (pending may have been paid on-chain)
-  const connection = new Connection(resolveMainnetRpcUrl(), 'confirmed')
+  const connection = await getWorkingConnection()
   const solairusPayProgramId =
     process.env.SOLAIRUS_PAY_PROGRAM_ID ??
     (solairusPayIdl as { address?: string }).address ??
@@ -939,7 +644,7 @@ async function reapplyHandlerGeneric(transactionType: TransactionType, req: Requ
   // If signature is missing but we have orderId, try to find it via PaymentMade events
   if (!record.signature && orderId) {
     try {
-      const found = await findTransactionSignature(orderId, new PublicKey(initiatorWallet), solairusPayProgramId)
+      const found = await findSignatureUnified(connection, new PublicKey(initiatorWallet), orderId, { types: ['payment'] })
 
       if (found) {
         const metaPatch = {
@@ -1010,8 +715,8 @@ router.post('/transactions/activation/signature', async (req: Request, res: Resp
   let record = rows[0]
   if (record.type !== type) return res.status(400).json({ error: 'Invalid transaction type' })
 
-  const connection = new Connection(resolveMainnetRpcUrl(), 'confirmed')
-  const metaBase = metadataToObject(record.metadata)
+  const connection = await getWorkingConnection()
+  const metaBase = (record.metadata as Record<string, unknown> || {})
   const metaPayload = JSON.stringify({ ...metaBase, ...(metadata ?? {}), phase: 'signature_recorded' })
 
   if (record.signature !== signature) {
@@ -1096,7 +801,7 @@ router.get('/transactions/:orderId([0-9a-fA-F-]{36})', async (req: Request, res:
           let dbStatus: TransactionStatus = 'failed'
           let reason: string | undefined
           if (isConfirmed) {
-            const match = await verifyOnChainMatchesRecord(connection, record)
+            const match = await verifyTransactionMatchesOnChain(connection, record)
             dbStatus = match.ok ? 'confirmed' : 'failed'
             reason = match.reason
           } else {
@@ -1156,8 +861,8 @@ async function createOrResumeLicenseActivationHandler(req: Request, res: Respons
     let record = rows[0]
     if (record.type !== type) return res.status(400).json({ error: 'Invalid transaction type' })
 
-    const connection = new Connection(resolveMainnetRpcUrl(), 'confirmed')
-    const metaBase = metadataToObject(record.metadata)
+    const connection = await getWorkingConnection()
+    const metaBase = (record.metadata as Record<string, unknown> || {})
     const metaPayload = JSON.stringify({ ...metaBase, ...(metadata ?? {}), phase: 'signature_recorded' })
 
     if (record.signature !== signature) {
@@ -1185,7 +890,6 @@ async function createOrResumeLicenseActivationHandler(req: Request, res: Respons
   }
 
   const initiator = parsed.data.initiatorWallet
-  const { getWorkingConnection } = await import('../lib/rpc-manager')
   const connection = await getWorkingConnection()
 
   // Check for existing pending transactions (max 1 for license activation)
@@ -1641,7 +1345,7 @@ async function recordTransactionSignatureHandler(req: Request, res: Response) {
   let record = rows[0]
 
   // Update signature and metadata
-  const metaBase = metadataToObject(record.metadata)
+  const metaBase = (record.metadata as Record<string, unknown> || {})
   const metaPayload = JSON.stringify({ ...metaBase, ...(metadata ?? {}), phase: 'signature_recorded' })
 
   if (record.signature !== signature) {
@@ -1659,7 +1363,7 @@ async function recordTransactionSignatureHandler(req: Request, res: Response) {
   }
 
   // Verify and process the transaction - ALWAYS use mainnet for Solairus Pay transactions
-  const connection = new Connection(resolveMainnetRpcUrl(), 'confirmed')
+  const connection = await getWorkingConnection()
   console.log(`[recordTransactionSignatureHandler] Starting verification for orderId: ${orderId}, signature: ${signature}`)
   console.log(`[recordTransactionSignatureHandler] Using mainnet RPC endpoint: ${connection.rpcEndpoint}`)
   const result = await verifyAndProcessTransaction(connection, record, { requireOrderIdMatch: true })

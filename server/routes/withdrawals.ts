@@ -85,8 +85,8 @@ router.post('/withdrawals/init', async (req: Request, res: Response) => {
 
         if (now - createdAt > ttl) {
           console.log(`[Withdrawal] Found expired pending transaction ${tx.id}, attempting refund/revert...`)
-          const { attemptExpiredWithdrawalRefund } = await import('../services/withdrawal_refund')
-          const refundResult = await attemptExpiredWithdrawalRefund(tx.order_id)
+          const { attemptExpiredAgentWithdrawalRefund } = await import('../services/agent_withdrawal_refund')
+          const refundResult = await attemptExpiredAgentWithdrawalRefund(tx as any) // tx type cast needed or match Transaction type
 
           if (refundResult.refunded) {
             console.log(`[Withdrawal] Successfully reverted expired transaction ${tx.id}`)

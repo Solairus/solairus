@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Wallet, ArrowDownToLine, DollarSign, TrendingUp } from 'lucide-react';
+import { PublicKey } from '@solana/web3.js';
 import { BucketType } from '@/hooks/useBucketBalances';
 import { formatUsdtAmount, parseUsdtAmount, withdrawFromBucket } from '@/services/bucket/bucket-service';
 import { useWallet } from '@/contexts/wallet-context';
@@ -28,7 +29,7 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
   const [showWithdrawForm, setShowWithdrawForm] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const validation = useFormValidation();
-  
+
   const transactionStatus = useTransactionStatus({
     steps: [
       { id: 'validate', label: 'Validating withdrawal' },
@@ -54,8 +55,8 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
   const bucketDisplayNames: Record<BucketType, string> = {
     admin: 'Admin',
     dev: 'Developer',
-    marketer_1: 'Marketer 1',
-    marketer_2: 'Marketer 2',
+    marketer1: 'Admin 2',
+    marketer2: 'Marketer 2',
     trader: 'Trader',
     reserve: 'System Reserve',
   };
@@ -63,8 +64,8 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
   const bucketColors: Record<BucketType, string> = {
     admin: 'bg-red-500/10 text-red-400 border-red-500/20',
     dev: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-    marketer_1: 'bg-green-500/10 text-green-400 border-green-500/20',
-    marketer_2: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+    marketer1: 'bg-green-500/10 text-green-400 border-green-500/20',
+    marketer2: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
     trader: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
     reserve: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
   };
@@ -74,7 +75,7 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
 
   const validateWithdrawal = () => {
     validation.clearErrors();
-    
+
     if (!anchorProvider || !publicKey) {
       validation.addError('wallet', 'Wallet not connected');
       return false;
@@ -123,7 +124,7 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
 
     await transactionStatus.executeTransaction(async () => {
       transactionStatus.updateProgress(20, 'validate');
-      
+
       const txSignature = await withdrawFromBucket({
         provider: anchorProvider,
         connection: anchorProvider.connection,
@@ -163,7 +164,7 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
             </Badge>
           </div>
         </CardHeader>
-        
+
         <CardContent className="space-y-4">
           {/* Balance Display */}
           <div className="bg-gray-800/50 rounded-lg p-4 text-center">
@@ -250,7 +251,7 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
                       Maximum: {formattedBalance} USDT
                     </div>
                   </div>
-                  
+
                   <div className="flex gap-2">
                     <Button
                       onClick={handleWithdrawClick}
@@ -259,7 +260,7 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
                     >
                       Confirm Withdrawal
                     </Button>
-                    
+
                     <Button
                       onClick={() => {
                         setShowWithdrawForm(false);

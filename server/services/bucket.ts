@@ -32,9 +32,11 @@ export async function getBucketRowId(client: PoolClient): Promise<number> {
  *  - UPDATE bucket_balances SET <bucketRef> = <bucketRef> + amount RETURNING <bucketRef>
  *  - INSERT INTO bucket_histories (bucket_ref, amount, bucket_balance, transaction_id)
  */
+export type BucketRef = 'admin' | 'dev' | 'marketer_1' | 'marketer_2' | 'trader' | 'reserve';
+
 export async function applyBucketChange(
   client: PoolClient,
-  bucketRef: 'admin' | 'dev' | 'marketer_1' | 'marketer_2' | 'trader' | 'reserve',
+  bucketRef: BucketRef,
   action: 'credit' | 'debit',
   amountUsdt: string,
   transactionId: number

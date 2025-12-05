@@ -9,12 +9,17 @@
 
 import { PublicKey } from "@solana/web3.js";
 import * as anchor from "@coral-xyz/anchor";
-import { getErrorMessage } from "@/lib/solairus-removed";
-import { 
-  ProfileErrorContext, 
+// Removed solairus-removed dependency
+import {
+  ProfileErrorContext,
   EnhancedProfileError,
-  ProfileErrorFormatter 
+  ProfileErrorFormatter
 } from "./profile-error-types";
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
 
 /**
  * Registration metrics and statistics
@@ -120,7 +125,7 @@ export class ProfileMonitoringService {
   constructor(program: anchor.Program, provider: anchor.AnchorProvider) {
     this.program = program;
     this.provider = provider;
-    
+
     this.registrationMetrics = {
       totalAttempts: 0,
       successfulRegistrations: 0,
@@ -160,22 +165,22 @@ export class ProfileMonitoringService {
     error?: EnhancedProfileError
   ): void {
     this.registrationMetrics.totalAttempts++;
-    
+
     if (success) {
       this.registrationMetrics.successfulRegistrations++;
     } else {
       this.registrationMetrics.failedRegistrations++;
-      
+
       // Track error types
       if (error) {
         const errorType = error.type || 'unknown';
-        this.registrationMetrics.errorBreakdown[errorType] = 
+        this.registrationMetrics.errorBreakdown[errorType] =
           (this.registrationMetrics.errorBreakdown[errorType] || 0) + 1;
       }
     }
 
     // Update success rate
-    this.registrationMetrics.successRate = 
+    this.registrationMetrics.successRate =
       (this.registrationMetrics.successfulRegistrations / this.registrationMetrics.totalAttempts) * 100;
 
     // Update average registration time
@@ -205,7 +210,7 @@ export class ProfileMonitoringService {
    */
   recordPerformanceMetric(metric: Omit<PerformanceMetrics, 'endTime' | 'duration'>): string {
     const id = `perf_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+
     const performanceMetric: PerformanceMetrics = {
       ...metric,
       endTime: Date.now(),
@@ -235,7 +240,7 @@ export class ProfileMonitoringService {
     complete: (success: boolean, errorType?: string, additionalMetadata?: Record<string, unknown>) => void;
   } {
     const startTime = Date.now();
-    
+
     return {
       complete: (success: boolean, errorType?: string, additionalMetadata?: Record<string, unknown>) => {
         this.recordPerformanceMetric({
@@ -370,8 +375,8 @@ export class ProfileMonitoringService {
     const totalOperations = recentMetrics.length;
     const successfulOperations = recentMetrics.filter(m => m.success).length;
     const successRate = totalOperations > 0 ? (successfulOperations / totalOperations) * 100 : 0;
-    const averageLatency = totalOperations > 0 
-      ? recentMetrics.reduce((sum, m) => sum + (m.duration || 0), 0) / totalOperations 
+    const averageLatency = totalOperations > 0
+      ? recentMetrics.reduce((sum, m) => sum + (m.duration || 0), 0) / totalOperations
       : 0;
     const errorRate = 100 - successRate;
 
@@ -545,21 +550,21 @@ export class ProfileMonitoringService {
     if (metric.operationType === 'validation' && metric.duration) {
       const validationMetrics = this.metrics.filter(m => m.operationType === 'validation');
       const totalTime = validationMetrics.reduce((sum, m) => sum + (m.duration || 0), 0);
-      this.registrationMetrics.performanceMetrics.averageValidationTime = 
+      this.registrationMetrics.performanceMetrics.averageValidationTime =
         totalTime / validationMetrics.length;
     }
 
     if (metric.operationType === 'recovery' && metric.duration) {
       const recoveryMetrics = this.metrics.filter(m => m.operationType === 'recovery');
       const totalTime = recoveryMetrics.reduce((sum, m) => sum + (m.duration || 0), 0);
-      this.registrationMetrics.performanceMetrics.averageRecoveryTime = 
+      this.registrationMetrics.performanceMetrics.averageRecoveryTime =
         totalTime / recoveryMetrics.length;
     }
 
     if (metric.networkLatency) {
       const metricsWithLatency = this.metrics.filter(m => m.networkLatency);
       const totalLatency = metricsWithLatency.reduce((sum, m) => sum + (m.networkLatency || 0), 0);
-      this.registrationMetrics.performanceMetrics.averageNetworkLatency = 
+      this.registrationMetrics.performanceMetrics.averageNetworkLatency =
         totalLatency / metricsWithLatency.length;
     }
   }
@@ -575,7 +580,7 @@ export class ProfileMonitoringService {
     if (recentMetrics.length > 0) {
       const errorRate = (recentMetrics.filter(m => !m.success).length / recentMetrics.length) * 100;
       if (errorRate > this.alertConfig.errorRateThreshold) {
-        this.createAlert('error_rate', 'high', 
+        this.createAlert('error_rate', 'high',
           `Error rate (${errorRate.toFixed(1)}%) exceeds threshold (${this.alertConfig.errorRateThreshold}%)`,
           { errorRate, threshold: this.alertConfig.errorRateThreshold }
         );
@@ -586,7 +591,7 @@ export class ProfileMonitoringService {
     const recentLatencies = recentMetrics
       .filter(m => m.duration)
       .map(m => m.duration!);
-    
+
     if (recentLatencies.length > 0) {
       const averageLatency = recentLatencies.reduce((sum, l) => sum + l, 0) / recentLatencies.length;
       if (averageLatency > this.alertConfig.latencyThreshold) {
@@ -614,9 +619,9 @@ export class ProfileMonitoringService {
     metrics: Record<string, unknown>
   ): void {
     // Check if similar alert already exists and is not resolved
-    const existingAlert = this.alerts.find(alert => 
-      alert.type === type && 
-      !alert.resolved && 
+    const existingAlert = this.alerts.find(alert =>
+      alert.type === type &&
+      !alert.resolved &&
       (Date.now() - alert.timestamp) < (this.alertConfig.timeWindowMinutes * 60 * 1000)
     );
 
@@ -665,11 +670,11 @@ export class ProfileMonitoringService {
         }
 
         // Calculate recent error rate
-        const recentMetrics = this.metrics.filter(m => 
+        const recentMetrics = this.metrics.filter(m =>
           m.startTime >= Date.now() - (15 * 60 * 1000) // Last 15 minutes
         );
-        const errorRate = recentMetrics.length > 0 
-          ? (recentMetrics.filter(m => !m.success).length / recentMetrics.length) * 100 
+        const errorRate = recentMetrics.length > 0
+          ? (recentMetrics.filter(m => !m.success).length / recentMetrics.length) * 100
           : 0;
 
         const healthMetric: SystemHealthMetrics = {
@@ -684,10 +689,12 @@ export class ProfileMonitoringService {
 
         // Add memory usage if available
         if (typeof performance !== 'undefined' && typeof (performance as unknown as { memory?: unknown }).memory !== 'undefined') {
-          const memory = (performance as unknown as { memory: {
-            usedJSHeapSize: number;
-            totalJSHeapSize: number;
-          } }).memory;
+          const memory = (performance as unknown as {
+            memory: {
+              usedJSHeapSize: number;
+              totalJSHeapSize: number;
+            }
+          }).memory;
           healthMetric.memoryUsage = {
             used: memory.usedJSHeapSize,
             total: memory.totalJSHeapSize,
@@ -790,7 +797,7 @@ export const ProfileMonitoringUtils = {
     }
 
     const measurement = monitoring.startPerformanceMeasurement(operationType, metadata);
-    
+
     try {
       const result = await operation();
       measurement.complete(true, undefined, { resultType: typeof result });

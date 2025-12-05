@@ -13,10 +13,10 @@ export function normalizeBucketType(bucketType: BucketType): string {
       return 'admin';
     case 'dev':
       return 'dev';
-    case 'marketer_1':
-      return 'marketer_1';
-    case 'marketer_2':
-      return 'marketer_2';
+    case 'marketer1':
+      return 'marketer1';
+    case 'marketer2':
+      return 'marketer2';
     case 'trader':
       return 'trader';
     case 'reserve':
@@ -45,6 +45,7 @@ export async function withdrawFromBucket({
   authority,
   usdtMint,
   memo,
+  signTransaction,
 }: WithdrawBucketParams): Promise<string> {
   // Validate amount
   if (amount.lte(new anchor.BN(0))) {
@@ -102,9 +103,9 @@ export function parseUsdtAmount(amountStr: string): anchor.BN {
   const parts = amountStr.split('.');
   const wholePart = parts[0] || '0';
   const fractionalPart = (parts[1] || '').padEnd(6, '0').slice(0, 6);
-  
+
   const wholeAmount = new anchor.BN(wholePart).mul(new anchor.BN(1_000_000));
   const fractionalAmount = new anchor.BN(fractionalPart);
-  
+
   return wholeAmount.add(fractionalAmount);
 }

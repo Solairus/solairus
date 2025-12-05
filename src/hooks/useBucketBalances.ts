@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ApiClient } from '@/config/service-endpoints';
+import { ApiClient, BUCKET_ENDPOINTS } from '@/config/service-endpoints';
 
-export type BucketType = 'admin' | 'dev' | 'marketer_1' | 'marketer_2' | 'trader' | 'reserve';
+export type BucketType = 'admin' | 'dev' | 'marketer1' | 'marketer2' | 'trader' | 'reserve';
 
 export interface BucketBalances {
   admin: number;
   dev: number;
-  marketer_1: number;
-  marketer_2: number;
+  marketer1: number;
+  marketer2: number;
   trader: number;
   reserve: number;
 }
@@ -29,16 +29,17 @@ export function useBucketBalances(): UseBucketBalancesReturn {
       setLoading(true);
       setError(null);
 
-      const response = await ApiClient.get('/admin/buckets');
+      const url = BUCKET_ENDPOINTS.buildUrl(BUCKET_ENDPOINTS.getAdminBuckets);
+      const response = await ApiClient.get(url);
       const bucketData = await response.json();
 
       const bucketBalances: BucketBalances = {
-        admin: bucketData.admin || 0,
-        dev: bucketData.dev || 0,
-        marketer_1: bucketData.marketer_1 || 0,
-        marketer_2: bucketData.marketer_2 || 0,
-        trader: bucketData.trader || 0,
-        reserve: bucketData.reserve || 0,
+        admin: Number(bucketData.admin || 0),
+        dev: Number(bucketData.dev || 0),
+        marketer1: Number(bucketData.marketer1 || 0),
+        marketer2: Number(bucketData.marketer2 || 0),
+        trader: Number(bucketData.trader || 0),
+        reserve: Number(bucketData.reserve || 0),
       };
 
       setBalances(bucketBalances);

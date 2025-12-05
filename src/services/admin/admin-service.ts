@@ -1,6 +1,6 @@
 import * as anchor from '@coral-xyz/anchor';
 import { PublicKey } from '@solana/web3.js';
-// Purged solairus-removed from admin service
+// Solairus removed from admin service
 import { ApiClient, API_CONFIG } from '@/config/service-endpoints';
 
 /**
@@ -94,7 +94,7 @@ export interface CreditBalanceUpdatedEvent {
  */
 export class AdminService {
   private program?: anchor.Program;
-  constructor(_provider: anchor.AnchorProvider) {}
+  constructor(_provider: anchor.AnchorProvider) { }
 
   private programAccessError(): never {
     throw new Error('AdminService program access disabled: use backend routes');
@@ -221,27 +221,27 @@ export class AdminService {
       if (error.message.includes('Unauthorized')) {
         return new Error('You are not authorized to perform this action. Only admin or dev can perform administrative operations.');
       }
-      
+
       if (error.message.includes('InvalidAmount')) {
         return new Error('Invalid amount provided. Please check your input values.');
       }
-      
+
       if (error.message.includes('InsufficientFunds')) {
         return new Error('Insufficient funds for this operation.');
       }
-      
+
       if (error.message.includes('MathOverflow')) {
         return new Error('Mathematical overflow occurred. Please check your input values.');
       }
-      
+
       if (error.message.includes('SponsorNotRegistered')) {
         return new Error('The specified sponsor is not registered in the system.');
       }
-      
+
       // Return original error if no specific handling
       return error;
     }
-    
+
     return new Error(`Transaction failed: ${String(error)}`);
   }
 }
@@ -264,11 +264,11 @@ export const AdminServiceUtils = {
     if (durationDays <= 0) {
       return { isValid: false, error: 'Duration must be greater than 0 days' };
     }
-    
+
     if (durationDays > 3650) { // 10 years max
       return { isValid: false, error: 'Duration cannot exceed 10 years (3650 days)' };
     }
-    
+
     return { isValid: true };
   },
 
@@ -279,11 +279,11 @@ export const AdminServiceUtils = {
     if (amount <= 0) {
       return { isValid: false, error: 'Amount must be greater than 0' };
     }
-    
+
     if (amount > 1_000_000_000) { // 1 billion max
       return { isValid: false, error: 'Amount is too large' };
     }
-    
+
     return { isValid: true };
   },
 
@@ -297,11 +297,11 @@ export const AdminServiceUtils = {
   ): Date {
     const now = new Date();
     const durationMs = durationDays * 24 * 60 * 60 * 1000;
-    
+
     if (extendExisting && currentExpiration && currentExpiration > now) {
       return new Date(currentExpiration.getTime() + durationMs);
     }
-    
+
     return new Date(now.getTime() + durationMs);
   },
 
@@ -312,29 +312,29 @@ export const AdminServiceUtils = {
     if (durationDays === 1) {
       return '1 day';
     }
-    
+
     if (durationDays < 30) {
       return `${durationDays} days`;
     }
-    
+
     if (durationDays < 365) {
       const months = Math.floor(durationDays / 30);
       const remainingDays = durationDays % 30;
-      
+
       if (remainingDays === 0) {
         return months === 1 ? '1 month' : `${months} months`;
       }
-      
+
       return `${months} month${months > 1 ? 's' : ''} and ${remainingDays} day${remainingDays > 1 ? 's' : ''}`;
     }
-    
+
     const years = Math.floor(durationDays / 365);
     const remainingDays = durationDays % 365;
-    
+
     if (remainingDays === 0) {
       return years === 1 ? '1 year' : `${years} years`;
     }
-    
+
     return `${years} year${years > 1 ? 's' : ''} and ${remainingDays} day${remainingDays > 1 ? 's' : ''}`;
   },
 };

@@ -1,12 +1,14 @@
+
 import React from 'react';
 import { useWallet } from '@/contexts/wallet-context';
 import { useBucketBalances } from '@/hooks/useBucketBalances';
+import { parseUsdtAmount } from '@/services/bucket/bucket-service';
 import { BucketCard } from './BucketCard';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
-import { 
-  Wallet, 
-  Shield, 
+import {
+  Wallet,
+  Shield,
   TrendingUp,
   Info
 } from 'lucide-react';
@@ -16,8 +18,7 @@ import {
  * Shows only marketer's own bucket balance and withdrawal functionality
  */
 export const MarketerDashboard: React.FC = () => {
-  try {
-    const { publicKey } = useWallet();
+  const { publicKey } = useWallet();
   // Simple marketer detection
   const isMarketer1 = publicKey?.toString() === import.meta.env.VITE_MARKETER1_ADDRESS;
   const isMarketer2 = publicKey?.toString() === import.meta.env.VITE_MARKETER2_ADDRESS;
@@ -55,9 +56,10 @@ export const MarketerDashboard: React.FC = () => {
 
   const marketerBucketType = role as 'marketer1' | 'marketer2'; // 'marketer1' or 'marketer2'
   const marketerBalance = balances?.[marketerBucketType];
+  const balanceBN = parseUsdtAmount((marketerBalance || 0).toString());
 
   const getMarketerDisplayName = () => {
-    return role === 'marketer1' ? 'Marketer 1' : 'Marketer 2';
+    return role === 'marketer1' ? 'Admin 2' : 'Marketer 2';
   };
 
   if (loading) {
@@ -70,7 +72,7 @@ export const MarketerDashboard: React.FC = () => {
             <p className="text-gray-400">Loading your earnings...</p>
           </div>
         </div>
-        
+
         <div className="animate-pulse">
           <Card className="p-6 bg-gray-800 border-gray-700">
             <div className="h-32 bg-gray-700 rounded"></div>
@@ -87,10 +89,10 @@ export const MarketerDashboard: React.FC = () => {
           <TrendingUp className="h-8 w-8 text-green-400" />
           <div>
             <h1 className="text-2xl font-bold text-white">{getMarketerDisplayName()} Dashboard</h1>
-            <p className="text-gray-400">Manage your earnings</p>
+            <p className="text-gray-400">5% Global Shares</p>
           </div>
         </div>
-        
+
         <Card className="p-6 bg-gray-800 border-gray-700 border-l-4 border-l-red-500">
           <div className="flex items-center gap-3 text-red-400 mb-3">
             <Info className="h-5 w-5" />
@@ -117,7 +119,7 @@ export const MarketerDashboard: React.FC = () => {
         <TrendingUp className="h-8 w-8 text-green-400" />
         <div>
           <h1 className="text-2xl font-bold text-white">{getMarketerDisplayName()} Dashboard</h1>
-          <p className="text-gray-400">Manage your marketing earnings</p>
+          <p className="text-gray-400">5% Global Shares</p>
         </div>
       </div>
 
@@ -134,12 +136,7 @@ export const MarketerDashboard: React.FC = () => {
               {getMarketerDisplayName()}
             </Badge>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-gray-300">Access Level:</span>
-            <Badge variant="outline" className="text-yellow-400 border-yellow-500/20">
-              Earnings Only
-            </Badge>
-          </div>
+
         </div>
       </Card>
 
@@ -149,11 +146,11 @@ export const MarketerDashboard: React.FC = () => {
           <Wallet className="h-6 w-6 text-green-400" />
           <h2 className="text-xl font-semibold text-white">Your Earnings</h2>
         </div>
-        
+
         <div className="grid grid-cols-1 max-w-md">
           <BucketCard
             bucketType={marketerBucketType}
-            balance={marketerBalance}
+            balance={balanceBN}
             canWithdraw={true}
             onWithdrawSuccess={refresh}
           />
@@ -189,7 +186,7 @@ export const MarketerDashboard: React.FC = () => {
           </div>
           <div className="bg-yellow-500/10 p-4 rounded-lg border border-yellow-500/20">
             <p className="text-yellow-400 text-sm">
-              <strong>Note:</strong> As a marketer, you only have access to your own earnings bucket. 
+              <strong>Note:</strong> As a marketer, you only have access to your own earnings bucket.
               Other administrative functions are not available in this interface.
             </p>
           </div>
@@ -197,20 +194,4 @@ export const MarketerDashboard: React.FC = () => {
       </Card>
     </div>
   );
-  } catch (error) {
-    console.error('Error in MarketerDashboard:', error);
-    return (
-      <div className="text-center py-8">
-        <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 max-w-md mx-auto">
-          <h3 className="text-red-400 font-semibold mb-2">Dashboard Error</h3>
-          <p className="text-gray-300 text-sm mb-3">
-            There was an error loading the marketer dashboard. Please try refreshing the page.
-          </p>
-          <p className="text-gray-500 text-xs">
-            Error: {error instanceof Error ? error.message : 'Unknown error'}
-          </p>
-        </div>
-      </div>
-    );
-  }
 };

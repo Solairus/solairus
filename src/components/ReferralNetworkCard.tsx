@@ -4,9 +4,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Users, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
-import { getProgram, derivePdas } from "@/lib/solairus-removed";
 import { useWallet } from "@/contexts/wallet-context";
 import { PublicKey } from "@solana/web3.js";
+// Actually it exports functions, let's fix the import
+import * as SponsorService from "@/services/admin/sponsor-management-service";
+
 
 interface ReferralNetworkCardProps {
   userPublicKey: PublicKey | null;
@@ -31,14 +33,18 @@ export default function ReferralNetworkCard({ userPublicKey }: ReferralNetworkCa
   const [error, setError] = useState<string | null>(null);
 
   const loadReferralData = useCallback(async () => {
-    if (!userPublicKey || !anchorProvider) return;
+    if (!userPublicKey) return;
 
     try {
       setIsLoading(true);
       setError(null);
 
-      // Since referral tracking is not implemented yet, show empty state
-      // TODO: Implement actual referral tracking system
+      // Fetch referral data from backend via service
+      // TODO: Use SponsorService.getSponsorReferralCount(userPublicKey) when ready
+      // Note: service.getSponsorReferralCount returns count, we need breakdown.
+      // For now, mocking structure or we can implement full fetch.
+      // Keeping mock/empty since backend endpoint for full tree might not match UI expectation perfectly yet.
+
       setReferralData({
         level1Count: 0,
         level2Count: 0,
@@ -49,52 +55,19 @@ export default function ReferralNetworkCard({ userPublicKey }: ReferralNetworkCa
         level3Referrals: [],
       });
 
-      // TODO: Replace with actual ReferralTracker fetching when implemented
-      /*
-      try {
-        const referralTrackerPda = PublicKey.findProgramAddressSync([
-          Buffer.from("referral_tracker"),
-          userPublicKey.toBuffer(),
-        ], program.programId)[0];
-
-        const referralTracker = await accounts(program).ReferralTracker.fetch(referralTrackerPda);
-        
-        setReferralData({
-          level1Count: referralTracker.level1Referrals.length,
-          level2Count: referralTracker.level2Referrals.length,
-          level3Count: referralTracker.level3Referrals.length,
-          totalCount: referralTracker.totalReferrals,
-          level1Referrals: referralTracker.level1Referrals.map(pk => pk.toString()),
-          level2Referrals: referralTracker.level2Referrals.map(pk => pk.toString()),
-          level3Referrals: referralTracker.level3Referrals.map(pk => pk.toString()),
-        });
-      } catch (trackerError) {
-        // ReferralTracker doesn't exist yet, use empty data
-        setReferralData({
-          level1Count: 0,
-          level2Count: 0,
-          level3Count: 0,
-          totalCount: 0,
-          level1Referrals: [],
-          level2Referrals: [],
-          level3Referrals: [],
-        });
-      }
-      */
-
     } catch (err) {
       console.error("Failed to load referral data:", err);
       setError("Failed to load referral network");
     } finally {
       setIsLoading(false);
     }
-  }, [userPublicKey, anchorProvider]);
+  }, [userPublicKey]);
 
   useEffect(() => {
-    if (userPublicKey && anchorProvider) {
+    if (userPublicKey) {
       loadReferralData();
     }
-  }, [userPublicKey, anchorProvider, loadReferralData]);
+  }, [userPublicKey, loadReferralData]);
 
   const toggleLevel = (level: number) => {
     const newExpanded = new Set(expandedLevels);
@@ -171,7 +144,7 @@ export default function ReferralNetworkCard({ userPublicKey }: ReferralNetworkCa
           )}
         </div>
       </CardHeader>
-      
+
       <CardContent className="space-y-4">
         {hasReferrals ? (
           <>
@@ -203,12 +176,12 @@ export default function ReferralNetworkCard({ userPublicKey }: ReferralNetworkCa
             {/* Expandable Level Details */}
             <div className="space-y-2">
               {[1, 2, 3].map((level) => {
-                const count = level === 1 ? referralData.level1Count : 
-                             level === 2 ? referralData.level2Count : 
-                             referralData.level3Count;
+                const count = level === 1 ? referralData.level1Count :
+                  level === 2 ? referralData.level2Count :
+                    referralData.level3Count;
                 const referrals = level === 1 ? referralData.level1Referrals :
-                                 level === 2 ? referralData.level2Referrals :
-                                 referralData.level3Referrals;
+                  level === 2 ? referralData.level2Referrals :
+                    referralData.level3Referrals;
                 const isExpanded = expandedLevels.has(level);
 
                 if (count === 0) return null;
@@ -234,7 +207,7 @@ export default function ReferralNetworkCard({ userPublicKey }: ReferralNetworkCa
                         <ChevronRight className="w-4 h-4" />
                       )}
                     </Button>
-                    
+
                     {isExpanded && (
                       <div className="px-3 pb-3 space-y-1">
                         {referrals.slice(0, 10).map((address, index) => (

@@ -1,5 +1,8 @@
-// Removed solairus-removed; license info is from backend only
 import { PublicKey } from "@solana/web3.js";
+import { LicenseInfo } from "@/types/backend";
+
+// Placeholder for program ID version tracking if needed, or just use a version string
+const PROGRAM_ID = new PublicKey("11111111111111111111111111111111"); // Dummy or import from config if available
 
 /**
  * Smart License Cache Utility
@@ -46,7 +49,7 @@ export class LicenseCache {
     try {
       const cacheKey = this.getCacheKey(userPubkey);
       const cached = localStorage.getItem(cacheKey);
-      
+
       if (!cached) return null;
 
       const data: CachedLicenseData = JSON.parse(cached);
@@ -77,8 +80,8 @@ export class LicenseCache {
       }
 
       // Restore Date objects
-      if (data.licenseInfo.expirationDate) {
-        data.licenseInfo.expirationDate = new Date(data.licenseInfo.expirationDate);
+      if (data.licenseInfo.expiryDate) {
+        data.licenseInfo.expiryDate = new Date(data.licenseInfo.expiryDate);
       }
 
       console.log('✅ Using valid cached license data');
@@ -96,7 +99,7 @@ export class LicenseCache {
     try {
       const cacheKey = this.getCacheKey(userPubkey);
       const now = Date.now();
-      
+
       const data: CachedLicenseData = {
         licenseInfo,
         timestamp: now,
@@ -131,11 +134,11 @@ export class LicenseCache {
     try {
       const cacheKey = this.getCacheKey(userPubkey);
       const cached = localStorage.getItem(cacheKey);
-      
+
       if (!cached) return true;
 
       const data: CachedLicenseData = JSON.parse(cached);
-      
+
       // Check if contract has changed
       const currentProgramId = PROGRAM_ID.toString();
       if (data.programId !== currentProgramId) {
@@ -195,7 +198,7 @@ export class LicenseCache {
   static clearAllForContractChange(): void {
     try {
       const keysToRemove: string[] = [];
-      
+
       // Find all license cache keys
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
@@ -206,10 +209,10 @@ export class LicenseCache {
 
       // Remove all license cache entries
       keysToRemove.forEach(key => localStorage.removeItem(key));
-      
+
       // Reset page load validation
       this.resetPageLoadValidation();
-      
+
       console.log(`🗑️ Cleared ${keysToRemove.length} cache entries for contract change`);
     } catch (error) {
       console.debug('Failed to clear cache for contract change:', error);

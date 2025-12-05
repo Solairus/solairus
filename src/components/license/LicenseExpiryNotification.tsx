@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, X, Clock } from "lucide-react";
-import { LicenseInfo } from "@/lib/solairus-removed";
+import { LicenseInfo } from "@/hooks/license/use-license-status";
 
 interface LicenseExpiryNotificationProps {
   licenseInfo: LicenseInfo;
@@ -34,12 +34,12 @@ export default function LicenseExpiryNotification({
     if (licenseInfo.status === 'near-expiry' && licenseInfo.daysRemaining) {
       const dismissKey = `license-notification-dismissed-${licenseInfo.daysRemaining}`;
       const dismissedUntil = localStorage.getItem(dismissKey);
-      
+
       if (dismissedUntil) {
         const dismissTime = parseInt(dismissedUntil, 10);
         const now = Date.now();
         const hoursSinceDismiss = (now - dismissTime) / (1000 * 60 * 60);
-        
+
         // Show again after 24 hours for 7+ days, 12 hours for 3-6 days, 6 hours for 1-2 days
         let showAgainAfterHours = 24;
         if (licenseInfo.daysRemaining <= 2) {
@@ -47,7 +47,7 @@ export default function LicenseExpiryNotification({
         } else if (licenseInfo.daysRemaining <= 6) {
           showAgainAfterHours = 12;
         }
-        
+
         setIsDismissed(hoursSinceDismiss < showAgainAfterHours);
       }
     }
@@ -69,7 +69,7 @@ export default function LicenseExpiryNotification({
 
   const getUrgencyConfig = () => {
     const days = licenseInfo.daysRemaining!;
-    
+
     if (days <= 1) {
       return {
         bgColor: 'bg-red-50',
@@ -111,7 +111,7 @@ export default function LicenseExpiryNotification({
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3 flex-1">
             <AlertTriangle className={`w-5 h-5 ${config.iconColor} mt-0.5 flex-shrink-0`} />
-            
+
             <div className="flex-1 space-y-2">
               <div className="flex items-center gap-2">
                 <h4 className={`font-semibold ${config.textColor}`}>
@@ -121,21 +121,21 @@ export default function LicenseExpiryNotification({
                   {config.urgencyText}
                 </Badge>
               </div>
-              
+
               <p className={`text-sm ${config.textColor}`}>
                 {config.message}
               </p>
-              
-              {licenseInfo.expirationDate && (
+
+              {licenseInfo.expiryDate && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Clock className="w-3 h-3" />
                   <span>
-                    Expires: {licenseInfo.expirationDate.toLocaleDateString()} at{' '}
-                    {licenseInfo.expirationDate.toLocaleTimeString()}
+                    Expires: {licenseInfo.expiryDate.toLocaleDateString()} at{' '}
+                    {licenseInfo.expiryDate.toLocaleTimeString()}
                   </span>
                 </div>
               )}
-              
+
               <div className="flex items-center gap-2 pt-1">
                 {onRenew && (
                   <Button
@@ -146,7 +146,7 @@ export default function LicenseExpiryNotification({
                     Renew License
                   </Button>
                 )}
-                
+
                 <Button
                   onClick={handleDismiss}
                   variant="outline"
@@ -158,7 +158,7 @@ export default function LicenseExpiryNotification({
               </div>
             </div>
           </div>
-          
+
           <button
             onClick={handleDismiss}
             className={`p-1 rounded-md hover:bg-background/50 ${config.textColor} opacity-70 hover:opacity-100 transition-opacity`}

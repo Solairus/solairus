@@ -15,6 +15,7 @@ import crypto from 'crypto'
 import solairusPayIdl from '../idl/solairus_pay.json'
 import { buildClaimRewardsTx } from '../services/withdrawals'
 import { getConnection } from '../lib/rpc-manager'
+import { deriveReference } from '../services/onchain_verifier'
 
 // Extend Request interface for admin middleware
 declare module 'express' {
@@ -367,7 +368,7 @@ router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Requ
 
   const PROGRAM_ID = process.env.SOLAIRUS_PAY_PROGRAM_ID || (solairusPayIdl as { address?: string }).address!
   const orderId = crypto.randomUUID()
-  const referencePubkey = deriveReference(orderId, PROGRAM_ID)
+  const referencePubkey = deriveReference(orderId, PROGRAM_ID).toBase58()
 
   // Build transaction first to fail fast
   let built
@@ -501,7 +502,7 @@ router.post('/admin/buckets/:bucketType/withdraw/init', requireAdmin, async (req
 
   const PROGRAM_ID = process.env.SOLAIRUS_PAY_PROGRAM_ID || (solairusPayIdl as { address?: string }).address!
   const orderId = crypto.randomUUID()
-  const referencePubkey = deriveReference(orderId, PROGRAM_ID)
+  const referencePubkey = deriveReference(orderId, PROGRAM_ID).toBase58()
 
   let built
   try {
@@ -958,10 +959,6 @@ router.post('/users/:address/license', requireAdmin, async (req: Request, res: R
 })
 
 // Helper function for reference derivation (same as withdrawals.ts)
-function deriveReference(orderId: string, programId: string): string {
-  const sha = crypto.createHash('sha256').update(orderId).digest()
-  const [pda] = PublicKey.findProgramAddressSync([Buffer.from('withdraw'), sha], new PublicKey(programId))
-  return pda.toBase58()
-}
+
 
 export default router

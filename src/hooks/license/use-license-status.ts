@@ -8,6 +8,7 @@ export interface LicenseInfo {
   status: BackendLicenseStatus | 'none' | 'near-expiry' | 'expired' | 'active';
   isValid: boolean;
   daysRemaining?: number;
+  expiryDate?: Date;
 }
 
 interface UseLicenseStatusReturn {
@@ -31,7 +32,7 @@ interface UseLicenseStatusReturn {
 export function useLicenseStatus(): UseLicenseStatusReturn {
   const { publicKey, isConnected } = useWallet();
   const { user, refreshSession } = useAuth();
-  
+
   const [licenseInfo, setLicenseInfo] = useState<LicenseInfo>({
     status: 'none',
     isValid: false,
@@ -46,11 +47,13 @@ export function useLicenseStatus(): UseLicenseStatusReturn {
     if (!user) return;
     const status = (user.license_status || 'none') as BackendLicenseStatus;
     let daysRemaining = 0;
+    let expiryDate: Date | undefined;
     let isValid = status === 'active';
 
     try {
       if (user.license_expiration) {
-        const exp = new Date(user.license_expiration).getTime();
+        expiryDate = new Date(user.license_expiration);
+        const exp = expiryDate.getTime();
         const now = Date.now();
         const diffDays = Math.max(0, Math.floor((exp - now) / (1000 * 60 * 60 * 24)));
         daysRemaining = diffDays;
@@ -58,7 +61,7 @@ export function useLicenseStatus(): UseLicenseStatusReturn {
           isValid = false;
         } else if (diffDays <= 7 && isValid) {
           // Mark as near-expiry if within 7 days
-          setLicenseInfo({ status: 'near-expiry', isValid, daysRemaining: diffDays });
+          setLicenseInfo({ status: 'near-expiry', isValid, daysRemaining: diffDays, expiryDate });
           return;
         }
       }
@@ -66,7 +69,7 @@ export function useLicenseStatus(): UseLicenseStatusReturn {
       // ignore parse errors
     }
 
-    setLicenseInfo({ status, isValid, daysRemaining });
+    setLicenseInfo({ status, isValid, daysRemaining, expiryDate });
   }, [user]);
 
   const refreshLicenseStatus = useCallback(async () => {
@@ -77,9 +80,11 @@ export function useLicenseStatus(): UseLicenseStatusReturn {
       const info = await LicenseBackendService.getInfo();
       const status = (info.license_status || 'none') as BackendLicenseStatus;
       let daysRemaining = 0;
+      let expiryDate: Date | undefined;
       let isValid = status === 'active';
       if (info.license_expiration) {
-        const exp = new Date(info.license_expiration).getTime();
+        expiryDate = new Date(info.license_expiration);
+        const exp = expiryDate.getTime();
         const now = Date.now();
         const diffDays = Math.max(0, Math.floor((exp - now) / (1000 * 60 * 60 * 24)));
         daysRemaining = diffDays;
@@ -87,7 +92,7 @@ export function useLicenseStatus(): UseLicenseStatusReturn {
           isValid = false;
         }
       }
-      setLicenseInfo({ status, isValid, daysRemaining });
+      setLicenseInfo({ status, isValid, daysRemaining, expiryDate });
       setHasCheckedOnce(true);
     } catch (err) {
       console.error('Failed to refresh license status (backend):', err);
@@ -107,12 +112,14 @@ export function useLicenseStatus(): UseLicenseStatusReturn {
       await refreshSession();
       const status = (result.license_status || 'active') as BackendLicenseStatus;
       let daysRemaining = 0;
+      let expiryDate: Date | undefined;
       if (result.license_expiration) {
-        const exp = new Date(result.license_expiration).getTime();
+        expiryDate = new Date(result.license_expiration);
+        const exp = expiryDate.getTime();
         const now = Date.now();
         daysRemaining = Math.max(0, Math.floor((exp - now) / (1000 * 60 * 60 * 24)));
       }
-      setLicenseInfo({ status, isValid: status === 'active', daysRemaining });
+      setLicenseInfo({ status, isValid: status === 'active', daysRemaining, expiryDate });
     } catch (err) {
       console.error('License activation failed (backend):', err);
       const errorMessage = err instanceof Error ? err.message : 'License activation failed';
