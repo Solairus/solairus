@@ -473,7 +473,7 @@ router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Requ
     await client.query(`
       INSERT INTO bucket_histories (bucket_ref, amount, bucket_balance, transaction_id, created_at)
       VALUES ($1, $2::numeric, $3::numeric, $4, NOW())
-    `, [bucketType, -amountUnits, newBalanceUnits, txId])
+    `, [dbColumn, -amountUnits, newBalanceUnits, txId])
 
     await client.query('COMMIT')
   } catch (e) {
@@ -564,7 +564,7 @@ router.post('/admin/buckets/:bucketType/withdraw/init', requireAdmin, async (req
 
     await client.query(
       'INSERT INTO bucket_histories (bucket_ref, amount, bucket_balance, transaction_id, created_at) VALUES ($1, $2::numeric, $3::numeric, $4, NOW())',
-      [bucketType, -amountUnits, newBalanceUnits, txId]
+      [dbColumn, -amountUnits, newBalanceUnits, txId]
     )
 
     await client.query('COMMIT')
