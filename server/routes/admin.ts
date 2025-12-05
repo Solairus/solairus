@@ -350,6 +350,7 @@ function filterBucketsByAccess(row: Record<string, string | number>, accessible:
 // Bucket withdrawal init (identical to affiliate withdrawal flow)
 router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Request, res: Response) => {
   const bucketType = req.params.bucketType as BucketType
+  const dbColumn = (bucketType === 'marketer1' ? 'marketer_1' : (bucketType === 'marketer2' ? 'marketer_2' : bucketType))
   const accessibleBuckets = req.accessibleBuckets as BucketType[]
 
   if (!accessibleBuckets.includes(bucketType)) {
@@ -421,7 +422,7 @@ router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Requ
     // Check and debit bucket balance
     const amountUnits = parsed.data.amountMicro / 1_000_000
     const okRes = await client.query(
-      `SELECT (${bucketType} >= $1::numeric) AS ok FROM bucket_balances WHERE id = 1 FOR UPDATE`,
+      `SELECT (${dbColumn} >= $1::numeric) AS ok FROM bucket_balances WHERE id = 1 FOR UPDATE`,
       [amountUnits]
     )
     const ok = !!okRes.rows[0]?.ok
@@ -431,13 +432,13 @@ router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Requ
 
     // Update bucket balance
     await client.query(
-      `UPDATE bucket_balances SET ${bucketType} = ${bucketType} - $1::numeric WHERE id = 1`,
+      `UPDATE bucket_balances SET ${dbColumn} = ${dbColumn} - $1::numeric WHERE id = 1`,
       [amountUnits]
     )
 
     // Get new balance for history
     const { rows: newBalanceRows } = await client.query(
-      `SELECT ${bucketType} AS bal FROM bucket_balances WHERE id = 1`
+      `SELECT ${dbColumn} AS bal FROM bucket_balances WHERE id = 1`
     )
     const newBalanceUnits = newBalanceRows[0].bal
 
@@ -521,23 +522,24 @@ router.post('/admin/buckets/:bucketType/withdraw/init', requireAdmin, async (req
   }
 
   const bucketType = req.params.bucketType as BucketType
+  const dbColumn = (bucketType === 'marketer1' ? 'marketer_1' : (bucketType === 'marketer2' ? 'marketer_2' : bucketType))
   const amountUnits = parsed.data.amountMicro / 1_000_000
 
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
     const okRes = await client.query(
-      `SELECT (${bucketType} >= $1::numeric) AS ok FROM bucket_balances WHERE id = 1 FOR UPDATE`,
+      `SELECT (${dbColumn} >= $1::numeric) AS ok FROM bucket_balances WHERE id = 1 FOR UPDATE`,
       [amountUnits]
     )
     if (!okRes.rows[0]?.ok) throw new Error('Insufficient bucket balance')
 
     await client.query(
-      `UPDATE bucket_balances SET ${bucketType} = ${bucketType} - $1::numeric WHERE id = 1`,
+      `UPDATE bucket_balances SET ${dbColumn} = ${dbColumn} - $1::numeric WHERE id = 1`,
       [amountUnits]
     )
     const { rows: newBalanceRows } = await client.query(
-      `SELECT ${bucketType} AS bal FROM bucket_balances WHERE id = 1`
+      `SELECT ${dbColumn} AS bal FROM bucket_balances WHERE id = 1`
     )
     const newBalanceUnits = newBalanceRows[0].bal
 
