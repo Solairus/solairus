@@ -9,6 +9,7 @@ import { query, pool } from '../db'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import { applyBalanceBucketChange, getOrCreateBalanceId } from '../services/balance'
+import { runDailyAgentEarnings } from '../services/agent_results'
 
 const router = Router()
 
@@ -174,6 +175,40 @@ router.get('/agents/user/:userAddress', async (req: Request, res: Response) => {
     const requestedAddr = (req.params.userAddress || '').toLowerCase()
     if (!requestedAddr || requestedAddr !== addr?.toLowerCase()) {
       return res.status(403).json({ error: 'Forbidden: wallet mismatch' })
+    }
+
+    // Trigger daily agent earnings (event-driven cron)
+    // Rate limited to once every 15 minutes globally
+    try {
+      const settingsKey = 'last_agent_rewards_run'
+      const now = Date.now()
+      const COOLDOWN_MS = 15 * 60 * 1000
+
+      // Check last run time
+      const settingsRes = await query<{ value: number }>(
+        `SELECT value FROM settings WHERE key = $1`,
+        [settingsKey]
+      )
+
+      const lastRun = settingsRes.rows[0]?.value ? Number(settingsRes.rows[0].value) : 0
+
+      if (now - lastRun > COOLDOWN_MS) {
+        // Update timestamp immediately to prevent concurrent runs (optimistic lock)
+        await query(
+          `INSERT INTO settings (key, value, type, description)
+           VALUES ($1, $2, 'number', 'Last timestamp of agent rewards run')
+           ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+          [settingsKey, now]
+        )
+
+        console.log('[agents/user] Triggering background agent earnings...')
+        // Fire and forget - do not await
+        runDailyAgentEarnings()
+          .then((res) => console.log(`[agents/user] Agent earnings completed: processed=${res.processed} credited=${res.credited} skipped=${res.skipped}`))
+          .catch((e) => console.error('[agents/user] Agent earnings failed:', e))
+      }
+    } catch (e) {
+      console.error('[agents/user] Failed to trigger earnings (non-blocking):', e)
     }
 
     // Pull active agents for this user, including tier cap and claimed/unclaimed stats
