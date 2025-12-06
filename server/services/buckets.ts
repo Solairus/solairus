@@ -16,17 +16,72 @@ function round6(n: number): number {
 /**
  * Compute license activation distribution (90% total)
  */
-function licenseDistribution(amountUsdt: number): DistributionMap {
-  const pct = {
+/**
+ * Compute license activation distribution (90% total)
+ * Fetches percentages from settings table
+ */
+async function licenseDistribution(amountUsdt: number): Promise<DistributionMap> {
+  const settingsSql = `
+    SELECT key, value FROM settings 
+    WHERE key IN ('distribution.license.admin', 'distribution.license.dev', 'distribution.license.marketer_1', 'distribution.license.marketer_2', 'distribution.license.reserve')
+  `
+  const { rows } = await pool.query<{ key: string; value: unknown }>(settingsSql)
+
+  // Default values if settings missing (fallback to old hardcoded for safety only if DB empty)
+  const defaults: AppDistribution = {
     admin: 0.30,
     dev: 0.30,
     marketer_1: 0.05,
     marketer_2: 0.05,
     reserve: 0.20,
   }
-  return Object.fromEntries(
-    Object.entries(pct).map(([k, v]) => [k, round6(amountUsdt * v)])
-  )
+
+  const result: DistributionMap = {}
+
+  // Helper to parse setting value
+  const parsePct = (val: unknown): number => {
+    if (typeof val === 'number') return val
+    if (typeof val === 'string') return Number(val)
+    if (typeof val === 'object' && val !== null) {
+      const v = (val as { value?: unknown }).value
+      return Number(v)
+    }
+    return 0
+  }
+
+  // Map settings keys to simple keys
+  const keyMap: Record<string, keyof AppDistribution> = {
+    'distribution.license.admin': 'admin',
+    'distribution.license.dev': 'dev',
+    'distribution.license.marketer_1': 'marketer_1',
+    'distribution.license.marketer_2': 'marketer_2',
+    'distribution.license.reserve': 'reserve'
+  }
+
+  // Populate from DB
+  for (const row of rows) {
+    const field = keyMap[row.key]
+    if (field) {
+      result[field] = round6(amountUsdt * parsePct(row.value))
+    }
+  }
+
+  // Fill gaps with defaults * amount
+  for (const [k, v] of Object.entries(defaults)) {
+    if (result[k] === undefined) {
+      result[k] = round6(amountUsdt * v)
+    }
+  }
+
+  return result
+}
+
+type AppDistribution = {
+  admin: number
+  dev: number
+  marketer_1: number
+  marketer_2: number
+  reserve: number
 }
 
 /**
@@ -78,9 +133,20 @@ async function applyDistribution(dist: DistributionMap, transactionId: number) {
 
 /**
  * Distribute license activation amount into buckets (USDT)
+ * Idempotent: Checks if transactionId has already been processed for buckets
  */
 export async function distributeLicense(amountUsdt: number, transactionId: number) {
-  const dist = licenseDistribution(amountUsdt)
+  // 1. Idempotency Check
+  const checkRes = await pool.query('SELECT 1 FROM bucket_histories WHERE transaction_id = $1 LIMIT 1', [transactionId])
+  if ((checkRes.rowCount ?? 0) > 0) {
+    console.warn(`[distributeLicense] Skipping: Transaction ${transactionId} already processed in bucket_histories`)
+    return
+  }
+
+  // 2. Compute Distribution
+  const dist = await licenseDistribution(amountUsdt)
+
+  // 3. Apply
   await applyDistribution(dist, transactionId)
 }
 

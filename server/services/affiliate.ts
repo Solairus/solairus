@@ -28,6 +28,22 @@ export async function distributeAffiliateBonuses(
   try {
     await client.query('BEGIN');
 
+    // 0. Idempotency Check: Don't process if we've already distributed affiliate bonuses for this tx
+    // We check for any history record with this transaction_id and metadata->>'source' = 'affiliate'
+    // This covers L1, L2, L3 allocations.
+    const checkSql = `
+      SELECT 1 FROM balance_history 
+      WHERE transaction_id = $1 
+      AND metadata->>'source' = 'affiliate'
+      LIMIT 1
+    `;
+    const checkRes = await client.query(checkSql, [transactionId]);
+    if ((checkRes.rowCount ?? 0) > 0) {
+      console.warn(`[distributeAffiliateBonuses] Skipping: Transaction ${transactionId} already processed`);
+      await client.query('ROLLBACK');
+      return;
+    }
+
     // Load affiliate percentages in a single query
     const settingsSql = `
       SELECT key, value, type FROM settings
