@@ -1,0 +1,81 @@
+version: '3.9'
+
+# Local Docker environment — tests the split architecture before Railway deploy.
+#
+# Usage:
+#   docker compose up --build          # build + start all services
+#   docker compose up --build -d       # detached
+#   docker compose down -v             # stop + remove volumes
+#   docker compose logs -f backend     # stream backend logs
+#   docker compose logs -f frontend    # stream frontend logs
+#
+# After first start, run migrations:
+#   docker compose exec backend node dist/scripts/migrate.js
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # In local Docker, frontend calls the backend container via Docker network.
+        # On Railway, set this to your backend service's public URL.
+        VITE_API_BASE_URL: http://localhost:4000/api
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    # Loads payment secrets/config from backend/.env (gitignored). The compose
+    # `environment` below still wins for any key also set there (e.g. DATABASE_URL).
+    env_file:
+      - ./backend/.env
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      # Local postgres — swap for Railway DB URL to test against production data
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/solairus
+      JWT_SECRET: local_dev_jwt_secret_change_me
+      CRON_SECRET: local_dev_cron_secret
+      CORS_ORIGIN: http://localhost:80
+      # Payment env comes from backend/.env (env_file above):
+      #   SOLAIRUS_AUTHORITY_SECRET_BASE58  (treasury / hot wallet — sweep + payout)
+      #   HD_WALLET_MNEMONIC                (derives per-order deposit addresses)
+      #   USDT_MINT_ADDRESS                 (SPL mint to detect/sweep)
+      #   SOLANA_CLUSTER                    (mainnet-beta | devnet)
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: solairus
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

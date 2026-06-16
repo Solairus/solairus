@@ -1,0 +1,106 @@
+# Local Docker DEV environment — hot reload for backend + frontend, plus Postgres.
+#
+# This is the file start-dev.sh drives. It is intentionally SEPARATE from
+# docker-compose.yml (the prod-style build) and from Railway: Railway deploys the
+# Dockerfiles directly and never reads this file, so nothing here — including the
+# dynamic host ports — can leak into a deployment.
+#
+# start-dev.sh picks free HOST ports and exports them before calling compose:
+#   FRONTEND_HOST_PORT  (walks up from 8080)
+#   BACKEND_HOST_PORT   (walks up from 4000)
+#   POSTGRES_HOST_PORT  (walks up from 5432)
+# Container-internal ports stay fixed; only the published host ports move, so a
+# port already taken by another project's container just shifts to the next one.
+#
+# How hot reload works:
+#   - Source is bind-mounted into each container (./backend, ./frontend).
+#   - node_modules lives in a named volume so the host's macOS binaries never
+#     shadow the container's Linux ones (initialized from the image, then kept
+#     in sync by `yarn install` on each start).
+#   - Watchers use polling (CHOKIDAR_USEPOLLING / Vite usePolling) because fs
+#     events don't reliably cross the macOS↔Linux bind mount.
+#
+# Manual use (defaults to 8080/4000/5432):
+#   docker compose -f docker-compose.dev.yml up --build
+# Full teardown (drops the DB + node_modules volumes):
+#   docker compose -f docker-compose.dev.yml down -v
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: deps        # stop at the node+deps stage; we run Vite, not nginx
+    command: sh -c "yarn install && yarn dev --host 0.0.0.0 --port ${FRONTEND_HOST_PORT:-8080}"
+    environment:
+      # Enables Vite file-watch polling (see vite.config.ts).
+      DOCKER_DEV: "1"
+      # The browser runs on the host, so it reaches the API via its host port —
+      # not the Docker-internal name. Vite prioritizes inline VITE_* over .env.
+      VITE_API_BASE_URL: http://localhost:${BACKEND_HOST_PORT:-4000}/api
+    ports:
+      # host==container port keeps Vite's HMR websocket working without extra config
+      - "${FRONTEND_HOST_PORT:-8080}:${FRONTEND_HOST_PORT:-8080}"
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      backend:
+        condition: service_started
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: deps        # stop at the node+deps stage; we run tsx watch
+    # Reconcile deps with the live package.json, apply migrations (idempotent),
+    # then start the hot-reloading dev server.
+    command: sh -c "yarn install && yarn migrate && yarn dev"
+    environment:
+      NODE_ENV: development
+      PORT: "4000"        # container-internal; published via BACKEND_HOST_PORT
+      CHOKIDAR_USEPOLLING: "true"   # tsx watch picks up host edits over the bind mount
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/solairus
+      JWT_SECRET: local_dev_jwt_secret_change_me
+      CRON_SECRET: local_dev_cron_secret
+      # CORS must match the frontend's published host port (the browser Origin).
+      CORS_ORIGIN: http://localhost:${FRONTEND_HOST_PORT:-8080}
+      # Any other secrets (RPC keys, authority secret, …) are picked up from the
+      # bind-mounted backend/.env by dotenv — compose vars above take precedence.
+    ports:
+      - "${BACKEND_HOST_PORT:-4000}:4000"
+    volumes:
+      - ./backend:/app
+      - backend_node_modules:/app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s   # first boot runs yarn install + migrate before /health is up
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: solairus
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  backend_node_modules:
+  frontend_node_modules:

@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+.yarn/install-state.gz
+
+# Build output
+dist/
+
+# Environment — NEVER commit real env files. .env.example is a tracked template.
+.env
+.env.*
+!.env.example
+.env.local
+
+# Logs
+*.log
+
+# OS
+.DS_Store

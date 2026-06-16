@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+.yarn/install-state.gz
+
+# Build output
+dist/
+
+# Environment — NEVER commit
+.env
+.env.*
+.env.local
+
+# Logs
+*.log
+
+# OS
+.DS_Store
