@@ -41,3 +41,9 @@ test-ledger/
 # Agent / session scratch — local only
 .brain/
 HANDOFF.md
+
+# Railway local tooling — NEVER track, NEVER push (reads tokens from AI Os .env)
+.railway.sh
+railway-api.mjs
+.rwy.json
+.railway/
