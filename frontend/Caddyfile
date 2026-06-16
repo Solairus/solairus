@@ -1,0 +1,15 @@
+# Serves the built SPA on Railway's injected $PORT (falls back to 80 locally).
+# A port-only address keeps Caddy on plain HTTP (Railway terminates TLS at its edge).
+:{$PORT:80} {
+	root * /srv
+	encode gzip zstd
+
+	# Long-cache fingerprinted assets; keep index.html always revalidated so new builds show.
+	@assets path *.js *.css *.png *.jpg *.jpeg *.gif *.ico *.svg *.woff *.woff2 *.ttf *.eot *.mp4 *.webm
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	header /index.html Cache-Control "no-cache"
+
+	# SPA fallback — every unmatched route serves index.html.
+	try_files {path} /index.html
+	file_server
+}

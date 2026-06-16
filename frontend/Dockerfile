@@ -15,9 +15,11 @@ ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 COPY . .
 RUN yarn build
 
-# ── Stage 3: Serve with nginx ─────────────────────────────────────────────────
-FROM nginx:alpine AS runner
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# ── Stage 3: Serve with Caddy ─────────────────────────────────────────────────
+# Caddy binds Railway's injected $PORT (Caddyfile: :{$PORT:80}), avoiding the
+# fixed-port mismatch that 502s nginx on Railway.
+FROM caddy:2-alpine AS runner
+COPY --from=builder /app/dist /srv
+COPY Caddyfile /etc/caddy/Caddyfile
 EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
