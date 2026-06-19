@@ -58,6 +58,15 @@ All colors MUST be HSL.
   }
 }
 
+/* Mobile upscale: enlarge the base rem so all rem-based font sizes, padding,
+   and margins scale up proportionally for a native mobile feel. Mobile-only
+   (< md breakpoint); the desktop phone-frame preview keeps the default 16px. */
+@media (max-width: 767px) {
+  :root {
+    font-size: 18px;
+  }
+}
+
 /* Flip clock animations */
 @keyframes flipTop {
   0% {

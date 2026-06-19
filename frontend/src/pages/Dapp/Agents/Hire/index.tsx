@@ -23,6 +23,7 @@ import {
 // Remove solairus-removed integrations and activation service for now
 import { useAgentErrorHandler } from '@/utils/agent-error-handler';
 import { AgentErrorDisplay } from '@/components/agent/AgentErrorDisplay';
+import AgentHireCard from '@/components/agent/AgentHireCard';
 import WalletGate from '@/components/WalletGate';
 import LicenseGuard from '@/components/license/LicenseGuard';
 import { PublicKey } from '@solana/web3.js';
@@ -48,6 +49,22 @@ const TIER_META: Record<string, { name: string; emoji: string; description: stri
   ORION: { name: 'ORION Agent', emoji: '⚡', description: 'Risk Balancer • High Risk', color: 'indigo' },
   PRIME: { name: 'PRIME Agent', emoji: '🧠', description: 'Alpha Hunter • Max Risk', color: 'amber' },
 };
+
+// Presentational tier list for the hire cards. Derives name/emoji/accent from
+// TIER_META (single source of truth); adds the listing-card visuals only.
+const TIERS = (
+  [
+    { key: 'NOVA', image: '/media/agents/nova.jpeg', tagline: 'Pattern Seeker', riskLabel: 'Low Risk' },
+    { key: 'VEGA', image: '/media/agents/vega.jpeg', tagline: 'Momentum Scout', riskLabel: 'Medium Risk' },
+    { key: 'ORION', image: '/media/agents/orion.jpeg', tagline: 'Risk Balancer', riskLabel: 'High Risk' },
+    { key: 'PRIME', image: '/media/agents/prime.jpeg', tagline: 'Alpha Hunter', riskLabel: 'Max Risk' },
+  ] as const
+).map((t) => ({
+  ...t,
+  name: TIER_META[t.key].name,
+  emoji: TIER_META[t.key].emoji,
+  accent: TIER_META[t.key].color,
+}));
 
 type ActivationStep = 'input' | 'processing' | 'success' | 'error';
 // Local stub for activation result to preserve success UI
@@ -1168,7 +1185,7 @@ export default function DappHire() {
   return (
     <LicenseGuard>
       <WalletGate>
-        <div className="max-w-sm mx-auto space-y-4">
+        <div className="w-full space-y-4">
           {/* Back Button */}
           <div className="flex items-center justify-start">
             <BackButton to="/dapp" />
@@ -1187,143 +1204,26 @@ export default function DappHire() {
             </div>
           </div>
 
-          {/* Tier Cards - Mobile Optimized */}
-          <div className="space-y-2">
-            {/* NOVA Tier */}
-            <div className="relative bg-gradient-to-r from-cyan-500/10 to-cyan-600/5 border border-cyan-500/20 min-h-[6rem] h-auto"
-              style={{ borderRadius: '48px 8px 8px 48px' }}>
-              <div className="flex items-center h-full px-3 py-3">
-                <div className="h-20 rounded-full overflow-hidden border-2 border-cyan-400/30 flex-shrink-0 flex items-center justify-center" style={{ width: '7.5rem' }}>
-                  <img
-                    src="/media/agents/nova.jpeg"
-                    alt="NOVA Agent"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-
-                <div className="flex-1 ml-4 flex flex-col justify-center items-center">
-                  <div className="flex items-center justify-center gap-1 mb-1">
-                    <h3 className="text-sm font-bold text-cyan-400">NOVA Agent</h3>
-                    <span className="text-sm">🪶</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-1 text-center">Pattern Seeker • Low Risk</p>
-                  <div className="text-center mb-1">
-                    <p className="text-xs text-cyan-300 font-medium">{tiersMap.NOVA ? `${formatDailyRange(tiersMap.NOVA.daily_reward_min_bp, tiersMap.NOVA.daily_reward_max_bp)} daily` : '—'}</p>
-                    <p className="text-xs text-muted-foreground">{tiersMap.NOVA ? `Min: $${microToUsdt(tiersMap.NOVA.min_amount)} • Max: $${microToUsdt(tiersMap.NOVA.max_amount).toLocaleString()}` : 'Min/Max: —'}</p>
-                  </div>
-
-                  <Button
-                    size="sm"
-                    className="bg-cyan-500 hover:bg-cyan-600 text-white text-xs px-4 py-1 h-6 rounded-full font-medium shadow-sm"
-                    onClick={() => setSelectedTier('NOVA')}
-                  >
-                    Hire Now
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            {/* VEGA Tier */}
-            <div className="relative bg-gradient-to-r from-emerald-500/10 to-emerald-600/5 border border-emerald-500/20 min-h-[6rem] h-auto"
-              style={{ borderRadius: '48px 8px 8px 48px' }}>
-              <div className="flex items-center h-full px-3 py-3">
-                <div className="h-20 rounded-full overflow-hidden border-2 border-emerald-400/30 flex-shrink-0 flex items-center justify-center" style={{ width: '7.5rem' }}>
-                  <img
-                    src="/media/agents/vega.jpeg"
-                    alt="VEGA Agent"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-
-                <div className="flex-1 ml-4 flex flex-col justify-center items-center">
-                  <div className="flex items-center justify-center gap-1 mb-1">
-                    <h3 className="text-sm font-bold text-emerald-400">VEGA Agent</h3>
-                    <span className="text-sm">🔮</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-1 text-center">Momentum Scout • Medium Risk</p>
-                  <div className="text-center mb-1">
-                    <p className="text-xs text-emerald-300 font-medium">{tiersMap.VEGA ? `${formatDailyRange(tiersMap.VEGA.daily_reward_min_bp, tiersMap.VEGA.daily_reward_max_bp)} daily` : '—'}</p>
-                    <p className="text-xs text-muted-foreground">{tiersMap.VEGA ? `Min: $${microToUsdt(tiersMap.VEGA.min_amount)} • Max: $${microToUsdt(tiersMap.VEGA.max_amount).toLocaleString()}` : 'Min/Max: —'}</p>
-                  </div>
-
-                  <Button
-                    size="sm"
-                    className="bg-emerald-500 hover:bg-emerald-600 text-white text-xs px-4 py-1 h-6 rounded-full font-medium shadow-sm"
-                    onClick={() => setSelectedTier('VEGA')}
-                  >
-                    Hire Now
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            {/* ORION Tier */}
-            <div className="relative bg-gradient-to-r from-indigo-500/10 to-indigo-600/5 border border-indigo-500/20 min-h-[6rem] h-auto"
-              style={{ borderRadius: '48px 8px 8px 48px' }}>
-              <div className="flex items-center h-full px-3 py-3">
-                <div className="h-20 rounded-full overflow-hidden border-2 border-indigo-400/30 flex-shrink-0 flex items-center justify-center" style={{ width: '7.5rem' }}>
-                  <img
-                    src="/media/agents/orion.jpeg"
-                    alt="ORION Agent"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-
-                <div className="flex-1 ml-4 flex flex-col justify-center items-center">
-                  <div className="flex items-center justify-center gap-1 mb-1">
-                    <h3 className="text-sm font-bold text-indigo-400">ORION Agent</h3>
-                    <span className="text-sm">⚡</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-1 text-center">Risk Balancer • High Risk</p>
-                  <div className="text-center mb-1">
-                    <p className="text-xs text-indigo-300 font-medium">{tiersMap.ORION ? `${formatDailyRange(tiersMap.ORION.daily_reward_min_bp, tiersMap.ORION.daily_reward_max_bp)} daily` : '—'}</p>
-                    <p className="text-xs text-muted-foreground">{tiersMap.ORION ? `Min: $${microToUsdt(tiersMap.ORION.min_amount)} • Max: $${microToUsdt(tiersMap.ORION.max_amount).toLocaleString()}` : 'Min/Max: —'}</p>
-                  </div>
-
-                  <Button
-                    size="sm"
-                    className="bg-indigo-500 hover:bg-indigo-600 text-white text-xs px-4 py-1 h-6 rounded-full font-medium shadow-sm"
-                    onClick={() => setSelectedTier('ORION')}
-                  >
-                    Hire Now
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            {/* PRIME Tier */}
-            <div className="relative bg-gradient-to-r from-amber-500/10 to-amber-600/5 border border-amber-500/20 min-h-[6rem] h-auto"
-              style={{ borderRadius: '48px 8px 8px 48px' }}>
-              <div className="flex items-center h-full px-3 py-3">
-                <div className="h-20 rounded-full overflow-hidden border-2 border-amber-400/30 flex-shrink-0 flex items-center justify-center" style={{ width: '7.5rem' }}>
-                  <img
-                    src="/media/agents/prime.jpeg"
-                    alt="PRIME Agent"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-
-                <div className="flex-1 ml-4 flex flex-col justify-center items-center">
-                  <div className="flex items-center justify-center gap-1 mb-1">
-                    <h3 className="text-sm font-bold text-amber-400">PRIME Agent</h3>
-                    <span className="text-sm">🧠</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-1 text-center">Alpha Hunter • Max Risk</p>
-                  <div className="text-center mb-1">
-                    <p className="text-xs text-amber-300 font-medium">{tiersMap.PRIME ? `${formatDailyRange(tiersMap.PRIME.daily_reward_min_bp, tiersMap.PRIME.daily_reward_max_bp)} daily` : '—'}</p>
-                    <p className="text-xs text-muted-foreground">{tiersMap.PRIME ? `Min: $${microToUsdt(tiersMap.PRIME.min_amount)} • Max: $${microToUsdt(tiersMap.PRIME.max_amount).toLocaleString()}` : 'Min/Max: —'}</p>
-                  </div>
-
-                  <Button
-                    size="sm"
-                    className="bg-amber-500 hover:bg-amber-600 text-white text-xs px-4 py-1 h-6 rounded-full font-medium shadow-sm"
-                    onClick={() => setSelectedTier('PRIME')}
-                  >
-                    Hire Now
-                  </Button>
-                </div>
-              </div>
-            </div>
+          {/* Tier Cards — native-mobile listing layout */}
+          <div className="space-y-3">
+            {TIERS.map((t) => {
+              const row = tiersMap[t.key];
+              return (
+                <AgentHireCard
+                  key={t.key}
+                  name={t.name}
+                  emoji={t.emoji}
+                  image={t.image}
+                  tagline={t.tagline}
+                  riskLabel={t.riskLabel}
+                  accent={t.accent}
+                  dailyRange={row ? formatDailyRange(row.daily_reward_min_bp, row.daily_reward_max_bp) : null}
+                  minUsd={row ? microToUsdt(row.min_amount) : null}
+                  maxUsd={row ? microToUsdt(row.max_amount) : null}
+                  onHire={() => setSelectedTier(t.key)}
+                />
+              );
+            })}
           </div>
 
           {/* Quick Link to View Active Agents */}

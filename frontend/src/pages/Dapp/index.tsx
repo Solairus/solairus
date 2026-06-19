@@ -9,7 +9,8 @@ import { Outlet } from "react-router-dom";
  * Dapp
  * Purpose: Mobile app-like shell for the Solairus dApp under "/dapp".
  * Notes:
- * - Strict 390px portrait container centered on all viewports.
+ * - Full-bleed (full width/height) on mobile for a native feel; centered 390px
+ *   phone-frame with border + shadow on md+ screens (desktop preview).
  * - Header sticky, bottom navigation fixed inside the container.
  * - Content scrolls beneath header; FAB sits above bottom navigation.
  * - Wallet adapter & Anchor client will be wired in future tasks.
@@ -42,9 +43,9 @@ export default function Dapp() {
     setShowOnboarding(false);
   };
   return (
-    <div className="flex justify-center items-center min-h-screen">
+    <div className="flex justify-center md:items-center min-h-screen">
       <div
-        className={`relative max-w-[390px] w-full h-screen bg-background text-foreground overflow-hidden flex flex-col border border-border/50 shadow-2xl`}
+        className={`relative w-full h-screen bg-background text-foreground overflow-hidden flex flex-col md:max-w-[390px] md:border md:border-border/50 md:shadow-2xl`}
       >
         {/* Header */}
         <TopBar title="SOLAIRUS" />
