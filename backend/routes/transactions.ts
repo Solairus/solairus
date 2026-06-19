@@ -258,7 +258,7 @@ router.get('/transactions', async (req: Request, res: Response) => {
   params.push(Number(offset))
 
   const sql = `
-    SELECT * FROM transactions
+    SELECT *, COALESCE(metadata->>'order_ref', NULL) AS order_ref FROM transactions
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY created_at DESC
     LIMIT $${params.length - 1} OFFSET $${params.length}

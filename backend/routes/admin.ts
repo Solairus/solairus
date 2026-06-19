@@ -1,7 +1,6 @@
 /**
  * Admin routes: Complete database-backed admin operations
  * Purpose: Manage agent tiers, buckets, settings, and users without blockchain dependencies
- * Only bucket withdrawals remain blockchain-based for fund transfer security
  * Inputs: Express Request bodies, validated via zod schemas
  * Outputs: JSON responses with admin data or operation results
  */
@@ -10,12 +9,6 @@ import { z } from 'zod'
 import { query, pool } from '../db'
 import { randomUUID } from 'crypto'
 import { applyBalanceBucketChange, getOrCreateBalanceId } from '../services/balance'
-import { PublicKey, Transaction } from '@solana/web3.js'
-import crypto from 'crypto'
-import solairusPayIdl from '../idl/solairus_pay.json'
-import { buildClaimRewardsTx } from '../services/withdrawals'
-import { getConnection } from '../lib/rpc-manager'
-import { deriveReference } from '../services/onchain_verifier'
 
 // Extend Request interface for admin middleware
 declare module 'express' {
@@ -347,8 +340,8 @@ function filterBucketsByAccess(row: Record<string, string | number>, accessible:
   return base
 }
 
-// Bucket withdrawal init (identical to affiliate withdrawal flow)
-router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Request, res: Response) => {
+// Bucket withdrawal (server-side, no on-chain interaction)
+router.post('/admin/buckets/:bucketType/withdraw', requireAdmin, async (req: Request, res: Response) => {
   const bucketType = req.params.bucketType as BucketType
   const dbColumn = (bucketType === 'marketer1' ? 'marketer_1' : (bucketType === 'marketer2' ? 'marketer_2' : bucketType))
   const accessibleBuckets = req.accessibleBuckets as BucketType[]
@@ -357,223 +350,69 @@ router.post('/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Requ
     return res.status(403).json({ error: 'Access denied to this bucket' })
   }
 
-  const auth = res.locals.auth as { sub: number; addr: string }
   const parsed = z.object({
     amountMicro: z.number().int().positive(),
-    mintAddress: z.string().min(32).max(64),
-    recipientAta: z.string().min(32).max(64),
-    memo: z.string().max(128).optional(),
   }).safeParse(req.body)
 
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
 
-  const PROGRAM_ID = process.env.SOLAIRUS_PAY_PROGRAM_ID || (solairusPayIdl as { address?: string }).address!
-  const orderId = crypto.randomUUID()
-  const referencePubkey = deriveReference(orderId, PROGRAM_ID).toBase58()
+  const auth = res.locals.auth as { sub: number; addr: string }
+  const amountMicro = parsed.data.amountMicro
+  const amountUnits = amountMicro / 1_000_000
 
-  // Build transaction first to fail fast
-  let built
-  try {
-    built = await buildClaimRewardsTx({
-      initiatorWallet: auth.addr,
-      recipient: auth.addr,
-      mintAddress: parsed.data.mintAddress,
-      amountMicro: parsed.data.amountMicro,
-      recipientAta: parsed.data.recipientAta,
-      memo: orderId,
-      referencePubkey,
-    })
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Unknown error'
-    return res.status(400).json({ error: msg })
-  }
-
-  // Preflight: config PDA and vault funding
-  try {
-    const { getWorkingConnection } = await import('../lib/rpc-manager')
-    const connection = await getWorkingConnection()
-    const mint = new PublicKey(parsed.data.mintAddress)
-    const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], new PublicKey(PROGRAM_ID))
-    const cfgInfo = await connection.getAccountInfo(configPda, 'confirmed')
-    if (!cfgInfo) return res.status(400).json({ error: 'Config PDA not initialized on-chain' })
-    // Decode backend authority on-chain and compare to env
-    // Decode backend authority on-chain (for internal comparison if needed)
-    // const onChainBackend = new PublicKey(cfgInfo.data.slice(8, 8 + 32)).toBase58()
-    const [vaultAuth] = PublicKey.findProgramAddressSync([Buffer.from('vault'), mint.toBuffer()], new PublicKey(PROGRAM_ID))
-    const vaultAta = PublicKey.findProgramAddressSync(
-      [vaultAuth.toBuffer(), new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA').toBuffer(), mint.toBuffer()],
-      new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
-    )[0]
-    const bal = await connection.getTokenAccountBalance(vaultAta, 'confirmed').catch(() => null)
-    const availableMicro = bal ? BigInt(bal.value.amount) : 0n
-    if (availableMicro < BigInt(parsed.data.amountMicro)) {
-      return res.status(400).json({ error: 'Vault underfunded for requested amount' })
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Unknown error'
-    return res.status(400).json({ error: msg })
-  }
-
-  // Debit bucket balance atomically (bucket_balances are NUMERIC(20,6) units)
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
 
     // Check and debit bucket balance
-    const amountUnits = parsed.data.amountMicro / 1_000_000
     const okRes = await client.query(
       `SELECT (${dbColumn} >= $1::numeric) AS ok FROM bucket_balances WHERE id = 1 FOR UPDATE`,
       [amountUnits]
     )
-    const ok = !!okRes.rows[0]?.ok
-    if (!ok) {
+    if (!okRes.rows[0]?.ok) {
       throw new Error('Insufficient bucket balance')
     }
 
-    // Update bucket balance
     await client.query(
       `UPDATE bucket_balances SET ${dbColumn} = ${dbColumn} - $1::numeric WHERE id = 1`,
       [amountUnits]
     )
 
-    // Get new balance for history
     const { rows: newBalanceRows } = await client.query(
       `SELECT ${dbColumn} AS bal FROM bucket_balances WHERE id = 1`
     )
     const newBalanceUnits = newBalanceRows[0].bal
 
     // Create transaction record
-    const { rows: txRows } = await client.query(`
-      INSERT INTO transactions (type, status, signature, initiator_wallet, recipient_wallet, program_id, amount, mint_address, decimals, metadata, order_id)
-      VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, $10)
-      RETURNING id
-    `, [
-      'role_withdrawal',
-      'pending',
-      auth.addr,
-      auth.addr,
-      PROGRAM_ID,
-      parsed.data.amountMicro,
-      parsed.data.mintAddress,
-      6,
-      JSON.stringify({
-        route: 'admin.buckets.withdraw.init',
-        order_id: orderId,
-        reference: referencePubkey,
-        bucket_type: bucketType,
-        ttlMs: 120000,
-        phase: 'created',
-        completed: false
-      }),
-      orderId,
-    ])
-    const txId = txRows[0].id
-
-    // Insert bucket history
-    await client.query(`
-      INSERT INTO bucket_histories (bucket_ref, amount, bucket_balance, transaction_id, created_at)
-      VALUES ($1, $2::numeric, $3::numeric, $4, NOW())
-    `, [dbColumn, -amountUnits, newBalanceUnits, txId])
-
-    await client.query('COMMIT')
-  } catch (e) {
-    await client.query('ROLLBACK')
-    const msg = e instanceof Error ? e.message : 'Unknown error'
-    return res.status(400).json({ error: msg })
-  } finally {
-    client.release()
-  }
-
-  res.status(201).json({ orderId, referencePubkey, txBase64: built.txBase64, ttlMs: built.ttlMs })
-})
-
-// Alias route to match frontend path
-router.post('/admin/buckets/:bucketType/withdraw/init', requireAdmin, async (req: Request, res: Response) => {
-  // Delegate to the same handler by reusing logic block above
-  // Copy the body to avoid duplication across files
-  const auth = res.locals.auth as { sub: number; addr: string }
-  const parsed = z.object({
-    amountMicro: z.number().int().positive(),
-    mintAddress: z.string().min(32).max(64),
-    recipientAta: z.string().min(32).max(64),
-    memo: z.string().max(128).optional(),
-  }).safeParse(req.body)
-
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
-
-  const PROGRAM_ID = process.env.SOLAIRUS_PAY_PROGRAM_ID || (solairusPayIdl as { address?: string }).address!
-  const orderId = crypto.randomUUID()
-  const referencePubkey = deriveReference(orderId, PROGRAM_ID).toBase58()
-
-  let built
-  try {
-    built = await buildClaimRewardsTx({
-      initiatorWallet: auth.addr,
-      recipient: auth.addr,
-      mintAddress: parsed.data.mintAddress,
-      amountMicro: parsed.data.amountMicro,
-      recipientAta: parsed.data.recipientAta,
-      memo: orderId,
-      referencePubkey,
-    })
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Unknown error'
-    return res.status(400).json({ error: msg })
-  }
-
-  const bucketType = req.params.bucketType as BucketType
-  const dbColumn = (bucketType === 'marketer1' ? 'marketer_1' : (bucketType === 'marketer2' ? 'marketer_2' : bucketType))
-  const amountUnits = parsed.data.amountMicro / 1_000_000
-
-  const client = await pool.connect()
-  try {
-    await client.query('BEGIN')
-    const okRes = await client.query(
-      `SELECT (${dbColumn} >= $1::numeric) AS ok FROM bucket_balances WHERE id = 1 FOR UPDATE`,
-      [amountUnits]
-    )
-    if (!okRes.rows[0]?.ok) throw new Error('Insufficient bucket balance')
-
-    await client.query(
-      `UPDATE bucket_balances SET ${dbColumn} = ${dbColumn} - $1::numeric WHERE id = 1`,
-      [amountUnits]
-    )
-    const { rows: newBalanceRows } = await client.query(
-      `SELECT ${dbColumn} AS bal FROM bucket_balances WHERE id = 1`
-    )
-    const newBalanceUnits = newBalanceRows[0].bal
-
+    const orderId = randomUUID()
     const { rows: txRows } = await client.query(
       `INSERT INTO transactions (type, status, signature, initiator_wallet, recipient_wallet, program_id, amount, mint_address, decimals, metadata, order_id)
-       VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, $10)
+       VALUES ($1, $2, NULL, $3, NULL, NULL, $4, 'USDT', 6, $5::jsonb, $6)
        RETURNING id`,
       [
         'role_withdrawal',
-        'pending',
+        'confirmed',
         auth.addr,
-        auth.addr,
-        PROGRAM_ID,
-        parsed.data.amountMicro,
-        parsed.data.mintAddress,
-        6,
-        JSON.stringify({ route: 'admin.buckets.withdraw.init', order_id: orderId, reference: referencePubkey, bucket_type: bucketType, ttlMs: 120000, phase: 'created', completed: false }),
+        amountMicro,
+        JSON.stringify({ route: 'admin.buckets.withdraw', bucket_type: bucketType }),
         orderId,
       ]
     )
     const txId = txRows[0].id
 
+    // Insert bucket history
     await client.query(
       'INSERT INTO bucket_histories (bucket_ref, amount, bucket_balance, transaction_id, created_at) VALUES ($1, $2::numeric, $3::numeric, $4, NOW())',
       [dbColumn, -amountUnits, newBalanceUnits, txId]
     )
 
     await client.query('COMMIT')
-    res.status(201).json({ orderId, referencePubkey, txBase64: built.txBase64, ttlMs: built.ttlMs })
+    res.status(201).json({ success: true, orderId })
   } catch (e) {
     await client.query('ROLLBACK')
     const msg = e instanceof Error ? e.message : 'Unknown error'
     if (msg.includes('Insufficient bucket balance')) return res.status(400).json({ error: msg })
-    console.error('Bucket withdrawal init error (alias):', e)
+    console.error('Bucket withdrawal error:', e)
     res.status(500).json({ error: msg })
   } finally {
     client.release()

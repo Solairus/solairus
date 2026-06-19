@@ -98,12 +98,7 @@ export const AdminRoute: React.FC<AdminRouteProps> = ({ children }) => {
   // User has access, render admin interface with context
   return (
     <AdminProvider>
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800">
-        <div className="container mx-auto px-4 py-6">
-
-          {children}
-        </div>
-      </div>
+      {children}
     </AdminProvider>
   );
 };

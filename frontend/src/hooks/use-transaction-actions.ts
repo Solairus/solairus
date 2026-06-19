@@ -7,6 +7,7 @@ export type TxRecord = {
   status: "pending" | "confirmed" | "failed" | string;
   signature: string | null;
   order_id: string | null;
+  order_ref: string | null;
   initiator_wallet: string;
   recipient_wallet: string | null;
   amount: number;

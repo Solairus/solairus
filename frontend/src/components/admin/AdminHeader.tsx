@@ -34,7 +34,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
   };
 
   return (
-    <div className="sticky top-0 z-40 bg-gray-800 border-b border-gray-700 px-4 py-3">
+    <div className="fixed top-0 left-0 right-0 z-40 bg-gray-800 border-b border-gray-700 px-4 py-3">
       <div className="flex items-center justify-between">
         {/* Left side - Menu button and title */}
         <div className="flex items-center gap-3">

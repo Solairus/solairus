@@ -194,7 +194,7 @@ export default function TransactionHistoryPage() {
                     )}
                   </span>
                   <span className="font-mono text-muted-foreground truncate min-w-0">
-                    {tx.order_id ? truncate(tx.order_id, 4, 4) : 'uuid: none'}
+                    {tx.order_ref ? truncate(tx.order_ref, 4, 4) : (tx.order_id ? truncate(tx.order_id, 4, 4) : '—')}
                   </span>
                   {(tx.type === 'user_withdrawal' || tx.type === 'role_withdrawal') && tx.recipient_wallet && (
                     <span className="font-mono text-muted-foreground truncate min-w-0">

@@ -5,20 +5,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { RefreshCw, Wallet, AlertCircle, ArrowDownToLine, DollarSign } from 'lucide-react';
-import { useWallet } from '@/contexts/wallet-context';
 import { useAdmin } from './AdminProvider';
 import { useAdminErrorHandler } from '@/utils/admin-error-handler';
-import { useTransactionStatus } from '@/hooks/useTransactionStatus';
-import { LoadingCard } from './LoadingStates';
-import { ConfirmationDialog } from './ConfirmationDialog';
-import { FormValidation, useFormValidation, validators } from './FormValidation';
 import { ApiClient, API_CONFIG } from '@/config/service-endpoints';
 import { useToast } from '@/hooks/use-toast';
-import { PublicKey } from '@solana/web3.js';
-import { Transaction } from '@solana/web3.js';
-import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
-import * as anchor from '@coral-xyz/anchor';
-import { confirmAndRecord } from '@/services/transactions/confirmAndRecord';
 
 type BucketType = 'admin' | 'dev' | 'marketer1' | 'marketer2' | 'trader' | 'reserve';
 
@@ -33,7 +23,6 @@ interface BucketBalances {
 }
 
 export function BucketManagement() {
-  const { publicKey, anchorProvider, signTransaction } = useWallet();
   const { role, context } = useAdmin();
   const { toast } = useToast();
   const { showError } = useAdminErrorHandler();
@@ -44,8 +33,6 @@ export function BucketManagement() {
   const [showWithdrawForm, setShowWithdrawForm] = useState(false);
   const [selectedBucket, setSelectedBucket] = useState<BucketType | null>(null);
   const [withdrawAmount, setWithdrawAmount] = useState('');
-
-  const validation = useFormValidation();
 
   // Use centralized role and context from AdminProvider
   // Normalize accessible buckets: map `systemreserve` → `reserve` for backend compatibility
@@ -92,24 +79,9 @@ export function BucketManagement() {
     );
   }
 
-  // Helper: resolve USDT mint based on cluster
-  const resolveUsdtMint = (): PublicKey => {
-    const override = localStorage.getItem('solana_cluster_override')?.toLowerCase();
-    const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? 'devnet').toLowerCase();
-    const effective = override || envCluster;
-    const normalized = effective.startsWith('mainnet') ? 'mainnet-beta' : 'devnet';
-
-    const mintStr = normalized === 'mainnet-beta'
-      ? (import.meta.env.VITE_USDT_MINT as string)
-      : (import.meta.env.VITE_USDT_MINT_DEVNET as string);
-
-    if (!mintStr) throw new Error('USDT mint not configured');
-    return new PublicKey(mintStr);
-  };
-
   const handleWithdraw = async () => {
-    if (!selectedBucket || !publicKey || !anchorProvider || !signTransaction) {
-      showError('Wallet not connected', 'Bucket withdrawal', { showRetry: false });
+    if (!selectedBucket) {
+      showError('No bucket selected', 'Bucket withdrawal', { showRetry: false });
       return;
     }
 
@@ -130,64 +102,22 @@ export function BucketManagement() {
     try {
       setWithdrawing(true);
 
-      // Resolve USDT mint and recipient ATA
-      const mint = resolveUsdtMint();
-      const recipientAta = getAssociatedTokenAddressSync(
-        mint,
-        publicKey,
-        false,
-        TOKEN_PROGRAM_ID,
-        ASSOCIATED_TOKEN_PROGRAM_ID
-      );
-
-      // Call backend to init withdrawal
       const baseUrl = API_CONFIG.getBaseUrl();
-      const initUrl = `${baseUrl}/admin/buckets/${selectedBucket}/withdraw/init`;
-      const initResp = await ApiClient.post(initUrl, {
+      const resp = await ApiClient.post(`${baseUrl}/admin/buckets/${selectedBucket}/withdraw`, {
         amountMicro,
-        mintAddress: mint.toBase58(),
-        recipientAta: recipientAta.toBase58(),
       });
-      const initJson = await initResp.json();
-      const { orderId, txBase64, ttlMs } = initJson;
+      const json = await resp.json();
 
-      if (!orderId || !txBase64) throw new Error('Invalid init response');
+      if (!json.success) throw new Error(json.error || 'Withdrawal failed');
 
-      // Decode, sign and send transaction
-      const tx = Transaction.from(Buffer.from(txBase64, 'base64'));
-      const signed = await signTransaction(tx);
-      const { signature } = await confirmAndRecord({
-        connection: anchorProvider.connection,
-        signedTx: signed,
-        orderId
+      toast({
+        title: 'Success',
+        description: `Successfully withdrew ${amount} USDT from ${selectedBucket} bucket`,
       });
-      const ok = Boolean(signature && signature.length > 0);
-
-      // Poll order status
-      let finalized = false;
-      for (let i = 0; i < 5 && !finalized; i++) {
-        await new Promise(r => setTimeout(r, 1500));
-        try {
-          const sResp = await ApiClient.get(`${baseUrl}/transactions/${orderId}`);
-          const sJson = await sResp.json();
-          finalized = Boolean(sJson?.finalized);
-        } catch (error) {
-          console.warn('Error polling transaction status:', error);
-        }
-      }
-
-      if (ok) {
-        toast({
-          title: 'Success',
-          description: `Successfully withdrew ${amount} USDT from ${selectedBucket} bucket`,
-        });
-        setShowWithdrawForm(false);
-        setWithdrawAmount('');
-        setSelectedBucket(null);
-        await loadBalances();
-      } else {
-        throw new Error('Transaction failed');
-      }
+      setShowWithdrawForm(false);
+      setWithdrawAmount('');
+      setSelectedBucket(null);
+      await loadBalances();
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Withdrawal failed';
       showError(msg, 'Bucket withdrawal', { showRetry: true });

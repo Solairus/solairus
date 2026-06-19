@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useWallet } from '@/contexts/wallet-context';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -26,12 +26,10 @@ import { AgentErrorDisplay } from '@/components/agent/AgentErrorDisplay';
 import AgentHireCard from '@/components/agent/AgentHireCard';
 import WalletGate from '@/components/WalletGate';
 import LicenseGuard from '@/components/license/LicenseGuard';
-import { PublicKey } from '@solana/web3.js';
 import { useNavigate } from 'react-router-dom';
-import * as anchor from '@coral-xyz/anchor';
 import BackButton from '@/components/ui/BackButton';
 import { ApiClient, API_CONFIG } from '@/config/service-endpoints';
-import { SolairusPayService } from '@/services/wallet/solairus-pay';
+import { PaymentOrderPanel } from '@/components/payment/PaymentOrderPanel';
 import { AuthService } from '@/services/auth/auth-service';
 import {
   getAgentTiersMap,
@@ -101,7 +99,6 @@ function DirectHireModal({
   onClose,
   tierName,
   userPublicKey,
-  anchorProvider,
   onSuccess,
   tierRow,
   tiersMap,
@@ -110,7 +107,6 @@ function DirectHireModal({
   onClose: () => void;
   tierName: string;
   userPublicKey: PublicKey;
-  anchorProvider: anchor.AnchorProvider;
   onSuccess: () => void;
   tierRow?: AgentTierRow;
   tiersMap?: Record<string, AgentTierRow>;
@@ -122,10 +118,8 @@ function DirectHireModal({
   const [error, setError] = useState<unknown>(null);
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const [loadingBalance, setLoadingBalance] = useState(false);
-  const [txSig, setTxSig] = useState<string>('');
-  const [confirmationCountdown, setConfirmationCountdown] = useState<number | null>(null);
-  const [showPendingModal, setShowPendingModal] = useState(false);
-  const [pendingTransaction, setPendingTransaction] = useState<Record<string, unknown> | null>(null);
+  const [showPaymentPanel, setShowPaymentPanel] = useState(false);
+  const [paymentAmountMicro, setPaymentAmountMicro] = useState<number>(0);
 
   // USDT on-chain balance via reusable hook (same as license activation page)
   const { balanceDisplay: usdtBalanceDisplay, isLoading: usdtLoading, error: usdtError, refresh: refreshUsdt, balanceMicro: usdtBalanceMicro } = useBalance();
@@ -136,7 +130,7 @@ function DirectHireModal({
 
   // Fetch user balances
   const fetchBalances = React.useCallback(async () => {
-    if (!userPublicKey || !anchorProvider) {
+    if (!userPublicKey) {
       setCreditBalance(0);
       setLoadingBalance(false);
       return;
@@ -160,20 +154,10 @@ function DirectHireModal({
 
   // Fetch balances when modal opens
   React.useEffect(() => {
-    if (isOpen && userPublicKey && anchorProvider) {
+    if (isOpen && userPublicKey) {
       fetchBalances();
     }
-  }, [isOpen, userPublicKey, anchorProvider, fetchBalances]);
-
-  // Countdown timer for confirmation waiting
-  React.useEffect(() => {
-    if (confirmationCountdown !== null && confirmationCountdown > 0) {
-      const timer = setTimeout(() => {
-        setConfirmationCountdown(confirmationCountdown - 1);
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [confirmationCountdown]);
+  }, [isOpen, userPublicKey, fetchBalances]);
 
   // Reset state when modal opens/closes
   const handleClose = () => {
@@ -183,11 +167,21 @@ function DirectHireModal({
     setActivationResult(null);
     setError(null);
     setCreditBalance(null);
-    setConfirmationCountdown(null);
+    setShowPaymentPanel(false);
+    setPaymentAmountMicro(0);
     onClose();
   };
 
-
+  const handleOrderCompleted = () => {
+    setShowPaymentPanel(false);
+    setActivationResult({ success: true });
+    setStep('success');
+    showSuccess('Agent activation successful', {
+      description: getTierSpecificSuccessMessage(tierName, Number.parseFloat(amount || '0').toFixed(2), tierRow),
+      duration: 6000,
+    });
+    onSuccess();
+  };
 
   const handleActivate = async () => {
     const investmentAmount = parseFloat(amount);
@@ -273,212 +267,31 @@ function DirectHireModal({
       }
     }
 
-    // Validate on-chain USDT balance availability
+    // USDT payment via PaymentOrderPanel (HD wallet, contract-free)
     try {
-      const availableMicro = Number(usdtBalanceMicro ?? 0);
-      const requestedMicro = Math.floor(investmentAmount * 1_000_000);
-      if (!Number.isFinite(availableMicro) || requestedMicro > availableMicro) {
-        const availUsd = (availableMicro / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        showError(`Insufficient USDT balance. Available: $${availUsd}`, 'Agent activation', undefined, {
-          showRetry: false,
-          duration: 5000,
-        });
-        return;
-      }
-    } catch (e) {
-      console.warn('[Hire] USDT balance check failed:', e);
-    }
-
-    // Proceed with backend init → on-chain payment → backend verify
-    try {
-      setStep('processing');
-      setError(null);
-
       // Ensure backend JWT is present before calling protected endpoints
-      try {
-        const token = localStorage.getItem('solairus.jwt');
-        if (!token && userPublicKey) {
-          await AuthService.authenticateWallet(userPublicKey.toBase58());
-        }
-      } catch (authErr) {
-        console.warn('[Hire] Silent auth failed, proceeding may 401:', authErr);
+      const token = localStorage.getItem('solairus.jwt');
+      if (!token && userPublicKey) {
+        await AuthService.authenticateWallet(userPublicKey.toBase58());
       }
-
-      // Resolve USDT mint using same cluster logic as license activation
-      const overrideCluster = (() => {
-        try { return (localStorage.getItem('solana_cluster_override') ?? '').toLowerCase(); } catch { return ''; }
-      })();
-      const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? 'devnet').toLowerCase();
-      const effectiveCluster = overrideCluster || envCluster;
-      const normalizedCluster = effectiveCluster.startsWith('mainnet') ? 'mainnet-beta' : 'devnet';
-      const usdtMintStr = normalizedCluster === 'mainnet-beta'
-        ? (import.meta.env.VITE_USDT_MINT as string)
-        : (import.meta.env.VITE_USDT_MINT_DEVNET as string);
-      if (!usdtMintStr) throw new Error('USDT mint not configured in .env');
-      const usdtMint = new PublicKey(usdtMintStr);
-
-      if (!anchorProvider) throw new Error('Wallet provider is missing signing capabilities');
-      const payService = new SolairusPayService(anchorProvider);
-
-      // Convert amount to micro-USDT (base units) safely
-      const toMicro = (val: string): number => {
-        const trimmed = val.trim();
-        if (!/^\d*(\.\d{0,6})?$/.test(trimmed)) {
-          throw new Error('Invalid amount format');
-        }
-        const [whole, frac = ''] = trimmed.split('.');
-        const fracPadded = (frac + '000000').slice(0, 6);
-        const microStr = `${whole}${fracPadded}`.replace(/^0+/, '') || '0';
-        const micro = Number(microStr);
-        if (!Number.isFinite(micro)) throw new Error('Amount conversion error');
-        return micro;
-      };
-      const amountMicro = toMicro(amount);
-
-      const initiatorWallet = userPublicKey.toBase58();
-
-      // 1) Backend init: create transaction record to obtain order ID
-      const initUrl = `${API_CONFIG.getBaseUrl()}/payments/activate`;
-      const initBody = {
-        type: 'agent_activation',
-        initiatorWallet,
-        amount: amountMicro,
-        mintAddress: usdtMintStr,
-        decimals: 6,
-        programId: payService.programId.toBase58(),
-        metadata: { flow: 'agent_activation', tier: tierName }
-      };
-      const initRes = await ApiClient.post(initUrl, initBody);
-      const initData = await initRes.json();
-
-      // Handle different response types
-      let orderId: string;
-      let isResumed = false;
-
-      if (initRes.status === 200 && initData.completed && initData.record) {
-        // Transaction already completed - no payment needed
-        console.log('Agent activation already completed:', initData.record.order_id);
-        // Show success message and close modal
-        setActivationResult({ success: true });
-        setStep('success');
-        showSuccess('Agent activation completed', {
-          description: 'Your agent has been successfully activated.',
-          duration: 6000,
-        });
-        onSuccess();
-        return; // Exit early, no payment needed
-      } else if (initRes.status === 200 && initData.pendingTransaction && initData.record) {
-        // Pending transaction exists - show management modal
-        console.log('Pending agent activation transaction found:', initData.record.order_id);
-        setPendingTransaction(initData.record);
-        setShowPendingModal(true);
-        return; // Exit to show pending modal
-      } else if (initRes.status === 200 && initData.resumed && initData.record) {
-        // Resumed existing transaction that needs payment (license activation style)
-        orderId = (initData.record.order_id) as string;
-        isResumed = true;
-        console.log('Resumed existing agent activation transaction:', orderId);
-      } else if (initRes.status === 201 && initData.record) {
-        // Created new transaction
-        orderId = (initData.record.order_id) as string;
-        console.log('Created new agent activation transaction:', orderId);
-      } else {
-        throw new Error('Failed to initialize payment order (missing order_id)');
-      }
-
-      // 2) On-chain payment via solairus_pay with memo containing order id
-      const memo = orderId;
-
-      // Start countdown for user feedback
-      setConfirmationCountdown(30);
-
-      const signature = await payService.makePayment({
-        payer: userPublicKey,
-        mint: usdtMint,
-        recipient: userPublicKey,
-        amount: amountMicro,
-        memo,
-      });
-      setTxSig(signature);
-      setConfirmationCountdown(null); // Payment sent, stop countdown
-
-      // 3) Record transaction signature - backend handles verification and status updates
-      const recordUrl = `${API_CONFIG.getBaseUrl()}/transactions/record/signature`;
-      const recordBody = {
-        orderId,
-        signature,
-      };
-      const recordRes = await ApiClient.post(recordUrl, recordBody);
-      const recordData = await recordRes.json();
-      if (!recordRes.ok) {
-        const reason = recordData?.error || 'Failed to record signature';
-        throw new Error(reason);
-      }
-
-      // Poll for backend verification result (backend handles on-chain checking)
-      let attempts = 0;
-      const maxAttempts = 12; // 12 attempts * 5 seconds = 60 seconds max wait
-      while (attempts < maxAttempts) {
-        try {
-          const statusUrl = `${API_CONFIG.getBaseUrl()}/transactions/${orderId}`;
-          const statusRes = await ApiClient.get(statusUrl);
-          const statusData = await statusRes.json();
-
-          if (statusData.status === 'confirmed') {
-            console.log('✅ Transaction confirmed by backend');
-            break; // Success!
-          } else if (statusData.status === 'failed') {
-            throw new Error(statusData.failureReason || statusData.metadata?.failureReason || 'Transaction verification failed');
-          } else if (statusData.status === 'pending') {
-            // Still processing, wait and try again
-            console.log(`⏳ Transaction still pending (attempt ${attempts + 1}/${maxAttempts})`);
-            await new Promise(resolve => setTimeout(resolve, 5000)); // 5 second intervals
-            attempts++;
-            continue;
-          } else {
-            console.warn('Unexpected transaction status:', statusData.status);
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            attempts++;
-            continue;
-          }
-        } catch (pollError) {
-          console.error('Error polling transaction status:', pollError);
-          attempts++;
-          if (attempts >= maxAttempts) {
-            throw pollError;
-          }
-          await new Promise(resolve => setTimeout(resolve, 5000));
-        }
-      }
-
-      if (attempts >= maxAttempts) {
-        throw new Error('Transaction verification timed out - please check your transaction status later');
-      }
-
-      // Success UI update and callback
-      setActivationResult({ success: true });
-      setStep('success');
-      showSuccess('Agent activation successful', {
-        description: getTierSpecificSuccessMessage(tierName, Number.parseFloat(amount || '0').toFixed(2), tierRow),
-        duration: 6000,
-      });
-      onSuccess();
-    } catch (e) {
-      console.error('[Hire] Agent activation failed:', e);
-      setError(e);
-      setStep('error');
-      showError(e instanceof Error ? e.message : 'Activation failed', 'Agent activation', undefined, {
-        showRetry: true,
-        duration: 6000,
-      });
+    } catch (authErr) {
+      console.warn('[Hire] Silent auth failed, proceeding may 401:', authErr);
     }
+
+    const amountMicro = Math.round(investmentAmount * 1_000_000);
+    if (!Number.isFinite(amountMicro) || amountMicro <= 0) {
+      showError('Invalid amount', 'Agent activation', undefined, { showRetry: false, duration: 4000 });
+      return;
+    }
+
+    setPaymentAmountMicro(amountMicro);
+    setShowPaymentPanel(true);
   };
 
   const handleRetry = () => {
     setStep('input');
     setError(null);
     setActivationResult(null);
-    setConfirmationCountdown(null);
   };
 
   const handleStartOver = () => {
@@ -487,274 +300,11 @@ function DirectHireModal({
     setPaymentMethod('usdt');
     setActivationResult(null);
     setError(null);
-    setConfirmationCountdown(null);
+    setShowPaymentPanel(false);
+    setPaymentAmountMicro(0);
   };
 
-  const handleCheckPendingPayment = async () => {
-    if (!pendingTransaction) return;
-
-    try {
-      setShowPendingModal(false);
-      setStep('processing');
-      setError(null);
-
-      // Try to reapply the pending transaction
-      const orderId = pendingTransaction.order_id as string;
-      const reapplyUrl = `${API_CONFIG.getBaseUrl()}/transactions/reapply-agent`;
-      const reapplyBody = { orderId, initiatorWallet: userPublicKey.toBase58() };
-      const reappliedRes = await ApiClient.post(reapplyUrl, reapplyBody);
-      const reappliedData = await reappliedRes.json();
-
-      if (reappliedRes.ok && reappliedData?.reapplied) {
-        // Success - pending transaction was completed
-        setActivationResult({ success: true });
-        setStep('success');
-        showSuccess('Agent activation completed', {
-          description: 'Your pending agent activation has been successfully completed.',
-          duration: 6000,
-        });
-        onSuccess();
-        return;
-      }
-
-      // Payment not found or failed - show error and allow retry
-      setStep('error');
-      setError('Pending payment not found or verification failed. Please try again or cancel to start fresh.');
-    } catch (e) {
-      console.error('Error checking pending payment:', e);
-      setStep('error');
-      setError('Failed to check pending payment status. Please try again.');
-    }
-  };
-
-  const handleCancelPendingAndStartFresh = async () => {
-    if (!pendingTransaction) return;
-
-    try {
-      setShowPendingModal(false);
-      setStep('processing');
-      setError(null);
-
-      // Cancel the pending transaction by updating its status
-      const cancelUrl = `${API_CONFIG.getBaseUrl()}/transactions/${pendingTransaction.id}/cancel`;
-      await ApiClient.post(cancelUrl, {});
-
-      // Now proceed with creating a new transaction
-      await proceedWithNewTransaction();
-    } catch (e) {
-      console.error('Error canceling pending transaction:', e);
-      setStep('error');
-      setError('Failed to cancel pending transaction. Please try again.');
-    }
-  };
-
-  const proceedWithNewTransaction = async () => {
-    // This is essentially the same logic as the original handleActivate
-    // but called after canceling the pending transaction
-    const investmentAmount = parseFloat(amount);
-
-    if (!amount || investmentAmount <= 0) {
-      showError('Please enter a valid amount', 'Agent activation', undefined, {
-        showRetry: false,
-        duration: 4000
-      });
-      return;
-    }
-
-    if (!tierMeta) {
-      showError('Invalid tier configuration', 'Agent activation', undefined, {
-        showRetry: false,
-        duration: 4000
-      });
-      return;
-    }
-
-    // Validate investment amount against tier limits
-    if (!tierRow) {
-      showError('Tier data unavailable', 'Agent activation', undefined, {
-        showRetry: false,
-        duration: 4000
-      });
-      return;
-    }
-    const minInv = microToUsdt(tierRow.min_amount);
-    const maxInv = microToUsdt(tierRow.max_amount);
-    if (investmentAmount < minInv) {
-      showError(`Minimum investment for ${tierMeta.name} is $${minInv} USDT`, 'Agent activation', undefined, {
-        showRetry: false,
-        duration: 4000
-      });
-      return;
-    }
-
-    if (investmentAmount > maxInv) {
-      showError(`Maximum investment for ${tierMeta.name} is $${maxInv.toLocaleString()} USDT`, 'Agent activation', undefined, {
-        showRetry: false,
-        duration: 4000
-      });
-      return;
-    }
-
-    // Only USDT payments are supported in this flow
-    if (paymentMethod !== 'usdt') {
-      showError('Credit payment is not available yet. Please use USDT.', 'Agent activation', undefined, {
-        showRetry: false,
-        duration: 5000,
-      });
-      return;
-    }
-
-    // Proceed with backend init → on-chain payment → backend verify
-    try {
-      setStep('processing');
-      setError(null);
-
-      // Ensure backend JWT is present before calling protected endpoints
-      try {
-        const token = localStorage.getItem('solairus.jwt');
-        if (!token && userPublicKey) {
-          await AuthService.authenticateWallet(userPublicKey.toBase58());
-        }
-      } catch (authErr) {
-        console.warn('[Hire] Silent auth failed, proceeding may 401:', authErr);
-      }
-
-      // Resolve USDT mint using same cluster logic as license activation
-      const overrideCluster = (() => {
-        try { return (localStorage.getItem('solana_cluster_override') ?? '').toLowerCase(); } catch { return ''; }
-      })();
-      const envCluster = (import.meta.env.VITE_SOLANA_CLUSTER ?? 'devnet').toLowerCase();
-      const effectiveCluster = overrideCluster || envCluster;
-      const normalizedCluster = effectiveCluster.startsWith('mainnet') ? 'mainnet-beta' : 'devnet';
-      const usdtMintStr = normalizedCluster === 'mainnet-beta'
-        ? (import.meta.env.VITE_USDT_MINT as string)
-        : (import.meta.env.VITE_USDT_MINT_DEVNET as string);
-      if (!usdtMintStr) throw new Error('USDT mint not configured in .env');
-      const usdtMint = new PublicKey(usdtMintStr);
-
-      if (!anchorProvider) throw new Error('Wallet provider is missing signing capabilities');
-      const payService = new SolairusPayService(anchorProvider);
-
-      // Convert amount to micro-USDT (base units) safely
-      const toMicro = (val: string): number => {
-        const trimmed = val.trim();
-        if (!/^\d*(\.\d{0,6})?$/.test(trimmed)) {
-          throw new Error('Invalid amount format');
-        }
-        const [whole, frac = ''] = trimmed.split('.');
-        const fracPadded = (frac + '000000').slice(0, 6);
-        const microStr = `${whole}${fracPadded}`.replace(/^0+/, '') || '0';
-        const micro = Number(microStr);
-        if (!Number.isFinite(micro)) throw new Error('Amount conversion error');
-        return micro;
-      };
-      const amountMicro = toMicro(amount);
-
-      const initiatorWallet = userPublicKey.toBase58();
-
-      // 1) Backend init: create transaction record to obtain order ID
-      const initUrl = `${API_CONFIG.getBaseUrl()}/payments/activate`;
-      const initBody = {
-        type: 'agent_activation',
-        initiatorWallet,
-        amount: amountMicro,
-        mintAddress: usdtMintStr,
-        decimals: 6,
-        programId: payService.programId.toBase58(),
-        metadata: { flow: 'agent_activation', tier: tierName }
-      };
-      const initRes = await ApiClient.post(initUrl, initBody);
-      const initData = await initRes.json();
-      const orderId: string = (initData?.record?.order_id ?? initData?.order_id) as string;
-      if (!orderId) throw new Error('Failed to initialize payment order (missing order_id)');
-
-      // 2) On-chain payment via solairus_pay with memo containing order id
-      const memo = orderId;
-
-      // Start countdown for user feedback
-      setConfirmationCountdown(30);
-
-      const signature = await payService.makePayment({
-        payer: userPublicKey,
-        mint: usdtMint,
-        recipient: userPublicKey,
-        amount: amountMicro,
-        memo,
-      });
-      setTxSig(signature);
-      setConfirmationCountdown(null); // Payment sent, stop countdown
-
-      // 3) Record transaction signature - backend handles verification and status updates
-      const recordUrl = `${API_CONFIG.getBaseUrl()}/transactions/record/signature`;
-      const recordBody = {
-        orderId,
-        signature,
-      };
-      const recordRes = await ApiClient.post(recordUrl, recordBody);
-      const recordData = await recordRes.json();
-      if (!recordRes.ok) {
-        const reason = recordData?.error || 'Failed to record signature';
-        throw new Error(reason);
-      }
-
-      // Poll for backend verification result (backend handles on-chain checking)
-      let attempts = 0;
-      const maxAttempts = 12; // 12 attempts * 5 seconds = 60 seconds max wait
-      while (attempts < maxAttempts) {
-        try {
-          const statusUrl = `${API_CONFIG.getBaseUrl()}/transactions/${orderId}`;
-          const statusRes = await ApiClient.get(statusUrl);
-          const statusData = await statusRes.json();
-
-          if (statusData.status === 'confirmed') {
-            console.log('✅ Transaction confirmed by backend');
-            break; // Success!
-          } else if (statusData.status === 'failed') {
-            throw new Error(statusData.failureReason || statusData.metadata?.failureReason || 'Transaction verification failed');
-          } else if (statusData.status === 'pending') {
-            // Still processing, wait and try again
-            console.log(`⏳ Transaction still pending (attempt ${attempts + 1}/${maxAttempts})`);
-            await new Promise(resolve => setTimeout(resolve, 5000)); // 5 second intervals
-            attempts++;
-            continue;
-          } else {
-            console.warn('Unexpected transaction status:', statusData.status);
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            attempts++;
-            continue;
-          }
-        } catch (pollError) {
-          console.error('Error polling transaction status:', pollError);
-          attempts++;
-          if (attempts >= maxAttempts) {
-            throw pollError;
-          }
-          await new Promise(resolve => setTimeout(resolve, 5000));
-        }
-      }
-
-      if (attempts >= maxAttempts) {
-        throw new Error('Transaction verification timed out - please check your transaction status later');
-      }
-
-      // Success UI update and callback
-      setActivationResult({ success: true });
-      setStep('success');
-      showSuccess('Agent activation successful', {
-        description: getTierSpecificSuccessMessage(tierName, Number.parseFloat(amount || '0').toFixed(2), tierRow),
-        duration: 6000,
-      });
-      onSuccess();
-    } catch (e) {
-      console.error('[Hire] Agent activation failed:', e);
-      setError(e);
-      setStep('error');
-      showError(e instanceof Error ? e.message : 'Activation failed', 'Agent activation', undefined, {
-        showRetry: true,
-        duration: 6000,
-      });
-    }
-  };
+  // PaymentOrderPanel handles its own expired/cancelled/retry states internally.
 
   if (!tierMeta) return null;
 
@@ -774,6 +324,15 @@ function DirectHireModal({
           {/* Step 1: Input & Configuration */}
           {step === 'input' && (
             <>
+              {showPaymentPanel ? (
+                <PaymentOrderPanel
+                  type="agent"
+                  amountMicro={paymentAmountMicro}
+                  onCompleted={handleOrderCompleted}
+                  onCancel={() => { setShowPaymentPanel(false); setPaymentAmountMicro(0); }}
+                />
+              ) : (
+                <>
               {/* Tier Summary */}
               <div className={
                 tierMeta.color === 'cyan' ? 'p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20' :
@@ -961,6 +520,8 @@ function DirectHireModal({
               >
                 Activate Agent
               </Button>
+                </>
+              )}
             </>
           )}
 
@@ -968,18 +529,8 @@ function DirectHireModal({
           {step === 'processing' && (
             <div className="text-center py-8">
               <Loader2 className="h-10 w-10 animate-spin mx-auto text-primary" />
-              <p className="mt-4 text-sm">
-                {confirmationCountdown !== null
-                  ? `Awaiting blockchain confirmation - ${confirmationCountdown}s`
-                  : 'Processing your activation...'
-                }
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {confirmationCountdown !== null
-                  ? 'Please wait while we confirm your transaction on the blockchain.'
-                  : 'Please wait while we confirm your transaction.'
-                }
-              </p>
+              <p className="mt-4 text-sm">Processing your activation...</p>
+              <p className="text-xs text-muted-foreground">Please wait while we confirm your transaction.</p>
             </div>
           )}
 
@@ -1055,51 +606,6 @@ function DirectHireModal({
         </div>
       </DialogContent>
 
-      {/* Pending Transaction Management Modal */}
-      <Dialog open={showPendingModal} onOpenChange={setShowPendingModal}>
-        <DialogContent className="max-w-sm mx-auto">
-          <DialogHeader>
-            <DialogTitle className="text-center">Pending Agent Activation</DialogTitle>
-            <DialogDescription className="text-center">
-              You have a pending agent activation transaction. What would you like to do?
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <AlertCircle className="h-4 w-4 text-blue-600" />
-                <span className="text-sm font-medium text-blue-800">Pending Transaction Details</span>
-              </div>
-              <div className="text-xs text-blue-700 space-y-1">
-                <p>Amount: ${(pendingTransaction?.amount ? (Number(pendingTransaction.amount) / 1_000_000).toFixed(2) : '0.00')} USDT</p>
-                <p>Status: {String(pendingTransaction?.status || 'Unknown')}</p>
-                <p>Created: {pendingTransaction?.created_at ? new Date(pendingTransaction.created_at as string).toLocaleDateString() : 'Unknown'}</p>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <Button
-                onClick={handleCheckPendingPayment}
-                className="w-full bg-blue-600 hover:bg-blue-700"
-              >
-                Check Payment Status
-              </Button>
-              <Button
-                onClick={handleCancelPendingAndStartFresh}
-                variant="outline"
-                className="w-full"
-              >
-                Cancel & Start Fresh
-              </Button>
-            </div>
-
-            <p className="text-xs text-muted-foreground text-center">
-              Check if your previous payment was completed, or cancel to create a new transaction with the current amount.
-            </p>
-          </div>
-        </DialogContent>
-      </Dialog>
     </Dialog>
   );
 }
@@ -1107,19 +613,17 @@ function DirectHireModal({
 /**
  * Agent Hire Page
  * Purpose: Let users choose an AI agent tier and activate using USDT or credit balance.
- * Inputs: Wallet context provides `publicKey`, `provider`, and `anchorProvider`.
+ * Inputs: Wallet context provides `publicKey`.
  * Outputs: Activation modal and navigation to portfolio.
  * Notes: Mobile-first layout consistent with other /dapp pages.
  */
 export default function DappHire() {
-  const { publicKey, provider, anchorProvider } = useWallet();
+  const { publicKey } = useWallet();
   const navigate = useNavigate();
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
   const [tiersMap, setTiersMap] = useState<Record<string, AgentTierRow>>({});
-  const [pendingTransaction, setPendingTransaction] = useState<Record<string, unknown> | null>(null);
-  const [showPendingDialog, setShowPendingDialog] = useState(false);
 
-  // Fetch agent tiers from backend and check for pending transactions
+  // Fetch agent tiers from backend
   useEffect(() => {
     (async () => {
       try {
@@ -1129,57 +633,12 @@ export default function DappHire() {
         console.warn('Failed to load agent tiers from backend:', error);
       }
     })();
-
-    // Check for pending transactions when component mounts
-    if (publicKey) {
-      checkPendingTransaction();
-    }
   }, [publicKey]);
 
   const handleActivationSuccess = () => {
     // Close modal and navigate to portfolio
     setSelectedTier(null);
-    setPendingTransaction(null);
-    setShowPendingDialog(false);
     navigate('/dapp/my-agents');
-  };
-
-  const checkPendingTransaction = async () => {
-    if (!publicKey) return;
-
-    try {
-      const lastUrl = `${API_CONFIG.getBaseUrl()}/transactions/last-confirmed?initiatorWallet=${encodeURIComponent(publicKey.toBase58())}`;
-      const lastRes = await ApiClient.get(lastUrl);
-      const lastData = await lastRes.json();
-      const record = lastData?.record as Record<string, unknown> | undefined | null;
-
-      if (record && record.type === 'agent_activation' && record.status === 'pending') {
-        setPendingTransaction(record);
-        setShowPendingDialog(true);
-      }
-    } catch (error) {
-      console.warn('Failed to check pending transactions:', error);
-    }
-  };
-
-  const handleProceedWithPending = () => {
-    if (pendingTransaction) {
-      // Navigate to transaction status page or show modal to complete payment
-      navigate(`/dapp/transactions/${pendingTransaction.order_id}`);
-    }
-  };
-
-  const handleCancelPending = async () => {
-    if (!pendingTransaction) return;
-
-    try {
-      // For now, just close the dialog and clear state
-      // In a full implementation, you'd call an API to mark as cancelled
-      setPendingTransaction(null);
-      setShowPendingDialog(false);
-    } catch (error) {
-      console.warn('Failed to cancel pending transaction:', error);
-    }
   };
 
   return (
@@ -1287,64 +746,17 @@ export default function DappHire() {
           </div>
 
           {/* Direct Hire Modal */}
-          {selectedTier && publicKey && anchorProvider && (
+          {selectedTier && publicKey && (
             <DirectHireModal
               isOpen={!!selectedTier}
               onClose={() => setSelectedTier(null)}
               tierName={selectedTier}
               userPublicKey={publicKey}
-              anchorProvider={anchorProvider}
               tierRow={selectedTier ? tiersMap[selectedTier] : undefined}
               tiersMap={tiersMap}
               onSuccess={handleActivationSuccess}
             />
           )}
-
-          {/* Pending Transaction Dialog */}
-          <Dialog open={showPendingDialog} onOpenChange={setShowPendingDialog}>
-            <DialogContent className="max-w-sm mx-auto">
-              <DialogHeader>
-                <DialogTitle className="text-center">Pending Agent Activation</DialogTitle>
-                <DialogDescription className="text-center">
-                  You have a pending agent activation transaction that needs to be completed.
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-4">
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <AlertCircle className="h-4 w-4 text-blue-600" />
-                    <span className="text-sm font-medium text-blue-800">Transaction Details</span>
-                  </div>
-                  <div className="text-xs text-blue-700 space-y-1">
-                    <p>Amount: ${(pendingTransaction?.amount ? (Number(pendingTransaction.amount) / 1_000_000).toFixed(2) : '0.00')} USDT</p>
-                    <p>Status: {String(pendingTransaction?.status || 'Unknown')}</p>
-                    <p>Created: {pendingTransaction?.created_at ? new Date(pendingTransaction.created_at as string).toLocaleDateString() : 'Unknown'}</p>
-                  </div>
-                </div>
-
-                <div className="flex gap-3">
-                  <Button
-                    onClick={handleProceedWithPending}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700"
-                  >
-                    Complete Payment
-                  </Button>
-                  <Button
-                    onClick={handleCancelPending}
-                    variant="outline"
-                    className="flex-1"
-                  >
-                    Cancel Transaction
-                  </Button>
-                </div>
-
-                <p className="text-xs text-muted-foreground text-center">
-                  Choose to complete your pending payment or cancel to start fresh.
-                </p>
-              </div>
-            </DialogContent>
-          </Dialog>
         </div>
       </WalletGate>
     </LicenseGuard>
