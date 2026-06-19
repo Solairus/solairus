@@ -20,18 +20,25 @@ export const TREASURY_HD_INDEX = 0
 /**
  * Derive a unique deposit keypair for an order.
  * Path: m/44'/501'/<index>'/0' — Solana BIP44, fully hardened (ed25519 requires hardened).
+ *
+ * Accepts number | string | bigint because pg's node-postgres library returns INT8/BIGINT
+ * column values as JavaScript strings by default (to avoid Number.MAX_SAFE_INTEGER overflow).
  */
-export function deriveOrderKeypair(index: number): Keypair {
+export function deriveOrderKeypair(index: number | string | bigint): Keypair {
   const mnemonic = process.env.HD_WALLET_MNEMONIC
   if (!mnemonic || !mnemonic.trim()) throw new Error('HD_WALLET_MNEMONIC not set')
-  if (!Number.isInteger(index) || index < 0) throw new Error(`Invalid HD index: ${index}`)
+
+  // Normalise pg "bigint as string" (e.g. "1") or BigInt wrapper before the integer check.
+  const n = typeof index === 'string' ? Number(index) : typeof index === 'bigint' ? Number(index) : index
+  if (!Number.isInteger(n) || n < 0) throw new Error(`Invalid HD index: ${index}`)
+
   const seed = mnemonicToSeedSync(mnemonic.trim())
-  const { key } = derivePath(`m/44'/501'/${index}'/0'`, seed.toString('hex'))
+  const { key } = derivePath(`m/44'/501'/${n}'/0'`, seed.toString('hex'))
   return Keypair.fromSeed(key)
 }
 
 /** Base58 deposit address for an order index. */
-export function getOrderAddress(index: number): string {
+export function getOrderAddress(index: number | string | bigint): string {
   return deriveOrderKeypair(index).publicKey.toBase58()
 }
 

@@ -209,16 +209,13 @@ export function PaymentOrderPanel({ type, amountMicro, tierId, onCompleted, onCa
           <span className={`font-mono ${remaining < 60 ? 'text-red-600' : 'text-gray-700'}`}>{formatCountdown(remaining)}</span>
         </div>
 
-        {resumedExisting && order.status === 'pending' && (
-          <div className="bg-amber-50 border border-amber-200 rounded p-2 flex items-center justify-between gap-2">
-            <p className="text-[11px] text-amber-700">You already have an order in progress — continue with this address, or start fresh.</p>
-            <Button size="sm" variant="outline" className="text-[11px] px-2 py-1 h-6 whitespace-nowrap" onClick={() => void cancelAndNew()}>Cancel &amp; new</Button>
-          </div>
-        )}
-
-        {order.status === 'pending' && !resumedExisting && (
+        {order.status === 'pending' && (
           <div className="bg-blue-50 border border-blue-100 rounded p-2">
-            <p className="text-[11px] text-blue-700">Detection is automatic — this updates as soon as your payment lands. You can also check now.</p>
+            <p className="text-[11px] text-blue-700">
+              {resumedExisting
+                ? 'You have a pending order from a previous session — use the address below to send USDT.'
+                : 'Detection is automatic — this updates as soon as your payment lands. You can also check now.'}
+            </p>
           </div>
         )}
 
@@ -228,6 +225,11 @@ export function PaymentOrderPanel({ type, amountMicro, tierId, onCompleted, onCa
           <Button size="sm" onClick={handleVerifyNow} disabled={verifying} className="bg-blue-600 hover:bg-blue-700 text-white flex-1">
             {verifying ? 'Checking…' : 'Check now'}
           </Button>
+          {resumedExisting && (
+            <Button size="sm" variant="outline" className="border-red-300 text-red-600 hover:bg-red-50" onClick={() => void cancelAndNew()}>
+              Cancel &amp; new
+            </Button>
+          )}
           {onCancel && <Button size="sm" variant="outline" onClick={onCancel}>Cancel</Button>}
         </div>
       </CardContent>

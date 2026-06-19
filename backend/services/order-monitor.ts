@@ -37,17 +37,22 @@ export async function verifyAndSettleOrder(order: PendingRow): Promise<void> {
   if ((locked.rowCount ?? 0) === 0) return
 
   try {
-    const { signature } = await sweepToTreasury({ orderIndex: order.hd_index, amountMicro: balanceMicro })
+    const { signature } = await sweepToTreasury({ orderIndex: Number(order.hd_index), amountMicro: balanceMicro })
     await fulfillOrder(order, balanceMicro, signature, order.user_address)
   } catch (e) {
     // Leave the order in 'processing' for admin reconciliation — never blind-revert,
     // the sweep may have broadcast. Record the error for visibility.
+    const errMsg = e instanceof Error ? e.message : String(e)
+    const errStack = e instanceof Error ? e.stack : ''
     console.error('[order-monitor] settle failed (left processing)', {
-      order_ref: order.order_ref, error: e instanceof Error ? e.message : e,
+      order_ref: order.order_ref,
+      error: errMsg,
+      stack: errStack,
+      name: e instanceof Error ? e.constructor.name : typeof e,
     })
     await query(
       "UPDATE payment_orders SET metadata = metadata || $1::jsonb, updated_at=NOW() WHERE id=$2",
-      [JSON.stringify({ settle_error: e instanceof Error ? e.message : String(e), settle_failed_at: new Date().toISOString() }), order.id]
+      [JSON.stringify({ settle_error: errMsg, settle_failed_at: new Date().toISOString() }), order.id]
     ).catch(() => {})
   }
 }

@@ -13,7 +13,7 @@ export interface OrderRow {
   id: number
   order_ref: string
   user_id: number
-  hd_index: number
+  hd_index: number | string
   address: string
   type: OrderType
   tier_id: number | null

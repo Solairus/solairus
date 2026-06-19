@@ -16,7 +16,7 @@ import {
   TokenInvalidAccountOwnerError,
 } from '@solana/spl-token'
 import { getWorkingConnection } from './rpc-manager'
-import { deriveOrderKeypair, getTreasuryKeypair } from './hd-wallet'
+import { deriveOrderKeypair, getTreasuryKeypair, getTreasuryAddress } from './hd-wallet'
 
 /** Resolve the configured USDT mint. */
 export function getUsdtMint(): PublicKey {
@@ -55,7 +55,13 @@ export async function getUsdtBalanceMicro(owner: PublicKey, connection?: Connect
  * Sweep USDT from an order address to the treasury.
  * Dual-signer: treasury = fee payer (holds SOL), order keypair = token authority. Both backend-held.
  */
-export async function sweepToTreasury(p: { orderIndex: number; amountMicro: bigint }): Promise<{ signature: string }> {
+/**
+ * Sweep USDT from an order address to the treasury.
+ * Dual-signer: treasury = fee payer (holds SOL), order keypair = token authority. Both backend-held.
+ *
+ * @param p.orderIndex - PG returns INT8 as string; accept number|string|bigint.
+ */
+export async function sweepToTreasury(p: { orderIndex: number | string | bigint; amountMicro: bigint }): Promise<{ signature: string }> {
   if (p.amountMicro <= 0n) throw new Error('Sweep amount must be positive')
   const connection = await getWorkingConnection()
   const order = deriveOrderKeypair(p.orderIndex)
@@ -63,7 +69,19 @@ export async function sweepToTreasury(p: { orderIndex: number; amountMicro: bigi
   const mint = getUsdtMint()
 
   const sourceAta = await getAssociatedTokenAddress(mint, order.publicKey, true)
-  const treasuryAta = await getOrCreateAssociatedTokenAccount(connection, treasury, mint, treasury.publicKey)
+  let treasuryAta: Awaited<ReturnType<typeof getAccount>>
+  try {
+    treasuryAta = await getOrCreateAssociatedTokenAccount(connection, treasury, mint, treasury.publicKey)
+  } catch (e) {
+    if (e instanceof TokenAccountNotFoundError) {
+      throw new Error(
+        `Treasury USDT ATA does not exist and could not be created (treasury=${getTreasuryAddress()}). ` +
+        `The treasury keypair has insufficient SOL on this cluster to pay rent (~0.002 SOL). ` +
+        `Fund it at https://faucet.solana.com then retry.`
+      )
+    }
+    throw e
+  }
 
   const ix = createTransferInstruction(sourceAta, treasuryAta.address, order.publicKey, p.amountMicro)
   const tx = new Transaction().add(ix)
