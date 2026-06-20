@@ -6,8 +6,6 @@
  */
 
 import { Connection, PublicKey } from '@solana/web3.js';
-import * as anchor from '@coral-xyz/anchor';
-// Removed solairus-removed; timing is backend-configured
 
 // Cache for the contract timing to avoid repeated RPC calls
 let cachedSecondsPerDay: number | null = null;
@@ -19,7 +17,7 @@ const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
  * This is crucial for debug mode where 5 minutes = 1 day
  */
 export async function getContractSecondsPerDay(
-  connection: Connection | anchor.AnchorProvider
+  connection: Connection
 ): Promise<number> {
   const now = Date.now();
   
@@ -68,7 +66,7 @@ export async function getContractSecondsPerDay(
  * Detect if the contract is in debug mode
  * We can do this by checking the program ID or other indicators
  */
-async function detectDebugMode(connection: Connection | anchor.AnchorProvider): Promise<boolean> {
+async function detectDebugMode(connection: Connection): Promise<boolean> {
   try {
     // Get the program ID from environment (optional now)
     const programId = import.meta.env.VITE_SOLAIRUS_MAIN_PROGRAM_ID;
@@ -102,7 +100,7 @@ async function detectDebugMode(connection: Connection | anchor.AnchorProvider): 
  * Get human-readable timing information
  */
 export async function getContractTimingInfo(
-  connection: Connection | anchor.AnchorProvider
+  connection: Connection
 ): Promise<{
   secondsPerDay: number;
   isDebugMode: boolean;
@@ -131,7 +129,7 @@ export async function getContractTimingInfo(
  * Calculate next withdrawal time based on contract timing
  */
 export async function calculateNextWithdrawalTime(
-  connection: Connection | anchor.AnchorProvider,
+  connection: Connection,
   activatedAt: Date,
   lastRoiWithdrawal?: Date
 ): Promise<Date | null> {

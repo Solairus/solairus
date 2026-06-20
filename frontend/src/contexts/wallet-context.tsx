@@ -10,7 +10,6 @@ import {
 import { Connection, PublicKey, clusterApiUrl, Transaction, VersionedTransaction } from "@solana/web3.js"
 import { WalletManager } from "@/services/wallet/wallet-manager"
 import { getHealthyRpcConnection, handleRpcError, onNetworkChange } from "@/utils/rpc-switcher"
-import * as anchor from "@coral-xyz/anchor"
 import { AuthService } from '@/services/auth/auth-service'
 import { API_CONFIG, ApiClient } from '@/config/service-endpoints'
 
@@ -54,8 +53,6 @@ type WalletContextType = {
   openConnectModal: () => void
   lastError: Error | null
   clearError: () => void
-  // Smart contract capabilities
-  anchorProvider: anchor.AnchorProvider | null
   publicKey: PublicKey | null
   signTransaction: ((transaction: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>) | null
   signAllTransactions: ((transactions: (Transaction | VersionedTransaction)[]) => Promise<(Transaction | VersionedTransaction)[]>) | null
@@ -74,7 +71,6 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
   const [isInitializing] = useState(false)
   const [provider, setProvider] = useState<Connection | null>(null)
   const [lastError, setLastError] = useState<Error | null>(null)
-  const [anchorProvider, setAnchorProvider] = useState<anchor.AnchorProvider | null>(null)
   const [publicKey, setPublicKey] = useState<PublicKey | null>(null)
   const [walletProvider, setWalletProvider] = useState<WalletProviderWithSigning | null>(null)
   const [lastBalanceUpdate, setLastBalanceUpdate] = useState<number>(0)
@@ -207,39 +203,9 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
         setProvider(conn)
         setChainId(null)
 
-        // Set public key for smart contract interactions
+        // Set public key
         const pubKey = new PublicKey(address)
         setPublicKey(pubKey)
-
-        // Create Anchor provider only if wallet provider supports signing
-        if (provider && typeof (provider as WalletProviderWithSigning).signTransaction === 'function') {
-          try {
-            const anchorWallet = {
-              publicKey: pubKey,
-              signTransaction: (provider as WalletProviderWithSigning).signTransaction!.bind(provider),
-              signAllTransactions: (provider as WalletProviderWithSigning).signAllTransactions?.bind(provider) ||
-                (async (txs: (Transaction | VersionedTransaction)[]) => {
-                  const signed = []
-                  for (const tx of txs) {
-                    const wp = provider as WalletProviderWithSigning
-                    if (typeof wp.signTransaction === 'function') {
-                      signed.push(await wp.signTransaction(tx))
-                    }
-                  }
-                  return signed
-                }),
-            } as anchor.Wallet
-
-            const anchorProv = new anchor.AnchorProvider(conn, anchorWallet, {
-              commitment: "confirmed",
-              preflightCommitment: "confirmed",
-            })
-            setAnchorProvider(anchorProv)
-          } catch (providerError) {
-            console.warn("Failed to create Anchor provider:", providerError)
-            setAnchorProvider(null)
-          }
-        }
 
         // Skip initial balance fetch to avoid unnecessary RPC calls
         // Balance will be fetched only when user explicitly requests it
@@ -299,7 +265,6 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
             setIsConnected(false)
             setWalletProvider(null)
             setProvider(null)
-            setAnchorProvider(null)
             setPublicKey(null)
             setBalance(null)
           }
@@ -374,7 +339,6 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
       setIsConnected(false)
       setWalletProvider(null)
       setProvider(null)
-      setAnchorProvider(null)
       setPublicKey(null)
       setBalance(null)
 
@@ -403,7 +367,6 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
       setBalance(null)
       setProvider(null)
       setIsConnected(false)
-      setAnchorProvider(null)
       setPublicKey(null)
       setWalletProvider(null)
 
@@ -564,8 +527,6 @@ export function WalletContextProvider({ children }: { children: ReactNode }) {
     openConnectModal,
     lastError,
     clearError,
-    // Smart contract capabilities
-    anchorProvider,
     publicKey,
     signTransaction: isConnected ? signTransaction : null,
     signAllTransactions: isConnected ? signAllTransactions : null,

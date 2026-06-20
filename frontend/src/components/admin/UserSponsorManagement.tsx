@@ -12,8 +12,6 @@ import { UserLookup, UserInfo } from './UserLookup';
 import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { createAdminService } from '@/services/admin/admin-service';
-import * as anchor from '@coral-xyz/anchor';
-
 interface SponsorUpdateForm {
   newSponsorAddress: string;
 }
@@ -26,7 +24,7 @@ interface SponsorUpdateConfirmation {
 }
 
 export function UserSponsorManagement() {
-  const { anchorProvider, publicKey } = useWallet();
+  const { publicKey } = useWallet();
   const { hasAccess } = useAdminRole();
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [form, setForm] = useState<SponsorUpdateForm>({ newSponsorAddress: '' });
@@ -123,7 +121,7 @@ export function UserSponsorManagement() {
   };
 
   const confirmSponsorUpdate = async () => {
-    if (!anchorProvider || !publicKey || !confirmation.userInfo) {
+    if (!publicKey || !confirmation.userInfo) {
       toast.error('Wallet not connected or invalid confirmation state');
       return;
     }
@@ -132,9 +130,9 @@ export function UserSponsorManagement() {
     setConfirmation({ ...confirmation, show: false });
 
     try {
-      const adminService = createAdminService(anchorProvider);
+      const adminService = createAdminService(null);
       const txSig = await adminService.updateUserSponsor({
-        provider: anchorProvider,
+        provider: null,
         userPubkey: confirmation.userInfo.address.trim(),
         newSponsor: confirmation.newSponsor.trim(),
         authority: publicKey,

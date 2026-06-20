@@ -1,10 +1,7 @@
 import { pool } from '../db'
 import type { Transaction } from '../types'
 import { applyBalanceBucketChange, getOrCreateBalanceId } from './balance'
-import { getWorkingConnection } from '../lib/rpc-manager'
-import { PublicKey } from '@solana/web3.js'
-import solairusPayIdl from '../idl/solairus_pay.json'
-import { deriveReference, finalizeRecovery, finalizeRefund } from './onchain_verifier'
+import { finalizeRecovery, finalizeRefund } from './onchain_verifier'
 import { microBigIntToDecimalString } from './amount'
 import type { BucketRef } from './bucket'
 
@@ -61,34 +58,6 @@ async function processRefund(orderId: string, expectedType: 'user_withdrawal' | 
         const now = new Date()
         if (now <= expiresAt) {
             return { refunded: false, reason: 'not_expired' }
-        }
-
-        // Safety: on-chain verification first
-        const PROGRAM_ID = process.env.SOLAIRUS_PAY_PROGRAM_ID || (solairusPayIdl as { address?: string }).address!
-        const referenceStr = (record.metadata && (record.metadata as Record<string, unknown>)['reference']) as string | undefined
-        const reference = referenceStr ? new PublicKey(referenceStr) : deriveReference(orderId, PROGRAM_ID)
-        const conn = await getWorkingConnection()
-
-        // Use event log verification instead of token delta
-        const { findEventByReference } = await import('./onchain_verifier')
-        const eventResult = await findEventByReference(conn, reference, { types: ['withdrawal'] })
-
-        if (eventResult) {
-            const event = eventResult.event
-            // Verify event details match record
-            const decimals = record.decimals || 6
-            const amtNum = typeof record.amount === 'string' ? Number(record.amount) : (record.amount as unknown as number)
-            const amtMicro = BigInt(Math.round(amtNum))
-
-            const amountMatch = event.amount === amtMicro
-            const mintMatch = event.mint?.toBase58() === record.mint_address
-
-            if (amountMatch && mintMatch) {
-                await finalizeRecovery(client, record.id, eventResult.signature, { recoveredVia: 'event_log', recoveredAt: new Date().toISOString() })
-                return { refunded: false, reason: 'recovered_signature' }
-            } else {
-                console.warn(`[Refund] Found event but mismatch: ${event.amount} vs ${amtMicro}`)
-            }
         }
 
         await client.query('BEGIN')
@@ -190,7 +159,6 @@ async function processRefund(orderId: string, expectedType: 'user_withdrawal' | 
             refund_finalized: true,
             failureReason: 'Expired; no on-chain signature found',
             refundAt: now.toISOString(),
-            reference: reference.toBase58()
         })
 
         await client.query('COMMIT')

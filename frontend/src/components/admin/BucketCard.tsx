@@ -13,17 +13,15 @@ import { useTransactionStatus } from '@/hooks/useTransactionStatus';
 import { LoadingCard } from './LoadingStates';
 import { ConfirmationDialog } from './ConfirmationDialog';
 import { FormValidation, useFormValidation, validators } from './FormValidation';
-import * as anchor from '@coral-xyz/anchor';
-
 interface BucketCardProps {
   bucketType: BucketType;
-  balance: anchor.BN;
+  balance: number;
   canWithdraw: boolean;
   onWithdrawSuccess?: () => void;
 }
 
 export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess }: BucketCardProps) {
-  const { anchorProvider, publicKey, signTransaction } = useWallet();
+  const { provider, publicKey, signTransaction } = useWallet();
   const { showError, showSuccess } = useAdminErrorHandler();
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [showWithdrawForm, setShowWithdrawForm] = useState(false);
@@ -71,12 +69,12 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
   };
 
   const formattedBalance = formatUsdtAmount(balance);
-  const isZeroBalance = balance.eq(new anchor.BN(0));
+  const isZeroBalance = balance <= 0;
 
   const validateWithdrawal = () => {
     validation.clearErrors();
 
-    if (!anchorProvider || !publicKey) {
+    if (!publicKey || !provider) {
       validation.addError('wallet', 'Wallet not connected');
       return false;
     }
@@ -87,8 +85,8 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
       return false;
     }
 
-    const amountBN = parseUsdtAmount(withdrawAmount);
-    if (amountBN.gt(balance)) {
+    const amountMicro = parseUsdtAmount(withdrawAmount);
+    if (amountMicro > balance) {
       validation.addError('amount', 'Amount exceeds available balance');
       return false;
     }
@@ -120,17 +118,16 @@ export function BucketCard({ bucketType, balance, canWithdraw, onWithdrawSuccess
   const handleWithdraw = async () => {
     if (!validateWithdrawal()) return;
 
-    const amountBN = parseUsdtAmount(withdrawAmount);
+    const amountMicro = parseUsdtAmount(withdrawAmount);
 
     await transactionStatus.executeTransaction(async () => {
       transactionStatus.updateProgress(20, 'validate');
 
       const txSignature = await withdrawFromBucket({
-        provider: anchorProvider,
-        connection: anchorProvider.connection,
+        connection: provider,
         bucketType,
-        amount: amountBN,
-        authority: publicKey,
+        amount: amountMicro,
+        authority: publicKey!,
         usdtMint: resolveUsdtMint(),
         signTransaction: signTransaction || undefined,
       });

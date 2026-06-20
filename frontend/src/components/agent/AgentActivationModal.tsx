@@ -97,7 +97,6 @@ export const AgentActivationModal: React.FC<AgentActivationModalProps> = ({
   const [activationError, setActivationError] = useState<unknown>(null);
   const { showError, showSuccess, formatErrorForUI } = useAgentErrorHandler();
 
-  const { anchorProvider } = useWallet();
   const [creditBalanceMicro, setCreditBalanceMicro] = useState<number | null>(null);
   const [creditLoading, setCreditLoading] = useState<boolean>(false);
   const [creditError, setCreditError] = useState<string | null>(null);

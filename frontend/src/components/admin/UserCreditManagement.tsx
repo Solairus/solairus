@@ -16,7 +16,6 @@ import { ResponsiveCard, InfoCard } from './ResponsiveCard';
 import { ConfirmationDialog } from './ConfirmationDialog';
 import { FormValidation, useFormValidation, validators } from './FormValidation';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import * as anchor from '@coral-xyz/anchor';
 
 interface CreditOperationForm {
   amount: string;
@@ -24,7 +23,7 @@ interface CreditOperationForm {
 }
 
 export function UserCreditManagement() {
-  const { anchorProvider, publicKey } = useWallet();
+  const { publicKey } = useWallet();
   const { hasAccess } = useAdminRole();
   const { showError, showSuccess } = useAdminErrorHandler();
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
@@ -34,29 +33,12 @@ export function UserCreditManagement() {
   const [pendingOperation, setPendingOperation] = useState<{ type: 'credit' | 'debit'; amount: string } | null>(null);
   const validation = useFormValidation();
   
-  // Format balance from micro-USDT (6 decimals) to display format
-  const formatBalance = (balance: anchor.BN | string | number): string => {
+  const formatBalance = (balance: string | number): string => {
     try {
-      let balanceBN: anchor.BN;
-      if (typeof balance === 'string') {
-        balanceBN = new anchor.BN(balance);
-      } else if (typeof balance === 'number') {
-        balanceBN = new anchor.BN(balance);
-      } else {
-        balanceBN = balance;
-      }
-      
-      // Convert from smallest unit (6 decimals for USDT) to display format
-      const divisor = new anchor.BN(1000000); // 10^6
-      const wholePart = balanceBN.div(divisor);
-      const fractionalPart = balanceBN.mod(divisor);
-      
-      if (fractionalPart.eq(new anchor.BN(0))) {
-        return wholePart.toString();
-      }
-      
-      const fractionalStr = fractionalPart.toString().padStart(6, '0').replace(/0+$/, '');
-      return `${wholePart.toString()}.${fractionalStr}`;
+      const micro = Number(balance);
+      const whole = Math.floor(micro / 1_000_000);
+      const frac = String(Math.abs(micro) % 1_000_000).padStart(6, '0').replace(/0+$/, '');
+      return frac ? `${whole}.${frac}` : whole.toString();
     } catch {
       return '0';
     }
@@ -139,16 +121,10 @@ export function UserCreditManagement() {
     return true;
   };
 
-  const parseUsdtAmount = (amount: string): anchor.BN => {
-    try {
-      const num = parseFloat(amount);
-      // Convert to smallest unit (6 decimals for USDT)
-      const multiplier = 1000000; // 10^6
-      const smallestUnit = Math.floor(num * multiplier);
-      return new anchor.BN(smallestUnit);
-    } catch {
-      throw new Error('Invalid amount format');
-    }
+  const parseUsdtAmount = (amount: string): number => {
+    const num = parseFloat(amount);
+    if (!Number.isFinite(num)) throw new Error('Invalid amount format');
+    return Math.floor(num * 1_000_000);
   };
 
   const handleCreditOperationClick = (isDebit: boolean) => {
@@ -172,18 +148,17 @@ export function UserCreditManagement() {
       transactionStatus.updateProgress(20, 'validate');
       
       const userPubkey = new PublicKey(userInfo!.address);
-      const amountBN = parseUsdtAmount(form.amount);
-      
+      const amountMicro = parseUsdtAmount(form.amount);
+
       transactionStatus.updateProgress(40, 'process');
 
-      // Use the admin service instead of calling contract directly
-      const adminService = createAdminService(anchorProvider);
+      const adminService = createAdminService(null);
       const result = await adminService.creditUserBalance({
-        provider: anchorProvider,
+        provider: null,
         userPubkey,
-        amount: amountBN.toNumber(), // Convert BN to number for the service
+        amount: amountMicro,
         isDebit,
-        authority: publicKey,
+        authority: publicKey!,
       });
 
       return result.txSignature;

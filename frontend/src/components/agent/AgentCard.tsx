@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Connection } from '@solana/web3.js';
-import * as anchor from '@coral-xyz/anchor';
 import { AgentData } from '@/services/agent/agent-service';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -25,7 +24,7 @@ import { cn } from '@/lib/utils';
 interface AgentCardProps {
   agent: AgentData;
   onWithdraw: (activationId: number) => Promise<void>;
-  connection?: Connection | anchor.AnchorProvider; // Connection or AnchorProvider for timing service
+  connection?: Connection;
 }
 
 export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connection }) => {

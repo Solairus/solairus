@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { PublicKey, Connection } from '@solana/web3.js';
-import * as anchor from '@coral-xyz/anchor';
 import { AgentData, GetUserAgentsOptions } from '@/services/agent/agent-service';
 import { fetchUserAgentActivations, type BackendAgentActivation } from '@/services/agent/agent-backend';
 import type { WithdrawalLimitDisplay } from '@/services/agent/withdrawal-limit-service';
@@ -82,9 +81,8 @@ const DEFAULT_WITHDRAWAL_DISPLAY: WithdrawalLimitDisplay = {
 interface AgentDashboardProps {
   userPublicKey: PublicKey;
   connection: Connection;
-  anchorProvider?: anchor.AnchorProvider; // Add optional anchor provider
   onActivateAgent?: () => void;
-  showActivationModal?: boolean; // New prop to control built-in modal
+  showActivationModal?: boolean;
 }
 
 interface AgentDashboardState {
@@ -100,7 +98,6 @@ interface AgentDashboardState {
 export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   userPublicKey,
   connection,
-  anchorProvider,
   onActivateAgent,
   showActivationModal = true
 }) => {
@@ -155,16 +152,10 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           : 0;
         const yieldCapProgress = row.yield_cap_progress_pct ?? computedProgress;
         const yieldCapReached = row.yield_cap_reached ?? (yieldCapProgress >= capPct);
-        type AccountDataStub = {
-          id?: anchor.BN;
-          principalUsdt?: anchor.BN;
-          startedAt?: anchor.BN;
-        };
-
-        const accountData: AccountDataStub = {
-          id: new anchor.BN(row.id),
-          principalUsdt: new anchor.BN(row.amount ?? 0),
-          startedAt: new anchor.BN(Math.floor(activatedAt.getTime() / 1000)),
+        const accountData = {
+          id: row.id,
+          principalUsdt: row.amount ?? 0,
+          startedAt: Math.floor(activatedAt.getTime() / 1000),
         };
 
         // Compute timing window using contract timing service (60s override supported)
@@ -261,15 +252,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     try {
       console.log('🚀 Starting ROI withdrawal for agent:', activationId);
 
-      if (!anchorProvider) {
-        throw new Error('Anchor provider not available. Please ensure your wallet is properly connected.');
-      }
-
-      // Import the withdrawal service dynamically to avoid circular dependencies
       const { withdrawAgentRoi } = await import('@/services/agent/agent-roi-service');
-
-      // Execute ROI withdrawal
-      const result = await withdrawAgentRoi(anchorProvider, activationId);
+      const result = await withdrawAgentRoi(connection, activationId);
 
       console.log('✅ ROI withdrawal successful:', result);
 

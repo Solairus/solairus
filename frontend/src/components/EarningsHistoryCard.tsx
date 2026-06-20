@@ -20,7 +20,7 @@ interface EarningsHistoryCardProps {
 
 export default function EarningsHistoryCard({ userPublicKey }: EarningsHistoryCardProps) {
   const { account } = useWalletConnection();
-  const { anchorProvider } = useWallet();
+  const { provider } = useWallet();
   const [historyItems, setHistoryItems] = useState<EarningsHistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,16 +31,15 @@ export default function EarningsHistoryCard({ userPublicKey }: EarningsHistoryCa
   });
 
   const loadEarningsHistory = useCallback(async () => {
-    if (!anchorProvider?.connection) return;
+    if (!provider) return;
 
     try {
       setIsLoading(true);
       setError(null);
 
-      // Fetch earnings history and summary
       const [history, summaryData] = await Promise.all([
-        getEarningsHistory(anchorProvider.connection, userPublicKey, 10),
-        getEarningsSummary(anchorProvider.connection, userPublicKey)
+        getEarningsHistory(provider, userPublicKey, 10),
+        getEarningsSummary(provider, userPublicKey)
       ]);
 
       setHistoryItems(history.items);
@@ -52,7 +51,7 @@ export default function EarningsHistoryCard({ userPublicKey }: EarningsHistoryCa
     } finally {
       setIsLoading(false);
     }
-  }, [anchorProvider, userPublicKey]);
+  }, [provider, userPublicKey]);
 
   useEffect(() => {
     // Only load on explicit user request to avoid aggressive RPC calls

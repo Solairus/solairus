@@ -4,18 +4,17 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { DollarSign, TrendingUp } from "lucide-react";
 import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
-import * as anchor from "@coral-xyz/anchor";
 import { AffiliateBackendService } from "@/services/affiliate/affiliate-backend";
 
 export default function AffiliateEarningsCard() {
   const { account } = useWalletConnection();
   const [earnings, setEarnings] = useState({
-    totalEarnings: new anchor.BN(0),
-    totalWithdrawn: new anchor.BN(0),
-    availableToWithdraw: new anchor.BN(0),
-    level1Earnings: new anchor.BN(0),
-    level2Earnings: new anchor.BN(0),
-    level3Earnings: new anchor.BN(0),
+    totalEarnings: 0,
+    totalWithdrawn: 0,
+    availableToWithdraw: 0,
+    level1Earnings: 0,
+    level2Earnings: 0,
+    level3Earnings: 0,
   });
 
   useEffect(() => {
@@ -26,7 +25,7 @@ export default function AffiliateEarningsCard() {
         if (!account) return;
         const summary = await AffiliateBackendService.getSummary();
         const per = summary.per_level_micro || {};
-        const bn = (v?: string | number) => new anchor.BN(String(v ?? 0));
+        const bn = (v?: string | number) => Number(v ?? 0);
         const next = {
           totalEarnings: bn(summary.total_earnings_affiliate_micro ?? 0),
           totalWithdrawn: bn(summary.total_withdrawn_micro ?? 0),
@@ -57,13 +56,10 @@ export default function AffiliateEarningsCard() {
     );
   }
   
-  // Convert from smallest unit (6 decimals for USDT) to display format
-  const formatUsdt = (amount: anchor.BN) => {
-    // Use string division to avoid precision issues with large numbers
-    const amountStr = amount.toString();
-    const wholePart = amountStr.slice(0, -6) || '0';
-    const decimalPart = amountStr.slice(-6).padStart(6, '0');
-    return `${wholePart}.${decimalPart.slice(0, 2)}`;
+  const formatUsdt = (amountMicro: number) => {
+    const whole = Math.floor(amountMicro / 1_000_000);
+    const frac = String(Math.abs(amountMicro) % 1_000_000).padStart(6, '0');
+    return `${whole}.${frac.slice(0, 2)}`;
   };
 
   const totalEarningsDisplay = formatUsdt(earnings.totalEarnings);
@@ -75,7 +71,7 @@ export default function AffiliateEarningsCard() {
 
 
 
-  const hasEarnings = earnings.totalEarnings.gt(new anchor.BN(0));
+  const hasEarnings = earnings.totalEarnings > 0;
 
   return (
     <Card className="bg-background/50 border-border/30">
@@ -121,7 +117,7 @@ export default function AffiliateEarningsCard() {
         )}
 
         {/* Withdrawal History */}
-        {earnings.totalWithdrawn.gt(new anchor.BN(0)) && (
+        {earnings.totalWithdrawn > 0 && (
           <>
             <Separator />
             <div className="flex items-center justify-between text-sm">

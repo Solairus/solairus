@@ -1,221 +1,5 @@
 import { Connection, PublicKey } from '@solana/web3.js'
-import { BorshCoder, EventParser, Idl } from '@coral-xyz/anchor'
-import solairusPayIdl from '../idl/solairus_pay.json'
-import crypto from 'crypto'
 import type { PoolClient } from 'pg'
-
-type ParsedEventResult = {
-  signature: string
-  slot: number
-  event: {
-    name: 'PaymentMade' | 'RewardsClaimed'
-    payer?: PublicKey
-    recipient?: PublicKey
-    mint?: PublicKey
-    amount?: bigint
-    decimals?: number
-    reference?: PublicKey
-    memo?: string
-  }
-}
-
-type SolairusPayEventData = {
-  payer?: unknown
-  recipient?: unknown
-  mint?: unknown
-  amount?: unknown
-  decimals?: unknown
-  reference?: unknown
-  memo?: unknown
-}
-
-type VerifyOptions = {
-  types?: Array<'payment' | 'withdrawal'>
-  maxSignatures?: number
-}
-
-function resolveProgramId(): string {
-  const idlAddr = (solairusPayIdl as { address?: string }).address
-  return process.env.SOLAIRUS_PAY_PROGRAM_ID || idlAddr || ''
-}
-
-export function deriveReference(orderId: string, programId: string): PublicKey {
-  const sha = crypto.createHash('sha256').update(orderId).digest()
-  const [pda] = PublicKey.findProgramAddressSync([Buffer.from('withdraw'), sha], new PublicKey(programId))
-  return pda
-}
-
-export async function findPaymentSignatureByOrderId(
-  connection: Connection,
-  walletPubkey: PublicKey,
-  orderId: string,
-  options?: VerifyOptions
-): Promise<ParsedEventResult | null> {
-  const programId = resolveProgramId()
-  if (!programId) return null
-
-  const types = options?.types ?? ['payment', 'withdrawal']
-  const maxSignatures = options?.maxSignatures ?? 100
-
-  const coder = new BorshCoder(solairusPayIdl as Idl)
-  const parser = new EventParser(new PublicKey(programId), coder)
-
-  const signatures = await connection.getSignaturesForAddress(walletPubkey, { limit: maxSignatures })
-  for (const sig of signatures) {
-    const tx = await connection.getParsedTransaction(sig.signature, {
-      commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0,
-    })
-    if (!tx || !tx.meta?.logMessages) continue
-
-    for (const event of parser.parseLogs(tx.meta.logMessages)) {
-      const name = String(event.name)
-      const isPayment = name === 'PaymentMade'
-      const isWithdrawal = name === 'RewardsClaimed'
-      if ((isPayment && !types.includes('payment')) || (isWithdrawal && !types.includes('withdrawal'))) continue
-
-      const data = event.data as SolairusPayEventData
-      const memoField = data.memo
-      const memo =
-        typeof memoField === 'string'
-          ? memoField
-          : memoField instanceof Uint8Array
-            ? Buffer.from(memoField).toString('utf8')
-            : memoField && typeof memoField === 'object' && 'toString' in memoField
-              ? (memoField as { toString(): string }).toString()
-              : undefined
-
-      if (memo === orderId) {
-        const normalizeKey = (value: unknown): PublicKey | undefined => {
-          try {
-            if (!value) return undefined
-            if (value instanceof PublicKey) return value
-            if (value instanceof Uint8Array) return new PublicKey(value)
-            if (typeof value === 'string') return new PublicKey(value)
-            if (value && typeof value === 'object' && 'toString' in value) {
-              return new PublicKey((value as { toString(): string }).toString())
-            }
-          } catch {
-            return undefined
-          }
-          return undefined
-        }
-
-        return {
-          signature: sig.signature,
-          slot: tx.slot,
-          event: {
-            name: isPayment ? 'PaymentMade' : 'RewardsClaimed',
-            payer: normalizeKey(data.payer),
-            recipient: normalizeKey(data.recipient),
-            mint: normalizeKey(data.mint),
-            amount: data.amount ? BigInt(String(data.amount)) : undefined,
-            decimals: typeof data.decimals === 'number' ? data.decimals : undefined,
-            reference: normalizeKey(data.reference),
-            memo,
-          },
-        }
-      }
-    }
-  }
-
-  return null
-}
-
-export async function findEventByReference(
-  connection: Connection,
-  reference: PublicKey,
-  options?: VerifyOptions
-): Promise<ParsedEventResult | null> {
-  const programId = resolveProgramId()
-  if (!programId) return null
-
-  const types = options?.types ?? ['payment', 'withdrawal']
-  const maxSignatures = options?.maxSignatures ?? 20
-
-  const coder = new BorshCoder(solairusPayIdl as Idl)
-  const parser = new EventParser(new PublicKey(programId), coder)
-
-  // Get signatures for the reference account
-  const signatures = await connection.getSignaturesForAddress(reference, { limit: maxSignatures })
-
-  for (const sig of signatures) {
-    if (sig.err) continue // Skip failed transactions
-
-    const tx = await connection.getParsedTransaction(sig.signature, {
-      commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0,
-    })
-    if (!tx || !tx.meta?.logMessages) continue
-
-    for (const event of parser.parseLogs(tx.meta.logMessages)) {
-      const name = String(event.name)
-      const isPayment = name === 'PaymentMade'
-      const isWithdrawal = name === 'RewardsClaimed'
-      if ((isPayment && !types.includes('payment')) || (isWithdrawal && !types.includes('withdrawal'))) continue
-
-      const normalizeKey = (value: unknown): PublicKey | undefined => {
-        try {
-          if (!value) return undefined
-          if (value instanceof PublicKey) return value
-          if (value instanceof Uint8Array) return new PublicKey(value)
-          if (typeof value === 'string') return new PublicKey(value)
-          if (value && typeof value === 'object' && 'toString' in value) {
-            return new PublicKey((value as { toString(): string }).toString())
-          }
-        } catch {
-          return undefined
-        }
-        return undefined
-      }
-
-      // Check if the event's reference matches our target reference
-      const data = event.data as SolairusPayEventData
-      const eventRef = normalizeKey(data.reference)
-      if (eventRef && eventRef.equals(reference)) {
-        const memoField = data.memo
-        const memo =
-          typeof memoField === 'string'
-            ? memoField
-            : memoField instanceof Uint8Array
-              ? Buffer.from(memoField).toString('utf8')
-              : memoField && typeof memoField === 'object' && 'toString' in memoField
-                ? (memoField as { toString(): string }).toString()
-                : undefined
-
-        return {
-          signature: sig.signature,
-          slot: tx.slot,
-          event: {
-            name: isPayment ? 'PaymentMade' : 'RewardsClaimed',
-            payer: normalizeKey(data.payer),
-            recipient: normalizeKey(data.recipient),
-            mint: normalizeKey(data.mint),
-            amount: data.amount ? BigInt(String(data.amount)) : undefined,
-            decimals: typeof data.decimals === 'number' ? data.decimals : undefined,
-            reference: eventRef,
-            memo,
-          },
-        }
-      }
-    }
-  }
-
-
-  return null
-}
-
-export async function findSignatureByReference(conn: Connection, ref: PublicKey): Promise<string | null> {
-  const sigs = await conn.getSignaturesForAddress(ref, { limit: 20 })
-  if (!sigs || sigs.length === 0) return null
-
-  // Iterate through all found signatures to find a successful one
-  for (const sigInfo of sigs) {
-    if (sigInfo.err) continue // Skip failed transactions
-    return sigInfo.signature
-  }
-  return null
-}
 
 export async function finalizeRecovery(
   client: PoolClient,
@@ -241,8 +25,8 @@ export async function finalizeRefund(
 }
 
 /**
- * Verify that on-chain transaction matches expected amount/mint/initiator/recipient.
- * Migrated from transactions.ts
+ * Verify that on-chain transaction matches expected amount/mint/initiator/recipient
+ * using pre/post token balance deltas — no smart contract required.
  */
 export async function verifyTransactionMatchesOnChain(
   connection: Connection,
@@ -303,7 +87,6 @@ export async function verifyTransactionMatchesOnChain(
 
   const foundMint = pre.concat(post).some((b) => b.mint === record.mint_address)
 
-  // Enforce presence of expected reference account if provided in metadata
   const refFromMeta = (() => {
     const m = record.metadata as Record<string, unknown> | null
     const r = m && (m['reference'] as string | undefined)
@@ -313,8 +96,7 @@ export async function verifyTransactionMatchesOnChain(
   if (refFromMeta) {
     referenceOk = accountKeys.some((k) => k?.pubkey?.toBase58() === refFromMeta)
   }
-  // For withdrawals, the recipient should be credited by expected amount.
-  // For payments, the initiator should be debited by expected amount.
+
   const isWithdrawal = record.type === 'user_withdrawal' || record.type === 'role_withdrawal'
   const amountOk = isWithdrawal ? recipientDelta === expected : initiatorDelta === expected
   const ok = amountOk && decimalsOk && recipientOk && foundMint && referenceOk

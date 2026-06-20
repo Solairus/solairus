@@ -1,36 +1,26 @@
-import * as anchor from '@coral-xyz/anchor';
 import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { BucketType } from '@/hooks/useBucketBalances';
 import { API_CONFIG, BUCKET_ENDPOINTS, ApiClient } from '@/config/service-endpoints';
 import { confirmAndRecord } from '@/services/transactions/confirmAndRecord';
 import { Connection } from '@solana/web3.js';
 
-// Bucket enum mapping to match the contract
 export function normalizeBucketType(bucketType: BucketType): string {
-  // Map UI bucket type to backend route param
   switch (bucketType) {
-    case 'admin':
-      return 'admin';
-    case 'dev':
-      return 'dev';
-    case 'marketer1':
-      return 'marketer1';
-    case 'marketer2':
-      return 'marketer2';
-    case 'trader':
-      return 'trader';
-    case 'reserve':
-      return 'reserve';
-    default:
-      throw new Error(`Invalid bucket type: ${bucketType}`);
+    case 'admin': return 'admin';
+    case 'dev': return 'dev';
+    case 'marketer1': return 'marketer1';
+    case 'marketer2': return 'marketer2';
+    case 'trader': return 'trader';
+    case 'reserve': return 'reserve';
+    default: throw new Error(`Invalid bucket type: ${bucketType}`);
   }
 }
 
 export interface WithdrawBucketParams {
-  provider: anchor.AnchorProvider;
   connection: Connection;
   bucketType: BucketType;
-  amount: anchor.BN;
+  amount: number;
   authority: PublicKey;
   usdtMint: PublicKey;
   memo?: string;
@@ -38,7 +28,6 @@ export interface WithdrawBucketParams {
 }
 
 export async function withdrawFromBucket({
-  provider,
   connection,
   bucketType,
   amount,
@@ -47,18 +36,14 @@ export async function withdrawFromBucket({
   memo,
   signTransaction,
 }: WithdrawBucketParams): Promise<string> {
-  // Validate amount
-  if (amount.lte(new anchor.BN(0))) {
+  if (amount <= 0) {
     throw new Error('Invalid amount. Must be greater than zero.');
   }
 
-  // Derive recipient ATA and validate
-  const recipientAta = anchor.utils.token.associatedAddress({ mint: usdtMint, owner: authority });
-
-  const amountMicro = amount.toNumber();
+  const recipientAta = getAssociatedTokenAddressSync(usdtMint, authority);
+  const amountMicro = Math.round(amount);
   const bucketParam = normalizeBucketType(bucketType);
 
-  // Initialize withdrawal via backend
   const initUrl = BUCKET_ENDPOINTS.buildUrl(BUCKET_ENDPOINTS.initBucketWithdrawal, { bucketType: bucketParam });
   const initResp = await ApiClient.post(initUrl, {
     amountMicro,
@@ -70,7 +55,6 @@ export async function withdrawFromBucket({
   const initData = await initResp.json();
   const { txBase64, orderId } = initData;
 
-  // Decode and send transaction
   const txBytes = Buffer.from(txBase64, 'base64');
   let tx: VersionedTransaction | Transaction;
   try {
@@ -79,33 +63,24 @@ export async function withdrawFromBucket({
     tx = Transaction.from(txBytes);
   }
 
-  // Sign using wallet adapter if available
   if (typeof signTransaction === 'function') {
     tx = await signTransaction(tx);
-  } else if (provider.wallet && typeof provider.wallet.signTransaction === 'function') {
-    tx = await provider.wallet.signTransaction(tx as Transaction);
   }
 
-  const { signature } = await confirmAndRecord({ connection, signedTx: tx as VersionedTransaction, orderId })
+  const { signature } = await confirmAndRecord({ connection, signedTx: tx as VersionedTransaction, orderId });
   return signature;
 }
 
-export function formatUsdtAmount(amount: anchor.BN): string {
-  // Always format with exactly 6 decimal places (USDT precision)
-  const divisor = new anchor.BN(1_000_000);
-  const wholePart = amount.div(divisor).toString();
-  const fractionalPart = amount.mod(divisor).toString().padStart(6, '0');
-  return `${wholePart}.${fractionalPart}`;
+export function formatUsdtAmount(amountMicro: number): string {
+  const whole = Math.floor(amountMicro / 1_000_000);
+  const frac = String(Math.abs(amountMicro) % 1_000_000).padStart(6, '0');
+  return `${whole}.${frac}`;
 }
 
-export function parseUsdtAmount(amountStr: string): anchor.BN {
-  // Parse string like "123.456" to BN with 6 decimal places
+export function parseUsdtAmount(amountStr: string): number {
   const parts = amountStr.split('.');
-  const wholePart = parts[0] || '0';
-  const fractionalPart = (parts[1] || '').padEnd(6, '0').slice(0, 6);
-
-  const wholeAmount = new anchor.BN(wholePart).mul(new anchor.BN(1_000_000));
-  const fractionalAmount = new anchor.BN(fractionalPart);
-
-  return wholeAmount.add(fractionalAmount);
+  const wholePart = parseInt(parts[0] || '0', 10);
+  const fracStr = (parts[1] || '').padEnd(6, '0').slice(0, 6);
+  const fracPart = parseInt(fracStr, 10);
+  return wholePart * 1_000_000 + fracPart;
 }

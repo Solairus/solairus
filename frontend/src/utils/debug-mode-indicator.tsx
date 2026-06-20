@@ -10,10 +10,9 @@ import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, Clock } from 'lucide-react';
 import { getContractTimingInfo } from '@/services/agent/contract-timing-service';
 import { Connection } from '@solana/web3.js';
-import * as anchor from '@coral-xyz/anchor';
 
 interface DebugModeIndicatorProps {
-  connection?: Connection | anchor.AnchorProvider;
+  connection?: Connection;
   className?: string;
 }
 

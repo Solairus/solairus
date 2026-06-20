@@ -60,8 +60,8 @@ class BackendRpcManager {
       })
     }
     
-    // Check for numbered devnet URLs (SOLANA_RPC_URL_DEVNET_2, _3, _4, _5)
-    for (let i = 2; i <= 5; i++) {
+    // Check for numbered devnet URLs (SOLANA_RPC_URL_DEVNET_0.._9)
+    for (let i = 0; i <= 9; i++) {
       const url = process.env[`SOLANA_RPC_URL_DEVNET_${i}`]
       if (url) {
         devnetEndpoints.push({
@@ -100,8 +100,8 @@ class BackendRpcManager {
       })
     }
     
-    // Check for numbered mainnet URLs (SOLANA_RPC_URL_MAINNET_2, _3, _4, _5)
-    for (let i = 2; i <= 5; i++) {
+    // Check for numbered mainnet URLs (SOLANA_RPC_URL_MAINNET_0.._9)
+    for (let i = 0; i <= 9; i++) {
       const url = process.env[`SOLANA_RPC_URL_MAINNET_${i}`]
       if (url) {
         mainnetEndpoints.push({

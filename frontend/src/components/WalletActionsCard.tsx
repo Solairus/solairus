@@ -14,7 +14,7 @@ type WalletActionsCardProps = Record<string, never>;
 
 export default function WalletActionsCard(_props: WalletActionsCardProps) {
   const navigate = useNavigate();
-  const { publicKey, anchorProvider } = useWallet();
+  const { publicKey } = useWallet();
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferAddress, setTransferAddress] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
@@ -60,13 +60,13 @@ export default function WalletActionsCard(_props: WalletActionsCardProps) {
   };
 
   const fetchUserCreditBalance = async () => {
-    if (!publicKey || !anchorProvider) {
+    if (!publicKey) {
       setUserCreditBalance(0);
       return;
     }
 
     try {
-      const userService = new UserService(anchorProvider);
+      const userService = new UserService();
       const balance = await userService.getUserCreditBalance(publicKey);
       setUserCreditBalance(balance);
     } catch (error) {
@@ -81,7 +81,7 @@ export default function WalletActionsCard(_props: WalletActionsCardProps) {
   };
 
   const handleTransferSubmit = async () => {
-    if (!publicKey || !anchorProvider || !transferAddress || !transferAmount) {
+    if (!publicKey || !transferAddress || !transferAmount) {
       toast.error("Please fill in all fields");
       return;
     }
@@ -118,14 +118,11 @@ export default function WalletActionsCard(_props: WalletActionsCardProps) {
 
     setIsTransferring(true);
     try {
-      const userService = new UserService(anchorProvider);
-      
-      // Use the dedicated user-to-user transfer method
+      const userService = new UserService();
       await userService.transferCredit({
         fromUser: publicKey,
         toUser: recipientPubkey,
         amount: amountInUnits,
-        provider: anchorProvider
       });
 
       toast.success(`Successfully transferred $${amount.toFixed(2)} to recipient`);

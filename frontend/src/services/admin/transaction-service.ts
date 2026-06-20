@@ -1,5 +1,4 @@
-import * as anchor from '@coral-xyz/anchor';
-import { Connection, PublicKey, TransactionSignature } from '@solana/web3.js';
+import { Connection, PublicKey, TransactionSignature, Commitment } from '@solana/web3.js';
 
 /**
  * Transaction Status
@@ -24,7 +23,7 @@ export interface TransactionConfirmationOptions {
   maxRetries?: number;
   retryDelay?: number;
   timeout?: number;
-  commitment?: anchor.web3.Commitment;
+  commitment?: Commitment;
 }
 
 /**

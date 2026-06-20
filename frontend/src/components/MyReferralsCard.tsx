@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Users, RefreshCw, ExternalLink, Copy, CheckCircle } from "lucide-react";
 import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
-import { useWallet } from "@/contexts/wallet-context";
 import { PublicKey } from "@solana/web3.js";
 import { toast } from "sonner";
 import { AffiliateBackendService } from "@/services/affiliate/affiliate-backend";
@@ -22,7 +21,6 @@ interface ReferralInfo {
 
 export default function MyReferralsCard({ userPublicKey, referralCount }: MyReferralsCardProps) {
   const { account } = useWalletConnection();
-  const { anchorProvider } = useWallet();
   const [referrals, setReferrals] = useState<ReferralInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

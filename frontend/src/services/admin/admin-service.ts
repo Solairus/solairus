@@ -1,13 +1,11 @@
-import * as anchor from '@coral-xyz/anchor';
 import { PublicKey } from '@solana/web3.js';
-// Solairus removed from admin service
 import { ApiClient, API_CONFIG } from '@/config/service-endpoints';
 
 /**
  * Manual License Activation Parameters
  */
 export interface ManualLicenseActivationParams {
-  provider: anchor.AnchorProvider;
+  provider: null;
   userPubkey: string; // Changed from PublicKey to string for backend operation
   sponsorPubkey: string; // Changed from PublicKey to string for backend operation
   durationDays: number;
@@ -33,7 +31,7 @@ export interface ManualLicenseActivationResult {
  * User Credit Management Parameters
  */
 export interface UserCreditParams {
-  provider: anchor.AnchorProvider;
+  provider: null;
   userPubkey: PublicKey;
   amount: number;
   isDebit: boolean;
@@ -56,7 +54,7 @@ export interface UserCreditResult {
  * User Sponsor Update Parameters
  */
 export interface UserSponsorUpdateParams {
-  provider: anchor.AnchorProvider;
+  provider: null;
   userPubkey: PublicKey;
   newSponsor: PublicKey;
   authority: PublicKey;
@@ -69,12 +67,12 @@ export interface ManualLicenseActivatedEvent {
   user: PublicKey;
   sponsor: PublicKey;
   durationDays: number;
-  licenseExpiresAt: anchor.BN;
+  licenseExpiresAt: number;
   activatedBy: PublicKey;
   wasNewUser: boolean;
   extendExisting: boolean;
-  previousExpiration: anchor.BN;
-  timestamp: anchor.BN;
+  previousExpiration: number;
+  timestamp: number;
 }
 
 /**
@@ -82,19 +80,18 @@ export interface ManualLicenseActivatedEvent {
  */
 export interface CreditBalanceUpdatedEvent {
   user: PublicKey;
-  amount: anchor.BN;
+  amount: number;
   isDebit: boolean;
-  balanceAfter: anchor.BN;
+  balanceAfter: number;
   updatedBy: PublicKey;
-  timestamp: anchor.BN;
+  timestamp: number;
 }
 
 /**
  * Admin Service for managing administrative operations
  */
 export class AdminService {
-  private program?: anchor.Program;
-  constructor(_provider: anchor.AnchorProvider) { }
+  constructor(_provider: null) { }
 
   private programAccessError(): never {
     throw new Error('AdminService program access disabled: use backend routes');
@@ -249,8 +246,8 @@ export class AdminService {
 /**
  * Create admin service instance
  */
-export function createAdminService(provider: anchor.AnchorProvider): AdminService {
-  return new AdminService(provider);
+export function createAdminService(_provider: unknown): AdminService {
+  return new AdminService(null);
 }
 
 /**

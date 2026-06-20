@@ -40,7 +40,7 @@ export default function AffiliatePage() {
   };
 
   const { account } = useWalletConnection();
-  const { anchorProvider, signTransaction } = useWallet();
+  const { provider, signTransaction } = useWallet();
 
   // Referral count not provided via backend summary yet; default to 0
   const [referralCount, setReferralCount] = useState<number>(0);
@@ -109,7 +109,7 @@ export default function AffiliatePage() {
 
   const handleWithdraw = async () => {
     try {
-      if (!account || !anchorProvider) throw new Error("Wallet not connected");
+      if (!account || !provider) throw new Error("Wallet not connected");
       if (!signTransaction) throw new Error("Wallet does not support transaction signing");
 
       // Ensure backend auth session exists before calling protected endpoint
@@ -167,7 +167,7 @@ export default function AffiliatePage() {
       const tx = Transaction.from(Buffer.from(txBase64, "base64"));
       const signed = await signTransaction(tx) as Transaction;
       const { signature } = await confirmAndRecord({
-        connection: anchorProvider.connection,
+        connection: provider,
         signedTx: signed,
         orderId,
       });

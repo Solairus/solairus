@@ -1,4 +1,3 @@
-import * as anchor from '@coral-xyz/anchor';
 import { PublicKey } from '@solana/web3.js';
 
 /**
@@ -97,7 +96,7 @@ export interface AdminContext {
  * Contract Event Base
  */
 export interface ContractEventBase {
-  timestamp: anchor.BN;
+  timestamp: number;
 }
 
 /**
@@ -107,11 +106,11 @@ export interface ManualLicenseActivatedEvent extends ContractEventBase {
   user: PublicKey;
   sponsor: PublicKey;
   durationDays: number;
-  licenseExpiresAt: anchor.BN;
+  licenseExpiresAt: number;
   activatedBy: PublicKey;
   wasNewUser: boolean;
   extendExisting: boolean;
-  previousExpiration: anchor.BN;
+  previousExpiration: number;
 }
 
 /**
@@ -119,9 +118,9 @@ export interface ManualLicenseActivatedEvent extends ContractEventBase {
  */
 export interface CreditBalanceUpdatedEvent extends ContractEventBase {
   user: PublicKey;
-  amount: anchor.BN;
+  amount: number;
   isDebit: boolean;
-  balanceAfter: anchor.BN;
+  balanceAfter: number;
   updatedBy: PublicKey;
 }
 

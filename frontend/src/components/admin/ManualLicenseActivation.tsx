@@ -17,8 +17,6 @@ import { FormValidation, useFormValidation, validators } from './FormValidation'
 import { LoadingCard } from './LoadingStates';
 import { AdminNotifications } from './NotificationSystem';
 import { useTransactionStatus } from '@/hooks/useTransactionStatus';
-import * as anchor from '@coral-xyz/anchor';
-
 interface ManualActivationForm {
   durationDays: string;
   extendExisting: boolean;
@@ -35,7 +33,7 @@ interface ActivationResult {
 }
 
 export function ManualLicenseActivation() {
-  const { anchorProvider, publicKey } = useWallet();
+  const { publicKey } = useWallet();
   const { hasAccess } = useAdminRole();
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [form, setForm] = useState<ManualActivationForm>({
@@ -156,9 +154,9 @@ export function ManualLicenseActivation() {
 
       transactionStatus.updateProgress(40, 'sign');
 
-      const adminService = createAdminService(anchorProvider);
+      const adminService = createAdminService(null);
       const svcResult = await adminService.activateLicenseManual({
-        provider: anchorProvider,
+        provider: null,
         userPubkey: userInfo!.address, // Pass as string
         sponsorPubkey: !userInfo!.exists ? form.sponsorAddress : (userInfo!.sponsor || publicKey.toString()), // Pass as string
         durationDays,

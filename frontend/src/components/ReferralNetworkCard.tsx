@@ -4,7 +4,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Users, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
-import { useWallet } from "@/contexts/wallet-context";
 import { PublicKey } from "@solana/web3.js";
 // Actually it exports functions, let's fix the import
 import * as SponsorService from "@/services/admin/sponsor-management-service";
@@ -26,7 +25,6 @@ interface ReferralData {
 
 export default function ReferralNetworkCard({ userPublicKey }: ReferralNetworkCardProps) {
   const { account } = useWalletConnection();
-  const { anchorProvider } = useWallet();
   const [referralData, setReferralData] = useState<ReferralData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [expandedLevels, setExpandedLevels] = useState<Set<number>>(new Set());

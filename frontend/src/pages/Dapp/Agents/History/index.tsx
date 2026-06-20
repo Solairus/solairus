@@ -9,12 +9,12 @@ import BackButton from '@/components/ui/BackButton';
 /**
  * My Agents (Portfolio)
  * Purpose: Show the user's active AI trading agents and allow navigation to hire.
- * Inputs: Wallet context provides `publicKey`, `provider`, and `anchorProvider`.
+ * Inputs: Wallet context provides `publicKey` and `provider`.
  * Outputs: Renders `AgentDashboard` or a prompt to connect wallet.
  * Notes: Mobile container aligned with other /dapp pages.
  */
 export default function DappHistory() {
-  const { publicKey, provider, anchorProvider } = useWallet();
+  const { publicKey, provider } = useWallet();
 
   return (
     <WalletGate>
@@ -46,11 +46,10 @@ export default function DappHistory() {
         </div>
 
         {/* Agent Portfolio (render AgentDashboard; now DB-only data source) */}
-        {publicKey && provider && anchorProvider ? (
+        {publicKey && provider ? (
           <AgentDashboard
             userPublicKey={publicKey}
             connection={provider}
-            anchorProvider={anchorProvider}
             showActivationModal={false}
             onActivateAgent={() => { window.location.href = '/dapp/hire'; }}
           />

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import * as anchor from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useWallet } from "@/contexts/wallet-context";
@@ -28,7 +27,7 @@ export interface UseBalanceResult {
  * - If ATA exists, use `getTokenAccountBalance`; else return 0
  */
 export function useBalance(): UseBalanceResult {
-  const { publicKey, anchorProvider, isConnected } = useWallet();
+  const { publicKey, provider, isConnected } = useWallet();
 
   const [balanceMicro, setBalanceMicro] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -73,7 +72,7 @@ export function useBalance(): UseBalanceResult {
   }, []);
 
   const refresh = useCallback(async () => {
-    if (!isConnected || !publicKey || !anchorProvider) return;
+    if (!isConnected || !publicKey || !provider) return;
 
     try {
       setIsLoading(true);
@@ -81,7 +80,7 @@ export function useBalance(): UseBalanceResult {
 
       const mint = resolveUsdtMint();
       const ata = getAssociatedTokenAddressSync(mint, publicKey, false, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
-      const connection = (anchorProvider as anchor.AnchorProvider).connection;
+      const connection = provider;
 
       // Check ATA existence; if missing, treat as zero balance without creating
       const info = await connection.getAccountInfo(ata);
@@ -101,7 +100,7 @@ export function useBalance(): UseBalanceResult {
     } finally {
       setIsLoading(false);
     }
-  }, [isConnected, publicKey, anchorProvider, resolveUsdtMint]);
+  }, [isConnected, publicKey, provider, resolveUsdtMint]);
 
   // Fetch exactly once on mount of the page/component using this hook
   useEffect(() => {

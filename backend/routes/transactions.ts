@@ -11,9 +11,7 @@ import { query } from '../db'
 import { Transaction, TransactionStatus, TransactionType } from '../types'
 import { z } from 'zod'
 import { Connection, PublicKey, ParsedInstruction, PartiallyDecodedInstruction } from '@solana/web3.js'
-import { BorshCoder, EventParser, Idl, utils } from '@coral-xyz/anchor'
-import { findPaymentSignatureByOrderId as findSignatureUnified, verifyTransactionMatchesOnChain } from '../services/onchain_verifier'
-import solairusPayIdl from '../idl/solairus_pay.json'
+import { verifyTransactionMatchesOnChain } from '../services/onchain_verifier'
 import { getConnection, getCurrentCluster, getRpcManager, getWorkingConnection } from '../lib/rpc-manager'
 import { attemptExpiredWithdrawalRefund, attemptExpiredBucketWithdrawalRefund } from '../services/refund_manager'
 
@@ -103,33 +101,10 @@ async function verifyAndProcessTransaction(
 
   console.log(`[verifyAndProcessTransaction] Signature confirmed, checking on-chain match`)
   const match = await verifyTransactionMatchesOnChain(connection, record)
-  let verified = match.ok
-  let failureReason = match.reason
+  const verified = match.ok
+  const failureReason = match.reason
 
   console.log(`[verifyAndProcessTransaction] On-chain match result: ok=${match.ok}, reason=${match.reason}`)
-
-  if (verified && options?.requireOrderIdMatch) {
-    console.log(`[verifyAndProcessTransaction] Checking order ID match (required)`)
-    const solairusPayProgramId =
-      process.env.SOLAIRUS_PAY_PROGRAM_ID ?? (solairusPayIdl as { address?: string }).address ?? ''
-    if (solairusPayProgramId) {
-      console.log(`[verifyAndProcessTransaction] Fetching payment event for signature ${record.signature}`)
-      console.log(`[verifyAndProcessTransaction] Fetching payment event for signature ${record.signature}`)
-      const paymentEvent = await findSignatureUnified(connection, new PublicKey(record.initiator_wallet), record.order_id!, { types: ['payment', 'withdrawal'] })
-      const memo = paymentEvent?.event.memo
-      console.log(`[verifyAndProcessTransaction] Payment event found: ${!!paymentEvent}, memo: "${memo}", expected order_id: "${record.order_id}"`)
-
-      if (!paymentEvent || !memo || (record.order_id && memo !== record.order_id)) {
-        verified = false
-        failureReason = 'Order ID mismatch'
-        console.log(`[verifyAndProcessTransaction] Order ID mismatch - verification failed`)
-      } else {
-        console.log(`[verifyAndProcessTransaction] Order ID match successful`)
-      }
-    } else {
-      console.log(`[verifyAndProcessTransaction] No SOLAIRUS_PAY_PROGRAM_ID configured`)
-    }
-  }
 
   const dbStatus: TransactionStatus = verified ? 'confirmed' : 'failed'
   const metaUpdate = verified
@@ -337,9 +312,6 @@ async function lastConfirmedHandlerGeneric(transactionType: TransactionType, req
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
 
   const { initiatorWallet } = parsed.data
-  const connection = await getWorkingConnection()
-  const solairusPayProgramId =
-    process.env.SOLAIRUS_PAY_PROGRAM_ID ?? (solairusPayIdl as { address?: string }).address ?? ''
 
   const sql = `
     SELECT * FROM transactions
@@ -351,36 +323,7 @@ async function lastConfirmedHandlerGeneric(transactionType: TransactionType, req
     LIMIT 1
   `
   const { rows } = await query<Transaction>(sql, [transactionType, initiatorWallet, 'confirmed', 'pending'])
-  let record = rows[0] ?? null
-
-  if (
-    record &&
-    record.type === transactionType &&
-    record.order_id &&
-    !record.signature &&
-    solairusPayProgramId
-  ) {
-    try {
-      const payerKey = new PublicKey(initiatorWallet)
-      const found = await findSignatureUnified(connection, payerKey, record.order_id, { types: ['payment'] })
-      if (found) {
-        const metaPatch = {
-          recoveredVia: 'order_id',
-          eventSlot: found.slot,
-          payer: found.event.payer?.toBase58(),
-          recipient: found.event.recipient?.toBase58(),
-          memo: found.event.memo,
-        }
-        const upd = await query<Transaction>(
-          'UPDATE transactions SET signature = COALESCE(signature, $1), metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
-          [found.signature, JSON.stringify(metaPatch), record.id]
-        )
-        record = upd.rows[0] ?? record
-      }
-    } catch (err) {
-      console.warn(`Failed to resolve signature during last-confirmed lookup for ${transactionType}:`, err)
-    }
-  }
+  const record = rows[0] ?? null
 
   return res.json({ record })
 }
@@ -483,65 +426,31 @@ router.post('/transactions/pending/resolve', async (req: Request, res: Response)
 
     if (!pending.rows.length) return res.status(200).end()
 
-    // Base connection for verification path; recovery calls rotate RPCs
+    // Base connection for verification path
     const { getWorkingConnection } = await import('../lib/rpc-manager')
     const connection = await getWorkingConnection()
-    const solairusPayProgramId =
-      process.env.SOLAIRUS_PAY_PROGRAM_ID ?? (solairusPayIdl as { address?: string }).address ?? ''
 
     // Process at most 5 per call to reduce RPC load
     for (const record of pending.rows.slice(0, 5)) {
       // Skip if refund already finalized
       if (record.metadata && record.metadata['refund_finalized'] === true) continue
 
-      // If signature exists, reuse shared verifier
+      // If signature exists, verify on-chain
       if (record.signature) {
-        await verifyAndProcessTransaction(connection, record, {
-          requireOrderIdMatch: true,
-        })
+        await verifyAndProcessTransaction(connection, record, {})
         continue
       }
 
-      // No signature: recover or refund depending on type
+      // No signature: activations are annotated and left pending; withdrawals go to refund
       if (record.type === 'license_activation' || record.type === 'agent_activation') {
-        // Recover by PaymentMade event memo (orderId)
-        if (record.order_id && solairusPayProgramId) {
-          const found = await findSignatureUnified(connection, new PublicKey(walletAddress), record.order_id, { types: ['payment'] })
-          if (found?.signature) {
-            // Patch signature and verify
-            await query('UPDATE transactions SET signature = $1 WHERE id = $2', [found.signature, record.id])
-            await verifyAndProcessTransaction(connection, { ...record, signature: found.signature } as Transaction, {
-              requireOrderIdMatch: true,
-            })
-            continue
-          }
-        }
-        // If not found, annotate metadata for diagnostics and leave pending
         await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
-          JSON.stringify({ resolver_action: 'activation_recover_attempt', resolver_result: 'not_found' }),
+          JSON.stringify({ resolver_action: 'activation_no_signature', resolver_result: 'pending' }),
           record.id,
         ])
         continue
       }
 
-      // Withdrawals: unified event-based recovery (RewardsClaimed with memo === orderId)
-      if (record.order_id && solairusPayProgramId) {
-        const recipientPk = new PublicKey(record.initiator_wallet)
-        const found = await findSignatureUnified(connection, recipientPk, record.order_id, { types: ['withdrawal'], maxSignatures: 100 })
-        if (found?.signature) {
-          await query<Transaction>(
-            'UPDATE transactions SET status = $1, signature = $2, metadata = metadata || $3::jsonb WHERE id = $4',
-            ['confirmed', found.signature, JSON.stringify({ completed: true, recoveredVia: 'event', event: 'RewardsClaimed' }), record.id]
-          )
-          continue
-        }
-        await query('UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id = $2', [
-          JSON.stringify({ resolver_action: 'withdrawal_recover_attempt', resolver_result: 'not_found' }),
-          record.id,
-        ])
-      }
-
-      // If recovery failed or no reference, perform refund safely (idempotent)
+      // Withdrawals: go directly to refund (no SC-based recovery)
       if (record.type === 'role_withdrawal') {
         if (record.order_id) {
           const rf = await attemptExpiredBucketWithdrawalRefund(record.order_id)
@@ -631,41 +540,11 @@ async function reapplyHandlerGeneric(transactionType: TransactionType, req: Requ
   if (!record) return res.status(404).json({ error: 'Transaction not found' })
   if (record.type !== transactionType) return res.status(400).json({ error: 'Invalid transaction type' })
 
-  // Allow both confirmed and pending transactions (pending may have been paid on-chain)
   const connection = await getWorkingConnection()
-  const solairusPayProgramId =
-    process.env.SOLAIRUS_PAY_PROGRAM_ID ??
-    (solairusPayIdl as { address?: string }).address ??
-    ''
-  if (!solairusPayProgramId) {
-    return res.status(500).json({ error: 'Solairus pay program id not configured' })
-  }
 
-  // If signature is missing but we have orderId, try to find it via PaymentMade events
-  if (!record.signature && orderId) {
-    try {
-      const found = await findSignatureUnified(connection, new PublicKey(initiatorWallet), orderId, { types: ['payment'] })
-
-      if (found) {
-        const metaPatch = {
-          recoveredVia: 'order_id',
-          eventSlot: found.slot,
-          payer: found.event.payer?.toBase58(),
-          recipient: found.event.recipient?.toBase58(),
-          memo: found.event.memo,
-        }
-        const upd = await query<Transaction>(
-          'UPDATE transactions SET signature = COALESCE(signature, $1), metadata = metadata || $2::jsonb WHERE id = $3 RETURNING *',
-          [found.signature, JSON.stringify(metaPatch), record.id]
-        )
-        record = upd.rows[0] ?? record
-      } else {
-        return res.status(404).json({ error: 'On-chain payment not found for this order' })
-      }
-    } catch (e) {
-      console.error('Error finding payment signature:', e)
-      return res.status(500).json({ error: 'Failed to search for on-chain payment' })
-    }
+  // If no signature recorded, cannot reapply
+  if (!record.signature) {
+    return res.status(404).json({ error: 'No on-chain payment recorded for this order' })
   }
 
   // If transaction is pending with signature, verify it on-chain and update status
