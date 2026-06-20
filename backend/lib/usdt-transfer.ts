@@ -25,6 +25,44 @@ export function getUsdtMint(): PublicKey {
   return new PublicKey(m.trim())
 }
 
+/** Rent-exempt minimum for an SPL token account (~0.00204 SOL). The user — never the platform — pays this. */
+export const ATA_RENT_LAMPORTS = 2_039_280
+
+/**
+ * Thrown when a payout recipient has no USDT ATA. RULE: the platform must NOT pay rent to
+ * create a recipient's token account — the user creates their own (see no-platform-ata-rent-rule).
+ */
+export class RecipientAtaMissingError extends Error {
+  readonly code = 'RECIPIENT_ATA_MISSING'
+  constructor(
+    public readonly owner: PublicKey,
+    public readonly recipientAta: PublicKey,
+    public readonly mint: PublicKey,
+  ) {
+    super(`Recipient has no USDT token account (owner=${owner.toBase58()})`)
+    this.name = 'RecipientAtaMissingError'
+  }
+}
+
+/** Check whether an owner already has a USDT ATA (does NOT create it). */
+export async function recipientUsdtAtaExists(
+  owner: PublicKey,
+  connection?: Connection,
+): Promise<{ exists: boolean; ata: PublicKey; mint: PublicKey }> {
+  const conn = connection ?? (await getWorkingConnection())
+  const mint = getUsdtMint()
+  const ata = await getAssociatedTokenAddress(mint, owner, false)
+  try {
+    await getAccount(conn, ata, 'confirmed')
+    return { exists: true, ata, mint }
+  } catch (e) {
+    if (e instanceof TokenAccountNotFoundError || e instanceof TokenInvalidAccountOwnerError) return { exists: false, ata, mint }
+    const msg = e instanceof Error ? e.message : String(e)
+    if (msg.includes('could not find account') || msg.includes('Account does not exist')) return { exists: false, ata, mint }
+    throw e
+  }
+}
+
 /** True only for a syntactically valid, on-curve Solana address (rejects PDAs/garbage). */
 export function isValidSolAddress(addr: string): boolean {
   try {
@@ -107,9 +145,23 @@ export async function sendUsdt(p: { toAddress: string; amountMicro: bigint }): P
   const recipient = new PublicKey(p.toAddress)
 
   const fromAta = await getOrCreateAssociatedTokenAccount(connection, treasury, mint, treasury.publicKey)
-  const toAta = await getOrCreateAssociatedTokenAccount(connection, treasury, mint, recipient)
 
-  const ix = createTransferInstruction(fromAta.address, toAta.address, treasury.publicKey, p.amountMicro)
+  // RULE: never pay rent to create a recipient's ATA — it must already exist (user creates their own).
+  const toAtaAddress = await getAssociatedTokenAddress(mint, recipient, false)
+  try {
+    await getAccount(connection, toAtaAddress, 'confirmed')
+  } catch (e) {
+    if (
+      e instanceof TokenAccountNotFoundError ||
+      e instanceof TokenInvalidAccountOwnerError ||
+      (e instanceof Error && (e.message.includes('could not find account') || e.message.includes('Account does not exist')))
+    ) {
+      throw new RecipientAtaMissingError(recipient, toAtaAddress, mint)
+    }
+    throw e
+  }
+
+  const ix = createTransferInstruction(fromAta.address, toAtaAddress, treasury.publicKey, p.amountMicro)
   const tx = new Transaction().add(ix)
   tx.feePayer = treasury.publicKey
   tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash

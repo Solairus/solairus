@@ -8,9 +8,7 @@ import { useWalletConnection } from "@/hooks/wallet/use-wallet-connection";
 import { useWallet } from "@/contexts/wallet-context";
 import { AffiliateBackendService, type AffiliateSummary } from "@/services/affiliate/affiliate-backend";
 import { PublicKey } from "@solana/web3.js";
-import { Transaction } from "@solana/web3.js";
-import { confirmAndRecord } from '@/services/transactions/confirmAndRecord';
-import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { ensureUserUsdtAta, isAtaSetupRequired } from "@/utils/ensure-usdt-ata";
 import { ApiClient, API_CONFIG } from "@/config/service-endpoints";
 import { toast } from "sonner";
 import AffiliateEarningsCard from "@/components/AffiliateEarningsCard";
@@ -139,55 +137,46 @@ export default function AffiliatePage() {
 
       setIsWithdrawing(true);
 
-      // Prepare init payload
       const userPubkey = new PublicKey(account);
-      const mint = resolveUsdtMint();
-      const recipientAta = getAssociatedTokenAddressSync(
-        mint,
-        userPubkey,
-        false,
-        TOKEN_PROGRAM_ID,
-        ASSOCIATED_TOKEN_PROGRAM_ID
-      );
-
-      // Call backend to init withdrawal and build tx
       const baseUrl = API_CONFIG.getBaseUrl();
       const initUrl = `${baseUrl}/withdrawals/init`;
-      const initResp = await ApiClient.post(initUrl, {
-        type: 'balance',
-        mintAddress: mint.toBase58(),
-        amountMicro,
-        recipientAta: recipientAta.toBase58(),
-      });
-      const initJson = await initResp.json();
-      const { orderId, txBase64 } = initJson as { orderId: string; txBase64: string };
-      if (!orderId || !txBase64) throw new Error("Invalid init response from backend");
+      // Treasury pays out server-side to the user's login wallet — no user signing for the payout itself.
+      const postInit = () => ApiClient.post(initUrl, { type: 'balance', amountMicro });
 
-      // Decode, sign and confirm transaction using shared utility (REST-only; no WebSockets)
-      const tx = Transaction.from(Buffer.from(txBase64, "base64"));
-      const signed = await signTransaction(tx) as Transaction;
-      const { signature } = await confirmAndRecord({
-        connection: provider,
-        signedTx: signed,
-        orderId,
-      });
-      const ok = Boolean(signature && signature.length > 0);
+      let resp = await postInit();
+      let data = await resp.json().catch(() => ({} as Record<string, unknown>));
 
-      // Backend verification will be handled via orderId polling below.
-      // The initial record created by /withdrawals/init has no signature yet,
-      // so posting to /transactions/verify by signature would 404 until it’s attached.
-      // We rely on GET /transactions/:orderId which resolves the signature via reference
-      // and updates status accordingly.
+      // One-time USDT-account setup gate (NOT an error): the user creates their own
+      // account (paying the small refundable rent); the platform never does.
+      if (resp.ok && isAtaSetupRequired(data)) {
+        if (!signTransaction) throw new Error("Your wallet needs to set up a USDT account first, but it can’t sign.");
+        toast.info("One-time setup: activating USDT on your wallet. Approve the request — it costs a small, refundable network deposit (~0.002 SOL).");
+        await ensureUserUsdtAta(provider, { publicKey: userPubkey, signTransaction });
+        toast.success("Your wallet is ready to receive USDT. Completing your withdrawal…");
+        resp = await postInit();
+        data = await resp.json().catch(() => ({} as Record<string, unknown>));
+        if (isAtaSetupRequired(data)) throw new Error("USDT account setup didn’t complete. Please try again.");
+      }
 
-      // Order polling is already handled in confirmAndRecord; no extra WebSocket confirmation
+      if (!resp.ok) throw new Error((data as { error?: string })?.error || "Withdrawal failed");
 
-      if (ok) {
+      const signature = (data as { signature?: string }).signature;
+      const status = (data as { status?: string }).status;
+      if (resp.status === 202 || (!signature && status === 'processing')) {
+        toast.info("Withdrawal submitted — confirmation pending. Your balance will update once it settles.");
+        setShowWithdrawForm(false);
+        setWithdrawAmount("");
+        await loadSummary();
+        return;
+      }
+
+      if (signature) {
         toast.success("Withdrawal sent and confirmed");
         setShowWithdrawForm(false);
         setWithdrawAmount("");
         await loadSummary();
       } else {
-        toast.error("Withdrawal broadcast failed");
+        throw new Error("Backend did not return a payout signature");
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

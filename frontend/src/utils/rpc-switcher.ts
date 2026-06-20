@@ -103,13 +103,21 @@ class RpcSwitcher {
     const urls: string[] = []
     
     if (cluster === 'mainnet-beta') {
-      // Collect from multiple environment variables for Vercel compatibility
+      // Collect from multiple environment variables (static refs — Vite only inlines
+      // literal import.meta.env.X keys, not dynamic ones). Full _0.._9 range so every
+      // slot set on the service is honored; .filter(Boolean) drops empty slots.
       const mainnetVars = [
         import.meta.env.VITE_SOLANA_RPC_URL_MAINNET,
+        import.meta.env.VITE_SOLANA_RPC_URL_MAINNET_0,
+        import.meta.env.VITE_SOLANA_RPC_URL_MAINNET_1,
         import.meta.env.VITE_SOLANA_RPC_URL_MAINNET_2,
         import.meta.env.VITE_SOLANA_RPC_URL_MAINNET_3,
         import.meta.env.VITE_SOLANA_RPC_URL_MAINNET_4,
         import.meta.env.VITE_SOLANA_RPC_URL_MAINNET_5,
+        import.meta.env.VITE_SOLANA_RPC_URL_MAINNET_6,
+        import.meta.env.VITE_SOLANA_RPC_URL_MAINNET_7,
+        import.meta.env.VITE_SOLANA_RPC_URL_MAINNET_8,
+        import.meta.env.VITE_SOLANA_RPC_URL_MAINNET_9,
       ].filter(Boolean)
       
       // First try comma-separated parsing on the primary variable

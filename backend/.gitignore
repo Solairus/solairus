@@ -16,3 +16,4 @@ dist/
 
 # OS
 .DS_Store
+reset-backup-*.json

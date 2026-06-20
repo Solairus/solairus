@@ -1,10 +1,13 @@
 import { Connection, PublicKey, TransactionSignature } from "@solana/web3.js";
 import { getUserAgent } from "./agent-service";
 import { AgentErrorHandler } from "@/utils/agent-error-handler";
+import { ensureUserUsdtAta, isAtaSetupRequired, type WalletSigner } from "@/utils/ensure-usdt-ata";
 
 export interface WithdrawAgentRoiOptions {
   confirmationTimeout?: number;
   skipPreflight?: boolean;
+  /** Notified when the one-time USDT-account setup starts/finishes (for UI copy). */
+  onAtaSetup?: (phase: 'start' | 'done') => void;
 }
 
 export interface WithdrawAgentRoiResult {
@@ -24,23 +27,41 @@ export interface WithdrawAgentRoiError {
 export async function withdrawAgentRoi(
   connection: Connection,
   activationId: number,
+  signer?: WalletSigner,
   options: WithdrawAgentRoiOptions = {}
 ): Promise<WithdrawAgentRoiResult> {
   try {
     console.log('🚀 Initiating ROI withdrawal via backend API for activation ID:', activationId);
 
     const { ApiClient, API_CONFIG } = await import("@/config/service-endpoints");
-    const response = await ApiClient.post(`${API_CONFIG.getBaseUrl()}/withdrawals/init`, {
+    const postInit = () => ApiClient.post(`${API_CONFIG.getBaseUrl()}/withdrawals/init`, {
       type: 'agent_roi',
       activationId: Number(activationId),
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-      throw new Error(`Backend withdrawal failed: ${errorData.error || response.statusText}`);
+    let response = await postInit();
+    let backendResult = await response.json().catch(() => ({}));
+
+    // One-time USDT-account setup gate (NOT an error). The user creates their own
+    // account (they pay the small refundable rent); the platform never does.
+    if (response.ok && isAtaSetupRequired(backendResult)) {
+      if (!signer) {
+        throw new Error(backendResult.message || 'Your wallet needs to set up a USDT account before you can withdraw.');
+      }
+      options.onAtaSetup?.('start');
+      await ensureUserUsdtAta(connection, signer);
+      options.onAtaSetup?.('done');
+      response = await postInit();
+      backendResult = await response.json().catch(() => ({}));
+      if (isAtaSetupRequired(backendResult)) {
+        throw new Error('USDT account setup didn’t complete. Please try the withdrawal again.');
+      }
     }
 
-    const backendResult = await response.json();
+    if (!response.ok) {
+      throw new Error(`Backend withdrawal failed: ${backendResult?.error || response.statusText}`);
+    }
+
     if (response.status === 202 || (!backendResult.signature && backendResult.status === 'processing')) {
       throw new Error('Withdrawal submitted — confirmation pending. Your balance will update once it settles.');
     }

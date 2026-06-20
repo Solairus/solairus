@@ -10,12 +10,40 @@
  *       post-broadcast uncertainty: leave processing for admin reconciliation.
  */
 import { Router, Request, Response } from 'express'
+import { PublicKey } from '@solana/web3.js'
 import { z } from 'zod'
 import crypto from 'crypto'
 import { query, pool } from '../db'
-import { sendUsdt, isValidSolAddress } from '../lib/usdt-transfer'
+import {
+  sendUsdt,
+  isValidSolAddress,
+  recipientUsdtAtaExists,
+  RecipientAtaMissingError,
+  ATA_RENT_LAMPORTS,
+  getUsdtMint,
+} from '../lib/usdt-transfer'
 
 const router = Router()
+
+/**
+ * Build the "set up USDT first" gate payload. This is NOT an error — it's a normal
+ * one-time step the user must complete (create their own USDT account). The platform
+ * never pays this rent. Returned with HTTP 200 + a status discriminator.
+ */
+function ataSetupRequiredPayload(recipient: string, recipientAta: string, mint: string) {
+  return {
+    status: 'ata_setup_required' as const,
+    recipient,
+    recipientAta,
+    mint,
+    rentLamports: ATA_RENT_LAMPORTS,
+    rentSol: ATA_RENT_LAMPORTS / 1_000_000_000,
+    message:
+      'Your wallet needs to set up a USDT account before it can receive this withdrawal. ' +
+      'This is a one-time step and costs a small, refundable network deposit (~0.002 SOL). ' +
+      'Approve the request in your wallet to finish.',
+  }
+}
 
 const InitSchema = z.object({
   type: z.enum(['balance', 'agent_roi']).default('balance'),
@@ -58,6 +86,19 @@ router.post('/withdrawals/init', async (req: Request, res: Response) => {
   const recipient = userRow.rows[0]?.user_address
   if (!recipient) return res.status(404).json({ error: 'User not found' })
   if (!isValidSolAddress(recipient)) return res.status(400).json({ error: 'Stored wallet address is not a valid payout destination' })
+
+  // ── Phase 0: ATA gate (RULE: platform never pays recipient-ATA rent) ────────
+  // If the user's wallet has no USDT account, return the one-time setup step BEFORE
+  // reserving any funds — nothing is debited until their account exists.
+  try {
+    const { exists, ata, mint } = await recipientUsdtAtaExists(new PublicKey(recipient))
+    if (!exists) {
+      return res.status(200).json(ataSetupRequiredPayload(recipient, ata.toBase58(), mint.toBase58()))
+    }
+  } catch (e) {
+    // RPC hiccup on the pre-check: don't block here — sendUsdt has the same guard in Phase 2.
+    console.warn('[withdrawals/init] ATA pre-check failed (continuing):', e instanceof Error ? e.message : e)
+  }
 
   const { type } = parsed.data
   const orderId = crypto.randomUUID()
@@ -192,6 +233,12 @@ router.post('/withdrawals/init', async (req: Request, res: Response) => {
       roiAmount: type === 'agent_roi' ? Number(reservation.amountMicro) / 1_000_000 : undefined,
     })
   } catch (e) {
+    // Recipient still has no USDT account (pre-check missed it / race). Not an error —
+    // revert the reservation and return the one-time setup step so the user can retry.
+    if (e instanceof RecipientAtaMissingError) {
+      await revertReservation(reservation, auth.sub).catch((re) => console.error('[withdrawals/init] revert failed', re))
+      return res.status(200).json(ataSetupRequiredPayload(recipient, e.recipientAta.toBase58(), e.mint.toBase58()))
+    }
     if (isPostBroadcastError(e)) {
       // Uncertain — leave 'processing'; admin reconciles against chain. Never re-credit.
       await query("UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id=$2",

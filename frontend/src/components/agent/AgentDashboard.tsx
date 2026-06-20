@@ -11,6 +11,8 @@ import { MultiAgentTimer } from './WithdrawalTimer';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/Card';
 import { Loader2, Plus, RefreshCw } from 'lucide-react';
+import { useWallet } from '@/contexts/wallet-context';
+import { toast } from 'sonner';
 
 // Local UI tier config (DB-only view; avoids contract module dependency)
 type TierUIConfig = {
@@ -114,6 +116,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   const [sortBy, setSortBy] = useState<GetUserAgentsOptions['sortBy']>('activatedAt');
   const [sortOrder, setSortOrder] = useState<GetUserAgentsOptions['sortOrder']>('desc');
   const [isActivationModalOpen, setIsActivationModalOpen] = useState(false);
+
+  // Wallet signer — needed so the user can do the one-time USDT-account setup themselves.
+  const { publicKey, signTransaction } = useWallet();
 
   // Load agents (DB-only) and omit RPC calls to keep it fast
   const loadDashboardData = useCallback(async (refresh = false) => {
@@ -253,7 +258,16 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
       console.log('🚀 Starting ROI withdrawal for agent:', activationId);
 
       const { withdrawAgentRoi } = await import('@/services/agent/agent-roi-service');
-      const result = await withdrawAgentRoi(connection, activationId);
+      const signer = publicKey && signTransaction ? { publicKey, signTransaction } : undefined;
+      const result = await withdrawAgentRoi(connection, activationId, signer, {
+        onAtaSetup: (phase) => {
+          if (phase === 'start') {
+            toast.info('One-time setup: activating USDT on your wallet. Please approve the request in your wallet — it costs a small, refundable network deposit (~0.002 SOL).');
+          } else {
+            toast.success('Your wallet is ready to receive USDT. Completing your withdrawal…');
+          }
+        },
+      });
 
       console.log('✅ ROI withdrawal successful:', result);
 
