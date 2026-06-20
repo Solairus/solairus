@@ -339,12 +339,6 @@ async function lastConfirmedHandler(req: Request, res: Response) {
 
 
 /**
- * Helper: Find transaction signature by searching for PaymentMade events from solairus_pay program
- * that contain the orderId in the memo field.
- */
-
-
-/**
  * Convenience wrappers for specific types (payments and withdrawals)
  */
 const setType = (type: TransactionType) => (req: Request, _res: Response, next: NextFunction) => {

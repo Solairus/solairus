@@ -269,33 +269,7 @@ async function seedAdmins() {
       process.env.MARKETER_2_PUBKEY,
     ].filter((s) => typeof s === 'string' && s.trim().length > 0)
 
-    // Derive dev backend authority from program details (Upgradeable Loader ProgramData)
-    const rpcUrl = process.env.SOLANA_RPC_URL || clusterApiUrl('devnet')
-    const programIdStr = process.env.SOLAIRUS_PAY_PROGRAM_ID || '6hvnwbkJqbFAWBKbrj22giH33hVUTLuLcPAvtCkkpSZ4'
-    const programId = new PublicKey(programIdStr)
-    const connection = new Connection(rpcUrl, 'confirmed')
-    let devAuthority = null
-    try {
-      const programInfo = await connection.getAccountInfo(programId)
-      if (programInfo && programInfo.data && programInfo.data.length >= 36) {
-        // Program account layout: [4-byte tag][32-byte ProgramData address]
-        const programDataAddress = new PublicKey(programInfo.data.slice(4, 36))
-        const programDataInfo = await connection.getAccountInfo(programDataAddress)
-        if (programDataInfo && programDataInfo.data && programDataInfo.data.length >= 45) {
-          // ProgramData layout: [4-byte tag][8-byte slot][1-byte option][32-byte upgrade authority if present]
-          const hasAuthority = programDataInfo.data[12] === 1
-          if (hasAuthority) {
-            const authBytes = programDataInfo.data.slice(13, 45)
-            devAuthority = new PublicKey(authBytes).toBase58()
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('[seed-admins] failed to derive program upgrade authority:', e?.message || e)
-    }
-
     const addresses = new Set([...(adminList || []), ...extras])
-    if (devAuthority) addresses.add(devAuthority)
 
     if (!addresses.size) {
       console.warn('[seed-admins] no admin/dev addresses discovered. Provide ADMIN_PUBKEYS env or use --admins=<comma-separated>')
