@@ -3,6 +3,11 @@ import Swal from 'sweetalert2'
 
 type ClusterName = 'mainnet-beta' | 'devnet' | 'testnet'
 
+// Probe timeout for the lightweight getVersion() reachability check. Must comfortably
+// exceed a COLD mobile round-trip (DNS + TLS handshake + CORS preflight + the RPC POST),
+// or healthy endpoints get marked dead and users get walled with "All RPCs Failed".
+const PROBE_TIMEOUT_MS = 5000
+
 interface RpcEndpoint {
   url: string
   name: string
@@ -241,14 +246,14 @@ class RpcSwitcher {
     if (cached) return cached
 
     const now = Date.now()
-    // Probe sequentially with lightweight call and short timeout
+    // Probe sequentially with a lightweight call (timeout sized for cold mobile round-trips).
     for (let i = 0; i < endpoints.length; i++) {
       const ep = endpoints[i]
       const cooldownUntil = this.endpointCooldownUntil.get(ep.url) || 0
       if (now < cooldownUntil) continue
       try {
         const conn = new Connection(ep.url, { commitment: 'confirmed', httpHeaders: ep.headers })
-        await withTimeout(conn.getVersion(), 1200)
+        await withTimeout(conn.getVersion(), PROBE_TIMEOUT_MS)
         this.activeConnections.set(cluster, conn)
         return conn
       } catch (probeErr) {
@@ -259,8 +264,13 @@ class RpcSwitcher {
         continue
       }
     }
-    await this.showRpcFailureAlert(cluster, endpoints)
-    throw new Error(`Failed to create connection to any RPC endpoint for ${cluster}`)
+    // Fail soft: the probe is a best-effort latency check, not proof an endpoint is down.
+    // Rather than wall the user with a blocking modal, fall back to the first configured
+    // endpoint and let real calls (which have their own retry/rotation) proceed.
+    const fallback = new Connection(endpoints[0].url, { commitment: 'confirmed', httpHeaders: endpoints[0].headers })
+    this.activeConnections.set(cluster, fallback)
+    console.warn(`⚠️ RPC probe didn't confirm any endpoint within ${PROBE_TIMEOUT_MS}ms for ${cluster}; using ${endpoints[0].name} and proceeding.`)
+    return fallback
   }
 
   public async switchToNextRpc(cluster: ClusterName): Promise<Connection> {
@@ -291,7 +301,7 @@ class RpcSwitcher {
       
       try {
         const connection = new Connection(endpoint.url, { commitment: 'confirmed', httpHeaders: endpoint.headers })
-        await withTimeout(connection.getVersion(), 1200)
+        await withTimeout(connection.getVersion(), PROBE_TIMEOUT_MS)
         this.activeConnections.set(cluster, connection)
         return connection
       } catch (error) {
@@ -304,9 +314,11 @@ class RpcSwitcher {
       }
     }
 
-    // If no endpoints work
-    await this.showRpcFailureAlert(cluster, endpoints)
-    throw new Error(`No working RPC endpoints available for ${cluster}`)
+    // Fail soft: keep the existing (or first) connection rather than walling the user.
+    const fallback = currentConnection ?? new Connection(endpoints[0].url, { commitment: 'confirmed', httpHeaders: endpoints[0].headers })
+    this.activeConnections.set(cluster, fallback)
+    console.warn(`⚠️ No RPC endpoint confirmed within ${PROBE_TIMEOUT_MS}ms for ${cluster}; keeping ${fallback.rpcEndpoint} and proceeding.`)
+    return fallback
   }
 
   private showRpcNotification(type: 'success' | 'info' | 'warning', message: string, cluster: ClusterName): void {
