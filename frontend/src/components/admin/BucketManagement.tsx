@@ -9,6 +9,8 @@ import { useAdmin } from './AdminProvider';
 import { useAdminErrorHandler } from '@/utils/admin-error-handler';
 import { ApiClient, API_CONFIG } from '@/config/service-endpoints';
 import { useToast } from '@/hooks/use-toast';
+import { useWallet } from '@/contexts/wallet-context';
+import { ensureUserUsdtAta, isAtaSetupRequired } from '@/utils/ensure-usdt-ata';
 
 type BucketType = 'admin' | 'dev' | 'marketer1' | 'marketer2' | 'trader' | 'reserve';
 
@@ -26,6 +28,8 @@ export function BucketManagement() {
   const { role, context } = useAdmin();
   const { toast } = useToast();
   const { showError } = useAdminErrorHandler();
+  // Wallet — needed for the one-time USDT-account setup (admin pays their own refundable rent).
+  const { publicKey, provider, signTransaction } = useWallet();
 
   const [balances, setBalances] = useState<BucketBalances | null>(null);
   const [loading, setLoading] = useState(true);
@@ -103,17 +107,39 @@ export function BucketManagement() {
       setWithdrawing(true);
 
       const baseUrl = API_CONFIG.getBaseUrl();
-      const resp = await ApiClient.post(`${baseUrl}/admin/buckets/${selectedBucket}/withdraw`, {
-        amountMicro,
-      });
-      const json = await resp.json();
+      const post = () => ApiClient.post(`${baseUrl}/admin/buckets/${selectedBucket}/withdraw`, { amountMicro });
 
-      if (!json.success) throw new Error(json.error || 'Withdrawal failed');
+      let resp = await post();
+      let json = await resp.json().catch(() => ({} as Record<string, unknown>));
 
-      toast({
-        title: 'Success',
-        description: `Successfully withdrew ${amount} USDT from ${selectedBucket} bucket`,
-      });
+      // One-time USDT-account setup gate (NOT an error): the admin creates their own
+      // account (paying the small refundable rent); the platform never does.
+      if (resp.ok && isAtaSetupRequired(json)) {
+        if (!publicKey || !provider || !signTransaction) {
+          throw new Error('Your wallet needs to set up a USDT account first — connect a wallet that can sign.');
+        }
+        toast({ title: 'One-time setup', description: 'Activating USDT on your wallet — approve the request (small, refundable network deposit ~0.002 SOL).' });
+        await ensureUserUsdtAta(provider, { publicKey, signTransaction });
+        resp = await post();
+        json = await resp.json().catch(() => ({} as Record<string, unknown>));
+        if (isAtaSetupRequired(json)) throw new Error('USDT account setup didn’t complete. Please try again.');
+      }
+
+      if (!resp.ok) throw new Error((json as { error?: string }).error || 'Withdrawal failed');
+
+      const status = (json as { status?: string }).status;
+      if (resp.status === 202 || status === 'processing') {
+        toast({ title: 'Submitted', description: 'Payout submitted — confirmation pending. It will be reconciled automatically.' });
+      } else if ((json as { success?: boolean }).success) {
+        const sig = (json as { signature?: string }).signature;
+        toast({
+          title: 'Success',
+          description: `Withdrew ${amount} USDT from ${selectedBucket} bucket${sig ? ` · tx ${sig.slice(0, 8)}…` : ''}`,
+        });
+      } else {
+        throw new Error((json as { error?: string }).error || 'Withdrawal failed');
+      }
+
       setShowWithdrawForm(false);
       setWithdrawAmount('');
       setSelectedBucket(null);

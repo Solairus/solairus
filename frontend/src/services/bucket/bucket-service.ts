@@ -1,9 +1,7 @@
-import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
-import { getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { Connection, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 import { BucketType } from '@/hooks/useBucketBalances';
-import { API_CONFIG, BUCKET_ENDPOINTS, ApiClient } from '@/config/service-endpoints';
-import { confirmAndRecord } from '@/services/transactions/confirmAndRecord';
-import { Connection } from '@solana/web3.js';
+import { API_CONFIG, ApiClient } from '@/config/service-endpoints';
+import { ensureUserUsdtAta, isAtaSetupRequired } from '@/utils/ensure-usdt-ata';
 
 export function normalizeBucketType(bucketType: BucketType): string {
   switch (bucketType) {
@@ -20,54 +18,56 @@ export function normalizeBucketType(bucketType: BucketType): string {
 export interface WithdrawBucketParams {
   connection: Connection;
   bucketType: BucketType;
-  amount: number;
+  amount: number; // micro-USDT
   authority: PublicKey;
-  usdtMint: PublicKey;
+  usdtMint?: PublicKey; // unused (recipient = acting admin's wallet, treasury pays out) — kept for callers
   memo?: string;
   signTransaction?: (tx: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>;
 }
 
+/**
+ * Withdraw from a role/admin bucket. Treasury pays out server-side to the acting
+ * admin's connected wallet (no SC, no user-signed payout). If the wallet has no USDT
+ * account, the one-time setup gate runs first (user pays their own refundable rent).
+ * Returns the payout signature.
+ */
 export async function withdrawFromBucket({
   connection,
   bucketType,
   amount,
   authority,
-  usdtMint,
-  memo,
   signTransaction,
 }: WithdrawBucketParams): Promise<string> {
   if (amount <= 0) {
     throw new Error('Invalid amount. Must be greater than zero.');
   }
 
-  const recipientAta = getAssociatedTokenAddressSync(usdtMint, authority);
-  const amountMicro = Math.round(amount);
   const bucketParam = normalizeBucketType(bucketType);
+  const amountMicro = Math.round(amount);
+  const url = `${API_CONFIG.getBaseUrl()}/admin/buckets/${bucketParam}/withdraw`;
+  const post = () => ApiClient.post(url, { amountMicro });
 
-  const initUrl = BUCKET_ENDPOINTS.buildUrl(BUCKET_ENDPOINTS.initBucketWithdrawal, { bucketType: bucketParam });
-  const initResp = await ApiClient.post(initUrl, {
-    amountMicro,
-    mintAddress: usdtMint.toBase58(),
-    recipientAta: recipientAta.toBase58(),
-    memo: memo || `Bucket:${bucketParam}`,
-  });
+  let resp = await post();
+  let json = await resp.json().catch(() => ({} as Record<string, unknown>));
 
-  const initData = await initResp.json();
-  const { txBase64, orderId } = initData;
-
-  const txBytes = Buffer.from(txBase64, 'base64');
-  let tx: VersionedTransaction | Transaction;
-  try {
-    tx = VersionedTransaction.deserialize(txBytes);
-  } catch {
-    tx = Transaction.from(txBytes);
+  // One-time USDT-account setup gate (NOT an error) — admin creates their own account.
+  if (resp.ok && isAtaSetupRequired(json)) {
+    if (!signTransaction) throw new Error('Your wallet needs to set up a USDT account first, but it can’t sign.');
+    await ensureUserUsdtAta(connection, { publicKey: authority, signTransaction });
+    resp = await post();
+    json = await resp.json().catch(() => ({} as Record<string, unknown>));
+    if (isAtaSetupRequired(json)) throw new Error('USDT account setup didn’t complete. Please try again.');
   }
 
-  if (typeof signTransaction === 'function') {
-    tx = await signTransaction(tx);
+  if (!resp.ok) throw new Error((json as { error?: string }).error || 'Bucket withdrawal failed');
+
+  const status = (json as { status?: string }).status;
+  if (resp.status === 202 || status === 'processing') {
+    throw new Error('Withdrawal submitted — confirmation pending. It will be reconciled automatically.');
   }
 
-  const { signature } = await confirmAndRecord({ connection, signedTx: tx as VersionedTransaction, orderId });
+  const signature = (json as { signature?: string }).signature;
+  if (!signature) throw new Error('Backend did not return a payout signature');
   return signature;
 }
 

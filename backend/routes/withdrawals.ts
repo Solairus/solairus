@@ -19,31 +19,10 @@ import {
   isValidSolAddress,
   recipientUsdtAtaExists,
   RecipientAtaMissingError,
-  ATA_RENT_LAMPORTS,
-  getUsdtMint,
 } from '../lib/usdt-transfer'
+import { ataSetupRequiredPayload, isPostBroadcastError } from '../lib/withdrawal-gate'
 
 const router = Router()
-
-/**
- * Build the "set up USDT first" gate payload. This is NOT an error — it's a normal
- * one-time step the user must complete (create their own USDT account). The platform
- * never pays this rent. Returned with HTTP 200 + a status discriminator.
- */
-function ataSetupRequiredPayload(recipient: string, recipientAta: string, mint: string) {
-  return {
-    status: 'ata_setup_required' as const,
-    recipient,
-    recipientAta,
-    mint,
-    rentLamports: ATA_RENT_LAMPORTS,
-    rentSol: ATA_RENT_LAMPORTS / 1_000_000_000,
-    message:
-      'Your wallet needs to set up a USDT account before it can receive this withdrawal. ' +
-      'This is a one-time step and costs a small, refundable network deposit (~0.002 SOL). ' +
-      'Approve the request in your wallet to finish.',
-  }
-}
 
 const InitSchema = z.object({
   type: z.enum(['balance', 'agent_roi']).default('balance'),
@@ -51,18 +30,6 @@ const InitSchema = z.object({
   activationId: z.number().int().positive().optional(), // required for agent_roi
   memo: z.string().max(128).optional(),
 })
-
-// True when the failure happened AFTER broadcast (confirmation uncertain) — never auto-revert these.
-function isPostBroadcastError(e: unknown): boolean {
-  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase()
-  return (
-    msg.includes('was not confirmed') ||
-    msg.includes('block height exceeded') ||
-    msg.includes('timed out') ||
-    msg.includes('timeout') ||
-    msg.includes('confirmtransaction')
-  )
-}
 
 interface Reservation {
   txId: number

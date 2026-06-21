@@ -5,10 +5,13 @@
  * Outputs: JSON responses with admin data or operation results
  */
 import { Router, Request, Response } from 'express'
+import { PublicKey } from '@solana/web3.js'
 import { z } from 'zod'
 import { query, pool } from '../db'
 import { randomUUID } from 'crypto'
 import { applyBalanceBucketChange, getOrCreateBalanceId } from '../services/balance'
+import { sendUsdt, isValidSolAddress, recipientUsdtAtaExists, RecipientAtaMissingError } from '../lib/usdt-transfer'
+import { ataSetupRequiredPayload, isPostBroadcastError } from '../lib/withdrawal-gate'
 
 // Extend Request interface for admin middleware
 declare module 'express' {
@@ -360,11 +363,31 @@ router.post('/admin/buckets/:bucketType/withdraw', requireAdmin, async (req: Req
   const amountMicro = parsed.data.amountMicro
   const amountUnits = amountMicro / 1_000_000
 
+  // Recipient is the acting admin's own connected wallet.
+  const recipient = auth.addr
+  if (!isValidSolAddress(recipient)) {
+    return res.status(400).json({ error: 'Your connected wallet is not a valid payout destination' })
+  }
+
+  // ── Phase 0: ATA gate (RULE: platform never pays recipient-ATA rent) ────────
+  // If the admin's wallet has no USDT account, return the one-time setup step BEFORE
+  // touching the ledger — nothing is debited until their account exists.
+  try {
+    const { exists, ata, mint } = await recipientUsdtAtaExists(new PublicKey(recipient))
+    if (!exists) {
+      return res.status(200).json(ataSetupRequiredPayload(recipient, ata.toBase58(), mint.toBase58()))
+    }
+  } catch (e) {
+    console.warn('[admin.buckets.withdraw] ATA pre-check failed (continuing):', e instanceof Error ? e.message : e)
+  }
+
+  // ── Phase 1: reserve — debit the bucket ledger + audit record (committed) ───
+  const orderId = randomUUID()
+  let txId: number
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
 
-    // Check and debit bucket balance
     const okRes = await client.query(
       `SELECT (${dbColumn} >= $1::numeric) AS ok FROM bucket_balances WHERE id = 1 FOR UPDATE`,
       [amountUnits]
@@ -383,41 +406,87 @@ router.post('/admin/buckets/:bucketType/withdraw', requireAdmin, async (req: Req
     )
     const newBalanceUnits = newBalanceRows[0].bal
 
-    // Create transaction record
-    const orderId = randomUUID()
+    // Audit record — kept intact; status is 'processing' until the treasury payout settles.
     const { rows: txRows } = await client.query(
       `INSERT INTO transactions (type, status, signature, initiator_wallet, recipient_wallet, program_id, amount, mint_address, decimals, metadata, order_id)
-       VALUES ($1, $2, NULL, $3, NULL, NULL, $4, 'USDT', 6, $5::jsonb, $6)
+       VALUES ($1, $2, NULL, $3, $4, NULL, $5, $6, 6, $7::jsonb, $8)
        RETURNING id`,
       [
         'role_withdrawal',
-        'confirmed',
+        'processing',
         auth.addr,
+        recipient,
         amountMicro,
-        JSON.stringify({ route: 'admin.buckets.withdraw', bucket_type: bucketType }),
+        process.env.USDT_MINT_ADDRESS || 'USDT',
+        JSON.stringify({ route: 'admin.buckets.withdraw', bucket_type: bucketType, phase: 'processing' }),
         orderId,
       ]
     )
-    const txId = txRows[0].id
+    txId = txRows[0].id
 
-    // Insert bucket history
     await client.query(
       'INSERT INTO bucket_histories (bucket_ref, amount, bucket_balance, transaction_id, created_at) VALUES ($1, $2::numeric, $3::numeric, $4, NOW())',
       [dbColumn, -amountUnits, newBalanceUnits, txId]
     )
 
     await client.query('COMMIT')
-    res.status(201).json({ success: true, orderId })
   } catch (e) {
     await client.query('ROLLBACK')
     const msg = e instanceof Error ? e.message : 'Unknown error'
     if (msg.includes('Insufficient bucket balance')) return res.status(400).json({ error: msg })
-    console.error('Bucket withdrawal error:', e)
-    res.status(500).json({ error: msg })
+    console.error('[admin.buckets.withdraw] reserve error:', e)
+    return res.status(500).json({ error: msg })
   } finally {
     client.release()
   }
+
+  // ── Phase 2: pay out from the treasury (no SC) ──────────────────────────────
+  try {
+    const { signature } = await sendUsdt({ toAddress: recipient, amountMicro: BigInt(amountMicro) })
+    await query("UPDATE transactions SET status='confirmed', signature=$1, metadata = metadata || '{\"phase\":\"confirmed\"}'::jsonb WHERE id=$2", [signature, txId])
+    return res.status(201).json({ success: true, orderId, signature, toAddress: recipient })
+  } catch (e) {
+    // Recipient still has no USDT account (race) — revert + return the one-time setup step.
+    if (e instanceof RecipientAtaMissingError) {
+      await revertBucketReservation(dbColumn, amountUnits, txId).catch((re) => console.error('[admin.buckets.withdraw] revert failed', re))
+      return res.status(200).json(ataSetupRequiredPayload(recipient, e.recipientAta.toBase58(), e.mint.toBase58()))
+    }
+    if (isPostBroadcastError(e)) {
+      // Uncertain — leave 'processing' for admin reconciliation; never re-credit.
+      await query("UPDATE transactions SET metadata = metadata || $1::jsonb WHERE id=$2",
+        [JSON.stringify({ payout_uncertain: e instanceof Error ? e.message : String(e), at: new Date().toISOString() }), txId]).catch(() => {})
+      console.error('[admin.buckets.withdraw] payout uncertain (left processing)', { orderId, txId })
+      return res.status(202).json({ orderId, status: 'processing', message: 'Payout submitted; confirmation pending. It will be reconciled automatically.' })
+    }
+    // Pre-broadcast failure — safe to revert the bucket debit.
+    await revertBucketReservation(dbColumn, amountUnits, txId).catch((re) => console.error('[admin.buckets.withdraw] revert failed', re))
+    const msg = e instanceof Error ? e.message : 'Payout failed'
+    console.error('[admin.buckets.withdraw] payout failed (reverted)', { orderId, error: msg })
+    return res.status(502).json({ error: `Payout failed: ${msg}` })
+  }
 })
+
+/** Credit a bucket back and mark its withdrawal failed after a pre-broadcast payout failure. */
+async function revertBucketReservation(dbColumn: string, amountUnits: number, txId: number): Promise<void> {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query(`UPDATE bucket_balances SET ${dbColumn} = ${dbColumn} + $1::numeric WHERE id = 1`, [amountUnits])
+    const { rows } = await client.query(`SELECT ${dbColumn} AS bal FROM bucket_balances WHERE id = 1`)
+    const newBalanceUnits = rows[0]?.bal
+    await client.query(
+      'INSERT INTO bucket_histories (bucket_ref, amount, bucket_balance, transaction_id, created_at) VALUES ($1, $2::numeric, $3::numeric, $4, NOW())',
+      [dbColumn, amountUnits, newBalanceUnits, txId]
+    )
+    await client.query("UPDATE transactions SET status='failed', metadata = metadata || '{\"phase\":\"failed\"}'::jsonb WHERE id=$1", [txId])
+    await client.query('COMMIT')
+  } catch (e) {
+    await client.query('ROLLBACK')
+    throw e
+  } finally {
+    client.release()
+  }
+}
 
 // SETTINGS MANAGEMENT
 router.get('/settings', requireAdmin, async (req: Request, res: Response) => {
