@@ -47,19 +47,6 @@ vi.mock('../WithdrawalLimitDisplay', () => ({
   )
 }));
 
-vi.mock('../AgentActivationModal', () => ({
-  AgentActivationModal: ({ isOpen, onClose, onSuccess }: any) => (
-    isOpen ? (
-      <div data-testid="activation-modal">
-        <button onClick={onClose}>Close</button>
-        <button onClick={() => onSuccess({ success: true, activationId: 123 })}>
-          Activate Agent
-        </button>
-      </div>
-    ) : null
-  )
-}));
-
 vi.mock('../WithdrawalTimer', () => ({
   MultiAgentTimer: ({ agents }: { agents: AgentData[] }) => (
     <div data-testid="multi-agent-timer">
@@ -157,7 +144,7 @@ describe('AgentDashboard', () => {
 
       await waitFor(() => {
         expect(screen.getByText('No Agents Yet')).toBeInTheDocument();
-        expect(screen.getByText('Activate your first AI trading agent to start earning daily ROI')).toBeInTheDocument();
+        expect(screen.getByText('Activate your first AI trading agent to start targeting monthly returns')).toBeInTheDocument();
       });
     });
 
@@ -376,9 +363,15 @@ describe('AgentDashboard', () => {
   });
 
   describe('Agent Activation', () => {
-    it('should open activation modal when activate button is clicked', async () => {
+    it('should navigate to /dapp/hire when no onActivateAgent callback is provided', async () => {
+      const originalLocation = window.location;
+      Object.defineProperty(window, 'location', {
+        writable: true,
+        value: { ...originalLocation, href: '' }
+      });
+
       render(
-        <AgentDashboard 
+        <AgentDashboard
           userPublicKey={mockUserPublicKey}
           connection={mockConnection}
         />
@@ -389,18 +382,22 @@ describe('AgentDashboard', () => {
         fireEvent.click(activateButton);
       });
 
-      expect(screen.getByTestId('activation-modal')).toBeInTheDocument();
+      expect(window.location.href).toBe('/dapp/hire');
+
+      Object.defineProperty(window, 'location', {
+        writable: true,
+        value: originalLocation
+      });
     });
 
     it('should call external onActivateAgent callback when provided', async () => {
       const mockOnActivate = vi.fn();
 
       render(
-        <AgentDashboard 
+        <AgentDashboard
           userPublicKey={mockUserPublicKey}
           connection={mockConnection}
           onActivateAgent={mockOnActivate}
-          showActivationModal={false}
         />
       );
 
@@ -410,29 +407,6 @@ describe('AgentDashboard', () => {
       });
 
       expect(mockOnActivate).toHaveBeenCalledTimes(1);
-      expect(screen.queryByTestId('activation-modal')).not.toBeInTheDocument();
-    });
-
-    it('should refresh dashboard after successful activation', async () => {
-      render(
-        <AgentDashboard 
-          userPublicKey={mockUserPublicKey}
-          connection={mockConnection}
-        />
-      );
-
-      await waitFor(() => {
-        const activateButton = screen.getByText('Activate First Agent');
-        fireEvent.click(activateButton);
-      });
-
-      const activateAgentButton = screen.getByText('Activate Agent');
-      fireEvent.click(activateAgentButton);
-
-      // Should refresh after activation
-      await waitFor(() => {
-        expect(mockGetUserAgents).toHaveBeenCalledTimes(2);
-      });
     });
   });
 

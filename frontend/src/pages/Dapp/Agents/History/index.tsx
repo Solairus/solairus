@@ -50,8 +50,6 @@ export default function DappHistory() {
           <AgentDashboard
             userPublicKey={publicKey}
             connection={provider}
-            showActivationModal={false}
-            onActivateAgent={() => { window.location.href = '/dapp/hire'; }}
           />
         ) : (
           <Card title="Agent Portfolio" subtitle="Connect your wallet to view your agents">

@@ -6,7 +6,6 @@ import type { WithdrawalLimitDisplay } from '@/services/agent/withdrawal-limit-s
 import { fetchGlobalPnlSummary } from '@/services/agent/pnl-backend';
 import { AgentCard } from './AgentCard';
 import { WithdrawalLimitDisplay as WithdrawalLimitDisplayComponent } from './WithdrawalLimitDisplay';
-import { AgentActivationModal } from './AgentActivationModal';
 import { MultiAgentTimer } from './WithdrawalTimer';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/Card';
@@ -27,29 +26,29 @@ const UI_TIER_CONFIGS: Record<string, TierUIConfig> = {
   NOVA: {
     name: 'NOVA',
     emoji: '🪶',
-    description: 'Entry tier with stable daily yields',
-    dailyRange: '1.25% - 1.75%',
+    description: 'Market Intelligence — steady monthly targets',
+    dailyRange: '8.25% – 8.5% / mo',
     yieldCapPct: 200,
   },
   VEGA: {
     name: 'VEGA',
     emoji: '🔮',
-    description: 'Balanced risk and return',
-    dailyRange: '1.75% - 2.15%',
+    description: 'Execution Intelligence — balanced risk and return',
+    dailyRange: '8.75% – 9% / mo',
     yieldCapPct: 200,
   },
   ORION: {
     name: 'ORION',
     emoji: '⚡',
-    description: 'Higher yields with moderate risk',
-    dailyRange: '2.15% - 2.75%',
+    description: 'Risk Intelligence — higher targets, controlled volatility',
+    dailyRange: '9.25% – 9.5% / mo',
     yieldCapPct: 200,
   },
   PRIME: {
     name: 'PRIME',
     emoji: '🧠',
-    description: 'Elite tier with top yields',
-    dailyRange: '2.75% - 3.25%',
+    description: 'Strategic Allocation — elite monthly targets',
+    dailyRange: '9.75% – 10% / mo',
     yieldCapPct: 200,
   },
 };
@@ -84,7 +83,6 @@ interface AgentDashboardProps {
   userPublicKey: PublicKey;
   connection: Connection;
   onActivateAgent?: () => void;
-  showActivationModal?: boolean;
 }
 
 interface AgentDashboardState {
@@ -100,8 +98,7 @@ interface AgentDashboardState {
 export const AgentDashboard: React.FC<AgentDashboardProps> = ({
   userPublicKey,
   connection,
-  onActivateAgent,
-  showActivationModal = true
+  onActivateAgent
 }) => {
   const [state, setState] = useState<AgentDashboardState>({
     agents: [],
@@ -115,7 +112,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
 
   const [sortBy, setSortBy] = useState<GetUserAgentsOptions['sortBy']>('activatedAt');
   const [sortOrder, setSortOrder] = useState<GetUserAgentsOptions['sortOrder']>('desc');
-  const [isActivationModalOpen, setIsActivationModalOpen] = useState(false);
 
   // Wallet signer — needed so the user can do the one-time USDT-account setup themselves.
   const { publicKey, signTransaction } = useWallet();
@@ -294,20 +290,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
     }
   };
 
-  // Handle agent activation
+  // Handle agent activation — the single activation flow lives at /dapp/hire
   const handleActivateAgent = () => {
-    if (showActivationModal) {
-      setIsActivationModalOpen(true);
-    } else if (onActivateAgent) {
+    if (onActivateAgent) {
       onActivateAgent();
+    } else {
+      window.location.href = '/dapp/hire';
     }
-  };
-
-  // Handle activation success
-  const handleActivationSuccess = () => {
-    setIsActivationModalOpen(false);
-    // Refresh the dashboard to show the new agent
-    loadDashboardData(true);
   };
 
   // Render loading state
@@ -353,7 +342,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
               </div>
               <h3 className="text-lg font-semibold mb-2">No Agents Yet</h3>
               <p className="text-muted-foreground mb-6">
-                Activate your first AI trading agent to start earning daily ROI
+                Activate your first AI trading agent to start targeting monthly returns
               </p>
             </div>
 
@@ -465,17 +454,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = ({
           </Button>
         </div>
       </Card>
-
-      {/* Agent Activation Modal */}
-      {showActivationModal && (
-        <AgentActivationModal
-          isOpen={isActivationModalOpen}
-          onClose={() => setIsActivationModalOpen(false)}
-          userPublicKey={userPublicKey}
-          connection={connection}
-          onSuccess={handleActivationSuccess}
-        />
-      )}
     </div>
   );
 };

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import type { PublicKey } from '@solana/web3.js';
 import { useWallet } from '@/contexts/wallet-context';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -34,7 +35,6 @@ import { AuthService } from '@/services/auth/auth-service';
 import {
   getAgentTiersMap,
   type AgentTierRow,
-  formatDailyRange,
   microToUsdt,
 } from '@/services/agent/tiers-backend';
 import { useBalance } from '@/hooks/useBalance';
@@ -46,6 +46,14 @@ const TIER_META: Record<string, { name: string; emoji: string; description: stri
   VEGA: { name: 'VEGA Agent', emoji: '🔮', description: 'Momentum Scout • Medium Risk', color: 'emerald' },
   ORION: { name: 'ORION Agent', emoji: '⚡', description: 'Risk Balancer • High Risk', color: 'indigo' },
   PRIME: { name: 'PRIME Agent', emoji: '🧠', description: 'Alpha Hunter • Max Risk', color: 'amber' },
+};
+
+// Investor-facing target monthly performance, shown in place of the raw daily reward rate.
+const TIER_MONTHLY_TARGET: Record<string, string> = {
+  NOVA: '8.25% – 8.5%',
+  VEGA: '8.75% – 9%',
+  ORION: '9.25% – 9.5%',
+  PRIME: '9.75% – 10%',
 };
 
 // Presentational tier list for the hire cards. Derives name/emoji/accent from
@@ -75,19 +83,20 @@ type AgentActivationResult = { success: boolean };
  */
 function getTierSpecificSuccessMessage(tierName: string, amount: string, row?: AgentTierRow): string {
   const meta = TIER_META[tierName];
-  const dailyRange = row ? formatDailyRange(row.daily_reward_min_bp, row.daily_reward_max_bp) : 'daily returns';
+  const monthlyTarget = TIER_MONTHLY_TARGET[tierName] ?? 'a competitive monthly target';
+  void row; // reward-engine bp values are unrelated to the displayed monthly target copy
   if (!meta) {
     return 'Your AI trading agent is now active and ready to generate returns.';
   }
   switch (tierName) {
     case 'NOVA':
-      return `Your ${meta.name} is now active with $${amount} investment. Expect steady daily returns between ${dailyRange} with minimal risk.`;
+      return `Your ${meta.name} is now active with $${amount} investment. Targeting steady monthly performance of ${monthlyTarget} with minimal risk.`;
     case 'VEGA':
-      return `Your ${meta.name} is now active with $${amount} investment. Enjoy balanced daily returns between ${dailyRange} with moderate risk.`;
+      return `Your ${meta.name} is now active with $${amount} investment. Targeting balanced monthly performance of ${monthlyTarget} with moderate risk.`;
     case 'ORION':
-      return `Your ${meta.name} is now active with $${amount} investment. Prepare for aggressive daily returns between ${dailyRange} with higher volatility.`;
+      return `Your ${meta.name} is now active with $${amount} investment. Targeting monthly performance of ${monthlyTarget} with higher volatility.`;
     case 'PRIME':
-      return `Your ${meta.name} is now active with $${amount} investment. Experience elite daily returns between ${dailyRange} with maximum potential.`;
+      return `Your ${meta.name} is now active with $${amount} investment. Targeting elite monthly performance of ${monthlyTarget} with maximum potential.`;
     default:
       return `Your ${meta.name} is now active with $${amount} investment and ready to generate returns.`;
   }
@@ -342,13 +351,13 @@ function DirectHireModal({
               }>
                 <p className="text-xs text-muted-foreground mb-1">{tierMeta.description}</p>
                 <div className="flex justify-between text-xs">
-                  <span>Daily Range:</span>
+                  <span>Monthly Target:</span>
                   <span className={
                     tierMeta.color === 'cyan' ? 'text-cyan-400 font-medium' :
                       tierMeta.color === 'emerald' ? 'text-emerald-400 font-medium' :
                         tierMeta.color === 'indigo' ? 'text-indigo-400 font-medium' :
                           'text-amber-400 font-medium'
-                  }>{tierRow ? formatDailyRange(tierRow.daily_reward_min_bp, tierRow.daily_reward_max_bp) : '—'}</span>
+                  }>{tierRow ? TIER_MONTHLY_TARGET[tierName] : '—'}</span>
                 </div>
                 <div className="flex justify-between text-xs">
                   <span>Yield Cap:</span>
@@ -676,7 +685,7 @@ export default function DappHire() {
                   tagline={t.tagline}
                   riskLabel={t.riskLabel}
                   accent={t.accent}
-                  dailyRange={row ? formatDailyRange(row.daily_reward_min_bp, row.daily_reward_max_bp) : null}
+                  dailyRange={row ? TIER_MONTHLY_TARGET[t.key] : null}
                   minUsd={row ? microToUsdt(row.min_amount) : null}
                   maxUsd={row ? microToUsdt(row.max_amount) : null}
                   onHire={() => setSelectedTier(t.key)}
@@ -708,9 +717,9 @@ export default function DappHire() {
                   <TrendingUp className="h-4 w-4 text-green-500" />
                 </div>
                 <div className="flex-1">
-                  <h4 className="font-medium text-xs text-foreground">Daily Returns</h4>
+                  <h4 className="font-medium text-xs text-foreground">Target Monthly Performance</h4>
                   <p className="text-xs text-muted-foreground leading-tight">
-                    Earn daily ROI from your activated agents with tier-specific yield ranges
+                    Each agent targets a tier-specific monthly performance range
                   </p>
                 </div>
               </div>

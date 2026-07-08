@@ -3,7 +3,6 @@ export { AgentCard } from './AgentCard';
 export { WithdrawalLimitDisplay } from './WithdrawalLimitDisplay';
 export { TierSelection } from './TierSelection';
 export { AgentDashboardDemo } from './AgentDashboardDemo';
-export { AgentActivationModal } from './AgentActivationModal';
 export { WithdrawalTimer, MultiAgentTimer } from './WithdrawalTimer';
 export { 
   WithdrawalValidationFeedback, 

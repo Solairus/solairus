@@ -56,8 +56,8 @@ export const EXTENDED_AGENT_TIER_METADATA: ExtendedTierConfig[] = [
     yieldCapPct: 200,
     name: 'Nova',
     emoji: '🌀',
-    description: 'Stable daily returns with minimal risk',
-    dailyRange: '1%–2% (backend)',
+    description: 'Market intelligence & opportunity discovery — minimal risk',
+    dailyRange: '8.25% – 8.5% Monthly',
     persona: 'Nova',
     tagline: 'Pattern Seeker',
     targetUser: 'Beginners',
@@ -74,9 +74,9 @@ export const EXTENDED_AGENT_TIER_METADATA: ExtendedTierConfig[] = [
       background: 'bg-cyan-500/10',
     },
     features: [
-      'Stable daily returns',
+      'Steady monthly performance',
       'Conservative strategies',
-      'Predictable yield patterns'
+      'Predictable target ranges'
     ],
     recommendedFor: ['New to crypto', 'Risk-averse investors', 'Small initial investments'],
     minimumExperience: 'Beginner'
@@ -87,8 +87,8 @@ export const EXTENDED_AGENT_TIER_METADATA: ExtendedTierConfig[] = [
     yieldCapPct: 200,
     name: 'Vega',
     emoji: '⭐',
-    description: 'Balanced approach with steady growth',
-    dailyRange: '2%–3% (backend)',
+    description: 'Precision execution & trade optimization — moderate risk',
+    dailyRange: '8.75% – 9% Monthly',
     persona: 'Vega',
     tagline: 'Momentum Scout',
     targetUser: 'Balanced',
@@ -114,8 +114,8 @@ export const EXTENDED_AGENT_TIER_METADATA: ExtendedTierConfig[] = [
     yieldCapPct: 200,
     name: 'Orion',
     emoji: '💠',
-    description: 'Higher yields with controlled volatility',
-    dailyRange: '3%–4% (backend)',
+    description: 'Risk intelligence & portfolio protection — controlled volatility',
+    dailyRange: '9.25% – 9.5% Monthly',
     persona: 'Orion',
     tagline: 'Risk Balancer',
     targetUser: 'Aggressive',
@@ -141,8 +141,8 @@ export const EXTENDED_AGENT_TIER_METADATA: ExtendedTierConfig[] = [
     yieldCapPct: 200,
     name: 'Prime',
     emoji: '🚀',
-    description: 'Maximum returns for experienced traders',
-    dailyRange: '4%–5% (backend)',
+    description: 'Strategic AI coordination & capital allocation — for experienced traders',
+    dailyRange: '9.75% – 10% Monthly',
     persona: 'Prime',
     tagline: 'Alpha Hunter',
     targetUser: 'Elite',
@@ -345,14 +345,6 @@ export const AGENT_ENV_CONFIG = {
 } as const;
 
 // Helper functions for configuration access
-export function getExtendedTierConfig(tier: AgentTier): ExtendedTierConfig {
-  return EXTENDED_AGENT_TIER_CONFIGS[tier];
-}
-
-export function getTierStyling(tier: AgentTier) {
-  return EXTENDED_AGENT_TIER_CONFIGS[tier].styling;
-}
-
 export function getAgentServiceConfig() {
   return AGENT_SERVICE_CONFIG;
 }
