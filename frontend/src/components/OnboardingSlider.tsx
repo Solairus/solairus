@@ -22,12 +22,12 @@ export default function OnboardingSlider({ onClose }: { onClose: () => void }) {
     {
       icon: Bot,
       title: "Hire Your AI Agent",
-      desc: "Autonomous trading tuned for steady daily USDT rewards.",
+      desc: "Autonomous market, execution, and risk intelligence working for you.",
     },
     {
       icon: Gift,
-      title: "Earn Daily Rewards",
-      desc: "Target 1–5% per day with transparent caps and controls.",
+      title: "Target Monthly Performance",
+      desc: "Target up to 8.25%–10% monthly by tier, with transparent caps and controls.",
     },
     {
       icon: Shield,

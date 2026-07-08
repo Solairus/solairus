@@ -47,17 +47,18 @@ export default function Hero() {
         <div className="animate-fade-in">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass border border-primary/30 mb-6 hover:glow-border transition-all">
             <Sparkles className="w-4 h-4 text-primary" />
-            <span className="text-sm text-muted-foreground">Powered by Solana AI Agents</span>
+            <span className="text-sm text-muted-foreground">The Autonomous AI Agent Infrastructure</span>
           </div>
-          
+
           <h1 className="text-5xl md:text-7xl font-bold mb-6 leading-tight">
-            <span className="gradient-text">AI That Trades.</span>
+            <span className="gradient-text">Four AI Agents.</span>
             <br />
-            <span className="text-foreground">You Earn.</span>
+            <span className="text-foreground">One Intelligent Ecosystem.</span>
           </h1>
-          
+
           <p className="text-xl md:text-2xl text-muted-foreground max-w-3xl mx-auto mb-12">
-            Earn automated daily profits through intelligent Solana-based DeFi strategies.
+            Institutional-grade market intelligence across digital assets — deployed by autonomous
+            AI agents that never sleep, targeting up to 8.25%–10% in monthly performance, by tier.
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
@@ -198,18 +199,21 @@ export default function Hero() {
           {/* Stats */}
           <div className="grid grid-cols-3 gap-8 max-w-2xl mx-auto mt-20">
             <div className="glass rounded-xl p-6 glow-card hover:scale-105 transition-transform">
-              <div className="text-3xl font-bold gradient-text mb-2">$2.4M+</div>
-              <div className="text-sm text-muted-foreground">Total Earned</div>
+              <div className="text-3xl font-bold gradient-text mb-2">4</div>
+              <div className="text-sm text-muted-foreground">Specialized AI Agents</div>
             </div>
             <div className="glass rounded-xl p-6 glow-card hover:scale-105 transition-transform">
-              <div className="text-3xl font-bold gradient-text mb-2">5,200+</div>
-              <div className="text-sm text-muted-foreground">Active Bots</div>
+              <div className="text-3xl font-bold gradient-text mb-2">24/7</div>
+              <div className="text-sm text-muted-foreground">Autonomous Market Coverage</div>
             </div>
             <div className="glass rounded-xl p-6 glow-card hover:scale-105 transition-transform">
-              <div className="text-3xl font-bold gradient-text mb-2">98.7%</div>
-              <div className="text-sm text-muted-foreground">Success Rate</div>
+              <div className="text-3xl font-bold gradient-text mb-2">8.25–10%</div>
+              <div className="text-sm text-muted-foreground">Target Monthly Performance*</div>
             </div>
           </div>
+          <p className="text-xs text-muted-foreground/70 max-w-xl mx-auto mt-4">
+            *Target performance objective, not a guaranteed return. All investing involves risk; past performance does not guarantee future results.
+          </p>
         </div>
       </div>
     </section>

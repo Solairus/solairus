@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
  * no padding/margin around it); only the content column is padded.
  * UI only — all existing tier info is preserved and reorganized:
  *   risk → corner badge · name+emoji → title · persona → subtitle ·
- *   daily yield → metric row · min–max liquidity → price row · action → Hire Now.
+ *   monthly target → metric row · min–max liquidity → price row · action → Hire Now.
  * Logic stays in the page; this component just renders + calls onHire().
  */
 
@@ -33,7 +33,7 @@ export interface AgentHireCardProps {
   tagline: string;
   riskLabel: string;
   accent: AgentAccent;
-  /** e.g. "1%–2%" from formatDailyRange; null while tiers load. */
+  /** e.g. "8.25% – 8.5%" target monthly return; null while tiers load. */
   dailyRange: string | null;
   /** Min/max liquidity in USDT; null while tiers load. */
   minUsd: number | null;
@@ -82,11 +82,11 @@ export default function AgentHireCard({
         </div>
         <p className="text-xs text-muted-foreground mt-0.5 truncate">{tagline}</p>
 
-        {/* Metric row (daily yield) */}
+        {/* Metric row (target monthly return) */}
         <div className="flex items-center gap-1 mt-1 text-xs">
           <TrendingUp className={`h-3.5 w-3.5 flex-shrink-0 ${a.text}`} />
           <span className={`font-semibold ${a.text}`}>{dailyRange ?? '—'}</span>
-          <span className="text-muted-foreground">daily</span>
+          <span className="text-muted-foreground">monthly target</span>
         </div>
 
         {/* Price + action row */}

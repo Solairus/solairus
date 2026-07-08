@@ -78,9 +78,9 @@ const TierCard: React.FC<TierCardProps> = ({
 
       {/* Yield Information */}
       <div className="space-y-3 mb-4">
-        {/* Daily Yield Range */}
+        {/* Target Monthly Return */}
         <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">Daily Yield</span>
+          <span className="text-sm text-muted-foreground">Monthly Target</span>
           <span className={cn("font-semibold text-sm", styling.accent)}>
             {config.dailyRange}
           </span>
@@ -116,10 +116,10 @@ const TierCard: React.FC<TierCardProps> = ({
         <div className="flex items-center gap-2">
           <IconComponent className={cn("h-4 w-4", styling.accent)} />
           <span className="text-xs text-muted-foreground">
-            {config.name === 'Nova' && "Stable daily returns with minimal risk"}
-            {config.name === 'Vega' && "Balanced approach with steady growth"}
-            {config.name === 'Orion' && "Higher yields with controlled volatility"}
-            {config.name === 'Prime' && "Maximum returns for experienced traders"}
+            {config.name === 'Nova' && "Market intelligence, minimal risk"}
+            {config.name === 'Vega' && "Precision execution, balanced risk"}
+            {config.name === 'Orion' && "Risk intelligence, controlled volatility"}
+            {config.name === 'Prime' && "Strategic capital allocation, elite tier"}
           </span>
         </div>
       </div>
@@ -161,8 +161,8 @@ export const TierSelection: React.FC<TierSelectionProps> = ({
           Choose Your Agent Tier
         </h2>
         <p className="text-sm text-muted-foreground max-w-md mx-auto">
-          Select an AI trading agent tier based on your risk tolerance and yield expectations. 
-          Each tier offers different daily yield ranges and total yield caps.
+          Select an AI trading agent tier based on your risk tolerance and target performance.
+          Each tier targets a different monthly performance range with its own total return cap.
         </p>
       </div>
 
@@ -196,7 +196,7 @@ export const TierSelection: React.FC<TierSelectionProps> = ({
           
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <span className="text-muted-foreground">Daily Yield Range:</span>
+              <span className="text-muted-foreground">Monthly Target Range:</span>
               <p className="font-semibold text-primary">
                 {EXTENDED_AGENT_TIER_METADATA.find(t => t.name === selectedTierName)?.dailyRange}
               </p>
@@ -214,8 +214,8 @@ export const TierSelection: React.FC<TierSelectionProps> = ({
       {/* Info Footer */}
       <div className="text-center">
         <p className="text-xs text-muted-foreground">
-          💡 Higher tiers offer greater yield potential but come with increased risk. 
-          Choose the tier that matches your investment strategy.
+          💡 Higher tiers target greater monthly performance but carry increased risk.
+          Choose the tier that matches your investment strategy. Targets are objectives, not guarantees.
         </p>
       </div>
     </div>

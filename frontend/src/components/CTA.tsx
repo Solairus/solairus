@@ -16,7 +16,7 @@ export default function CTA() {
           </h2>
           
           <p className="text-xl text-muted-foreground mb-10 max-w-2xl mx-auto">
-            Join thousands of smart investors earning daily USDT rewards through autonomous AI trading
+            Join investors targeting up to 8.25%–10% in monthly performance through autonomous AI trading intelligence
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center">

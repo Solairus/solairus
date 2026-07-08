@@ -13,8 +13,8 @@ const steps = [
   },
   {
     icon: TrendingUp,
-    title: "Earn Daily",
-    description: "Watch your USDT rewards grow daily. Transparent, predictable, sustainable."
+    title: "Target Monthly Growth",
+    description: "Track performance toward each agent's monthly target. Transparent, predictable, sustainable."
   }
 ];
 
@@ -39,7 +39,7 @@ export default function HowItWorks() {
             How <span className="gradient-text">SOLAIRUS</span> Works
           </h2>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-            Three simple steps to automated DeFi wealth generation
+            Three simple steps to autonomous portfolio growth
           </p>
         </div>
         

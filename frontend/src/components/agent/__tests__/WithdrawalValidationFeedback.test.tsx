@@ -81,7 +81,7 @@ describe('WithdrawalValidationFeedback', () => {
 
       expect(screen.getByText('Ready for Withdrawal')).toBeInTheDocument();
       expect(screen.getByText(/This agent can generate ROI now/)).toBeInTheDocument();
-      expect(screen.getByText(/Daily yield range: 1.75% - 2.15%/)).toBeInTheDocument();
+      expect(screen.getByText(/Monthly target: 1.75% - 2.15%/)).toBeInTheDocument();
     });
 
     it('should not render anything when no error and agent cannot withdraw but no specific reason', () => {

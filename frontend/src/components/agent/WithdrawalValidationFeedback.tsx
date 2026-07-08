@@ -72,7 +72,7 @@ export const WithdrawalValidationFeedback: React.FC<WithdrawalValidationFeedback
           <AlertDescription className="text-green-200">
             <div className="font-medium mb-1">Ready for Withdrawal</div>
             <div className="text-sm text-green-300">
-              This agent can generate ROI now. Daily yield range: {agent.tierConfig.dailyRange}
+              This agent can generate ROI now. Monthly target: {agent.tierConfig.dailyRange}
             </div>
           </AlertDescription>
         </Alert>

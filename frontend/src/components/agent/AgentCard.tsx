@@ -185,11 +185,11 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onWithdraw, connect
           </span>
         </div>
 
-        {/* Daily Yield Range */}
+        {/* Target Monthly Return */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <TrendingUp className="h-3 w-3" />
-            <span>Daily Range</span>
+            <span>Monthly Target</span>
           </div>
           <span className="text-sm font-medium">
             {agent.tierConfig.dailyRange}

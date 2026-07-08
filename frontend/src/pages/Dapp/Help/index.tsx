@@ -48,12 +48,12 @@ const faqData: FAQItem[] = [
   // AI Agents
   {
     question: "What are AI Trading Agents?",
-    answer: "AI Trading Agents are automated trading bots that execute trading strategies on your behalf. They generate daily ROI based on market conditions and their tier level (NOVA, VEGA, ORION, PRIME).",
+    answer: "AI Trading Agents are autonomous trading systems that execute strategies on your behalf, each targeting a monthly performance objective based on market conditions and their tier level (NOVA, VEGA, ORION, PRIME).",
     category: "agents"
   },
   {
     question: "What are the different agent tiers?",
-    answer: "• NOVA: 1.00%-1.75% daily ROI, 175% yield cap\n• VEGA: 1.75%-2.15% daily ROI, 200% yield cap\n• ORION: 2.15%-3.00% daily ROI, 220% yield cap\n• PRIME: 3.00%-5.00% daily ROI, 250% yield cap",
+    answer: "• NOVA — Market Intelligence: 8.25%-8.5% target monthly, 175% yield cap\n• VEGA — Execution Intelligence: 8.75%-9% target monthly, 200% yield cap\n• ORION — Risk Intelligence: 9.25%-9.5% target monthly, 220% yield cap\n• PRIME — Strategic Allocation: 9.75%-10% target monthly, 250% yield cap\n\nThese are performance objectives, not guaranteed returns. All investing involves risk.",
     category: "agents"
   },
   {
@@ -213,7 +213,7 @@ export default function HelpPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="w-6 h-6 rounded-full p-0 flex items-center justify-center text-xs">4</Badge>
-                    <span>Start earning daily ROI</span>
+                    <span>Start targeting monthly returns</span>
                   </div>
                 </div>
               </div>
@@ -221,7 +221,7 @@ export default function HelpPage() {
               <div className="space-y-3">
                 <h4 className="font-medium text-sm">💰 Earning Opportunities</h4>
                 <div className="space-y-2 text-sm text-muted-foreground">
-                  <div>• <strong>Agent ROI:</strong> 1-5% daily returns</div>
+                  <div>• <strong>Agent Performance:</strong> Up to 8.25%–10% target monthly, by tier</div>
                   <div>• <strong>Referrals:</strong> 5% + 3% + 2% commissions</div>
                   <div>• <strong>Network Building:</strong> Passive income growth</div>
                   <div>• <strong>Compound Growth:</strong> Reinvest for scaling</div>
@@ -325,24 +325,24 @@ export default function HelpPage() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    Automated trading bots that generate daily returns through advanced AI strategies.
+                    Autonomous AI agents that target a monthly performance objective through advanced market, execution, and risk intelligence.
                   </p>
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
                       <span className="font-medium">NOVA</span>
-                      <span className="text-muted-foreground">1.00-1.75% daily</span>
+                      <span className="text-muted-foreground">8.25-8.5% monthly target</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="font-medium">VEGA</span>
-                      <span className="text-muted-foreground">1.75-2.15% daily</span>
+                      <span className="text-muted-foreground">8.75-9% monthly target</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="font-medium">ORION</span>
-                      <span className="text-muted-foreground">2.15-3.00% daily</span>
+                      <span className="text-muted-foreground">9.25-9.5% monthly target</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="font-medium">PRIME</span>
-                      <span className="text-muted-foreground">3.00-5.00% daily</span>
+                      <span className="text-muted-foreground">9.75-10% monthly target</span>
                     </div>
                   </div>
                 </CardContent>

@@ -150,10 +150,10 @@ describe('AgentCard', () => {
       expect(screen.getByText('Jan 1, 2024')).toBeInTheDocument();
     });
 
-    it('should display daily yield range', () => {
+    it('should display target monthly return range', () => {
       render(<AgentCard agent={mockAgent} onWithdraw={mockOnWithdraw} />);
 
-      expect(screen.getByText('Daily Range')).toBeInTheDocument();
+      expect(screen.getByText('Monthly Target')).toBeInTheDocument();
       expect(screen.getByText('1.75% - 2.15%')).toBeInTheDocument();
     });
   });
