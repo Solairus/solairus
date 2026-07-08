@@ -14,8 +14,14 @@ vi.mock('@/config/pricing', () => ({
     licenseFeeUsd: 50,
     agentMinimumUsd: 25,
     withdrawalFeePercent: 0
-  },
-  getRecommendedStartingBalance: () => 75
+  }
+}));
+
+// Mock the settings context
+vi.mock('@/contexts/settings-context', () => ({
+  useSettings: () => ({
+    licenseFeeUsdtMicro: 50_000_000, // 50 USDT
+  }),
 }));
 
 const renderWithRouter = (component: React.ReactElement) => {

@@ -19,7 +19,8 @@ import {
   Link
 } from "lucide-react";
 import BackButton from "@/components/ui/BackButton";
-import { PRICING_CONFIG, getRecommendedStartingBalance } from "@/config/pricing";
+import { PRICING_CONFIG } from "@/config/pricing";
+import { useSettings } from '@/contexts/settings-context';
 
 interface FAQItem {
   question: string;
@@ -28,12 +29,9 @@ interface FAQItem {
 }
 
 /**
- * Generate FAQ data with dynamic pricing from config
+ * Generate FAQ data with dynamic pricing from settings
  */
-function getFAQData(): FAQItem[] {
-  const licenseFee = PRICING_CONFIG.licenseFeeUsd;
-  const agentMin = PRICING_CONFIG.agentMinimumUsd;
-  const recommendedStart = getRecommendedStartingBalance();
+function getFAQData(licenseFee: number, agentMin: number, recommendedStart: number): FAQItem[] {
 
   return [
     // Getting Started
@@ -148,7 +146,13 @@ export default function HelpPage() {
   const [expandedFAQ, setExpandedFAQ] = useState<number | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
-  const faqData = getFAQData();
+  // Dynamic license fee from backend (micro-USDT → whole USDT), falls back to env var
+  const { licenseFeeUsdtMicro } = useSettings();
+  const licenseFee = licenseFeeUsdtMicro > 0 ? licenseFeeUsdtMicro / 1_000_000 : PRICING_CONFIG.licenseFeeUsd;
+  const agentMin = PRICING_CONFIG.agentMinimumUsd;
+  const recommendedStart = licenseFee + agentMin;
+
+  const faqData = getFAQData(licenseFee, agentMin, recommendedStart);
 
   const filteredFAQs = selectedCategory === 'all'
     ? faqData
@@ -216,7 +220,7 @@ export default function HelpPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="w-6 h-6 rounded-full p-0 flex items-center justify-center text-xs">2</Badge>
-                    <span>Activate license (${PRICING_CONFIG.licenseFeeUsd} USDT)</span>
+                    <span>Activate license (${licenseFee} USDT)</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="w-6 h-6 rounded-full p-0 flex items-center justify-center text-xs">3</Badge>
@@ -432,7 +436,7 @@ export default function HelpPage() {
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span>License Fee</span>
-                      <span className="font-medium">${PRICING_CONFIG.licenseFeeUsd} USDT</span>
+                      <span className="font-medium">${licenseFee} USDT</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Agent Minimum</span>
