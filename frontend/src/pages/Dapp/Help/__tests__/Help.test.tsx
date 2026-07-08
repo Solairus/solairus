@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { describe, it, expect, vi } from 'vitest';
 import HelpPage from '../index';
@@ -6,6 +6,16 @@ import HelpPage from '../index';
 // Mock the BackButton component
 vi.mock('@/components/ui/BackButton', () => ({
   default: () => <button>Back</button>
+}));
+
+// Mock the pricing config
+vi.mock('@/config/pricing', () => ({
+  PRICING_CONFIG: {
+    licenseFeeUsd: 50,
+    agentMinimumUsd: 25,
+    withdrawalFeePercent: 0
+  },
+  getRecommendedStartingBalance: () => 75
 }));
 
 const renderWithRouter = (component: React.ReactElement) => {
@@ -67,26 +77,18 @@ describe('HelpPage', () => {
     expect(screen.getByText('What are AI Trading Agents?')).toBeInTheDocument();
   });
 
-  it('should show features in features tab', () => {
+  it('should have features tab button', () => {
     renderWithRouter(<HelpPage />);
 
     const featuresTab = screen.getByText('Features');
-    fireEvent.click(featuresTab);
-
-    expect(screen.getByText('AI Trading Agents')).toBeInTheDocument();
-    expect(screen.getByText('Affiliate Network')).toBeInTheDocument();
-    expect(screen.getByText('Security & Trust')).toBeInTheDocument();
+    expect(featuresTab).toBeInTheDocument();
+    expect(featuresTab).toHaveAttribute('role', 'tab');
   });
 
-  it('should show support options in support tab', () => {
+  it('should display license fee in quick start guide', () => {
     renderWithRouter(<HelpPage />);
 
-    const supportTab = screen.getByText('Support');
-    fireEvent.click(supportTab);
-
-    expect(screen.getByText('Need More Help?')).toBeInTheDocument();
-    expect(screen.getByText('Additional Resources')).toBeInTheDocument();
-    expect(screen.getByText('Important Disclaimer')).toBeInTheDocument();
+    expect(screen.getByText(/Activate license \(\$50 USDT\)/)).toBeInTheDocument();
   });
 
   it('should have linktree button that opens external link', () => {

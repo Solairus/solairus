@@ -2,16 +2,15 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { 
-  HelpCircle, 
-  Wallet, 
-  Users, 
-  TrendingUp, 
-  Shield, 
-  DollarSign, 
-  ChevronDown, 
+import {
+  HelpCircle,
+  Wallet,
+  Users,
+  TrendingUp,
+  Shield,
+  DollarSign,
+  ChevronDown,
   ChevronRight,
   ExternalLink,
   AlertCircle,
@@ -20,6 +19,7 @@ import {
   Link
 } from "lucide-react";
 import BackButton from "@/components/ui/BackButton";
+import { PRICING_CONFIG, getRecommendedStartingBalance } from "@/config/pricing";
 
 interface FAQItem {
   question: string;
@@ -27,97 +27,106 @@ interface FAQItem {
   category: 'getting-started' | 'agents' | 'affiliate' | 'wallet' | 'troubleshooting';
 }
 
-const faqData: FAQItem[] = [
-  // Getting Started
-  {
-    question: "What is Solairus?",
-    answer: "Solairus is a decentralized AI trading platform built on Solana that allows users to activate AI trading agents and earn passive income through automated trading strategies. Users can also build affiliate networks to earn commissions.",
-    category: "getting-started"
-  },
-  {
-    question: "How do I get started?",
-    answer: "1. Connect your Solana wallet (Phantom, Solflare, etc.)\n2. Activate your license for $50 USDT\n3. Hire AI trading agents to start earning\n4. Share your referral link to build your network",
-    category: "getting-started"
-  },
-  {
-    question: "What do I need to use Solairus?",
-    answer: "You need a Solana wallet with USDT for license activation and agent hiring. We recommend starting with at least $75 USDT - $50 for license and $25+ for your first agent.",
-    category: "getting-started"
-  },
-  
-  // AI Agents
-  {
-    question: "What are AI Trading Agents?",
-    answer: "AI Trading Agents are autonomous trading systems that execute strategies on your behalf, each targeting a monthly performance objective based on market conditions and their tier level (NOVA, VEGA, ORION, PRIME).",
-    category: "agents"
-  },
-  {
-    question: "What are the different agent tiers?",
-    answer: "• NOVA — Market Intelligence: 8.25%-8.5% target monthly, 175% yield cap\n• VEGA — Execution Intelligence: 8.75%-9% target monthly, 200% yield cap\n• ORION — Risk Intelligence: 9.25%-9.5% target monthly, 220% yield cap\n• PRIME — Strategic Allocation: 9.75%-10% target monthly, 250% yield cap\n\nThese are performance objectives, not guaranteed returns. All investing involves risk.",
-    category: "agents"
-  },
-  {
-    question: "How do agent withdrawals work?",
-    answer: "You can withdraw your agent ROI once every 24 hours. The system tracks your last withdrawal time and enforces the cooldown period. Higher tier agents have higher daily limits.",
-    category: "agents"
-  },
-  {
-    question: "What is the yield cap?",
-    answer: "The yield cap is the maximum total ROI you can earn from an agent (as a percentage of your initial investment). Once reached, the agent stops generating returns and you can hire a new one.",
-    category: "agents"
-  },
-  
-  // Affiliate System
-  {
-    question: "How does the affiliate system work?",
-    answer: "Earn commissions when people use your referral link:\n• 5% on direct referrals (Level 1)\n• 3% on their referrals (Level 2)\n• 2% on Level 3 referrals\nCommissions apply to license activations and agent hirings.",
-    category: "affiliate"
-  },
-  {
-    question: "When do I receive affiliate earnings?",
-    answer: "Affiliate earnings are credited immediately when your referrals make purchases. You can withdraw your accumulated earnings anytime from the Affiliate dashboard.",
-    category: "affiliate"
-  },
-  {
-    question: "How do I share my referral link?",
-    answer: "Go to Affiliate > Share tab to get your unique referral link. Share it on social media, with friends, or through any marketing channels. Track your referrals in the Referrals tab.",
-    category: "affiliate"
-  },
-  
-  // Wallet & Technical
-  {
-    question: "Which wallets are supported?",
-    answer: "We support all major Solana wallets including Phantom, Solflare, Backpack, and any wallet compatible with the Solana Wallet Adapter.",
-    category: "wallet"
-  },
-  {
-    question: "Why do I need USDT?",
-    answer: "USDT is used for all transactions on Solairus - license activation ($50), agent hiring (varies by tier), and ROI payouts. It provides price stability for the platform economy.",
-    category: "wallet"
-  },
-  {
-    question: "Is my wallet safe?",
-    answer: "Yes! Solairus is fully decentralized on Solana. We never hold your private keys or funds. All transactions are executed through smart contracts that you approve.",
-    category: "wallet"
-  },
-  
-  // Troubleshooting
-  {
-    question: "Transaction failed - what should I do?",
-    answer: "1. Check your USDT balance\n2. Ensure your wallet is connected\n3. Try refreshing the page\n4. Check Solana network status\n5. Increase transaction priority if needed",
-    category: "troubleshooting"
-  },
-  {
-    question: "My balance isn't updating",
-    answer: "Balances update every few minutes. Click the refresh button or wait a moment. If the issue persists, disconnect and reconnect your wallet.",
-    category: "troubleshooting"
-  },
-  {
-    question: "I can't withdraw my ROI",
-    answer: "Check: 1) 24-hour cooldown period, 2) Sufficient ROI balance, 3) Agent hasn't reached yield cap, 4) Wallet connection. The dashboard shows your next available withdrawal time.",
-    category: "troubleshooting"
-  }
-];
+/**
+ * Generate FAQ data with dynamic pricing from config
+ */
+function getFAQData(): FAQItem[] {
+  const licenseFee = PRICING_CONFIG.licenseFeeUsd;
+  const agentMin = PRICING_CONFIG.agentMinimumUsd;
+  const recommendedStart = getRecommendedStartingBalance();
+
+  return [
+    // Getting Started
+    {
+      question: "What is Solairus?",
+      answer: "Solairus is a decentralized AI trading platform built on Solana that allows users to activate AI trading agents and earn passive income through automated trading strategies. Users can also build affiliate networks to earn commissions.",
+      category: "getting-started"
+    },
+    {
+      question: "How do I get started?",
+      answer: `1. Connect your Solana wallet (Phantom, Solflare, etc.)\n2. Activate your license for $${licenseFee} USDT\n3. Hire AI trading agents to start earning\n4. Share your referral link to build your network`,
+      category: "getting-started"
+    },
+    {
+      question: "What do I need to use Solairus?",
+      answer: `You need a Solana wallet with USDT for license activation and agent hiring. We recommend starting with at least $${recommendedStart} USDT - $${licenseFee} for license and $${agentMin}+ for your first agent.`,
+      category: "getting-started"
+    },
+
+    // AI Agents
+    {
+      question: "What are AI Trading Agents?",
+      answer: "AI Trading Agents are autonomous trading systems that execute strategies on your behalf, each targeting a monthly performance objective based on market conditions and their tier level (NOVA, VEGA, ORION, PRIME).",
+      category: "agents"
+    },
+    {
+      question: "What are the different agent tiers?",
+      answer: "• NOVA — Market Intelligence: 8.25%-8.5% target monthly, 175% yield cap\n• VEGA — Execution Intelligence: 8.75%-9% target monthly, 200% yield cap\n• ORION — Risk Intelligence: 9.25%-9.5% target monthly, 220% yield cap\n• PRIME — Strategic Allocation: 9.75%-10% target monthly, 250% yield cap\n\nThese are performance objectives, not guaranteed returns. All investing involves risk.",
+      category: "agents"
+    },
+    {
+      question: "How do agent withdrawals work?",
+      answer: "You can withdraw your agent ROI once every 24 hours. The system tracks your last withdrawal time and enforces the cooldown period. Higher tier agents have higher daily limits.",
+      category: "agents"
+    },
+    {
+      question: "What is the yield cap?",
+      answer: "The yield cap is the maximum total ROI you can earn from an agent (as a percentage of your initial investment). Once reached, the agent stops generating returns and you can hire a new one.",
+      category: "agents"
+    },
+
+    // Affiliate System
+    {
+      question: "How does the affiliate system work?",
+      answer: "Earn commissions when people use your referral link:\n• 5% on direct referrals (Level 1)\n• 3% on their referrals (Level 2)\n• 2% on Level 3 referrals\nCommissions apply to license activations and agent hirings.",
+      category: "affiliate"
+    },
+    {
+      question: "When do I receive affiliate earnings?",
+      answer: "Affiliate earnings are credited immediately when your referrals make purchases. You can withdraw your accumulated earnings anytime from the Affiliate dashboard.",
+      category: "affiliate"
+    },
+    {
+      question: "How do I share my referral link?",
+      answer: "Go to Affiliate > Share tab to get your unique referral link. Share it on social media, with friends, or through any marketing channels. Track your referrals in the Referrals tab.",
+      category: "affiliate"
+    },
+
+    // Wallet & Technical
+    {
+      question: "Which wallets are supported?",
+      answer: "We support all major Solana wallets including Phantom, Solflare, Backpack, and any wallet compatible with the Solana Wallet Adapter.",
+      category: "wallet"
+    },
+    {
+      question: "Why do I need USDT?",
+      answer: `USDT is used for all transactions on Solairus - license activation ($${licenseFee}), agent hiring (varies by tier), and ROI payouts. It provides price stability for the platform economy.`,
+      category: "wallet"
+    },
+    {
+      question: "Is my wallet safe?",
+      answer: "Yes! Solairus is fully decentralized on Solana. We never hold your private keys or funds. All transactions are executed through smart contracts that you approve.",
+      category: "wallet"
+    },
+
+    // Troubleshooting
+    {
+      question: "Transaction failed - what should I do?",
+      answer: "1. Check your USDT balance\n2. Ensure your wallet is connected\n3. Try refreshing the page\n4. Check Solana network status\n5. Increase transaction priority if needed",
+      category: "troubleshooting"
+    },
+    {
+      question: "My balance isn't updating",
+      answer: "Balances update every few minutes. Click the refresh button or wait a moment. If the issue persists, disconnect and reconnect your wallet.",
+      category: "troubleshooting"
+    },
+    {
+      question: "I can't withdraw my ROI",
+      answer: "Check: 1) 24-hour cooldown period, 2) Sufficient ROI balance, 3) Agent hasn't reached yield cap, 4) Wallet connection. The dashboard shows your next available withdrawal time.",
+      category: "troubleshooting"
+    }
+  ];
+}
 
 const categoryLabels = {
   'getting-started': 'Getting Started',
@@ -139,9 +148,11 @@ export default function HelpPage() {
   const [expandedFAQ, setExpandedFAQ] = useState<number | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
-  const filteredFAQs = selectedCategory === 'all' 
-    ? faqData 
-    : faqData.filter(faq => faq.category === selectedCategory);
+  const faqData = getFAQData();
+
+  const filteredFAQs = selectedCategory === 'all'
+    ? faqData
+    : faqData.filter((faq: FAQItem) => faq.category === selectedCategory);
 
   const toggleFAQ = (index: number) => {
     setExpandedFAQ(expandedFAQ === index ? null : index);
@@ -205,7 +216,7 @@ export default function HelpPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="w-6 h-6 rounded-full p-0 flex items-center justify-center text-xs">2</Badge>
-                    <span>Activate license ($50 USDT)</span>
+                    <span>Activate license (${PRICING_CONFIG.licenseFeeUsd} USDT)</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="w-6 h-6 rounded-full p-0 flex items-center justify-center text-xs">3</Badge>
@@ -276,7 +287,7 @@ export default function HelpPage() {
             <Card>
               <CardContent className="p-0">
                 <div className="divide-y">
-                  {filteredFAQs.map((faq, index) => {
+                  {filteredFAQs.map((faq: FAQItem, index: number) => {
                     const isExpanded = expandedFAQ === index;
                     const Icon = categoryIcons[faq.category];
                     
@@ -421,15 +432,15 @@ export default function HelpPage() {
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span>License Fee</span>
-                      <span className="font-medium">$50 USDT</span>
+                      <span className="font-medium">${PRICING_CONFIG.licenseFeeUsd} USDT</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Agent Minimum</span>
-                      <span className="font-medium">$25 USDT</span>
+                      <span className="font-medium">${PRICING_CONFIG.agentMinimumUsd} USDT</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Withdrawal Fee</span>
-                      <span className="font-medium">0%</span>
+                      <span className="font-medium">{PRICING_CONFIG.withdrawalFeePercent}%</span>
                     </div>
                   </div>
                 </CardContent>
