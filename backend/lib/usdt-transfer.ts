@@ -72,6 +72,37 @@ export function isValidSolAddress(addr: string): boolean {
   }
 }
 
+/**
+ * Wait for a signature to reach 'confirmed' by polling getSignatureStatuses.
+ * The legacy websocket-based confirmTransaction(sig) times out on HTTP-only/flaky RPCs
+ * even when the tx has landed (July 8 stuck-order incident) — polling is authoritative.
+ * Throws if the tx failed on-chain or the timeout elapses without a confirmation.
+ */
+export async function waitForSignatureConfirmation(
+  connection: Connection,
+  signature: string,
+  timeoutMs = 90_000,
+  pollMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  let lastRpcError: unknown = null
+  for (;;) {
+    try {
+      const res = await connection.getSignatureStatuses([signature], { searchTransactionHistory: true })
+      const st = res.value[0]
+      if (st?.err) throw new Error(`Transaction ${signature} failed on-chain: ${JSON.stringify(st.err)}`)
+      if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) return
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('failed on-chain')) throw e
+      lastRpcError = e // transient RPC error — keep polling
+    }
+    if (Date.now() >= deadline) break
+    await new Promise((r) => setTimeout(r, pollMs))
+  }
+  const detail = lastRpcError instanceof Error ? ` (last RPC error: ${lastRpcError.message})` : ''
+  throw new Error(`Timed out after ${timeoutMs}ms waiting for confirmation of ${signature}${detail}`)
+}
+
 /** Read USDT balance (micro) at an owner's ATA. Returns 0n when the ATA does not exist yet. */
 export async function getUsdtBalanceMicro(owner: PublicKey, connection?: Connection): Promise<bigint> {
   const conn = connection ?? (await getWorkingConnection())
@@ -98,8 +129,14 @@ export async function getUsdtBalanceMicro(owner: PublicKey, connection?: Connect
  * Dual-signer: treasury = fee payer (holds SOL), order keypair = token authority. Both backend-held.
  *
  * @param p.orderIndex - PG returns INT8 as string; accept number|string|bigint.
+ * @param p.onSignature - invoked right after broadcast, BEFORE confirmation — persist the
+ *                        signature here so a confirm timeout never orphans the sweep again.
  */
-export async function sweepToTreasury(p: { orderIndex: number | string | bigint; amountMicro: bigint }): Promise<{ signature: string }> {
+export async function sweepToTreasury(p: {
+  orderIndex: number | string | bigint
+  amountMicro: bigint
+  onSignature?: (signature: string) => Promise<void>
+}): Promise<{ signature: string }> {
   if (p.amountMicro <= 0n) throw new Error('Sweep amount must be positive')
   const connection = await getWorkingConnection()
   const order = deriveOrderKeypair(p.orderIndex)
@@ -128,7 +165,12 @@ export async function sweepToTreasury(p: { orderIndex: number | string | bigint;
   tx.sign(treasury, order)
 
   const signature = await connection.sendRawTransaction(tx.serialize())
-  await connection.confirmTransaction(signature, 'confirmed')
+  if (p.onSignature) {
+    try { await p.onSignature(signature) } catch (e) {
+      console.error('[sweepToTreasury] onSignature persist failed', { signature, error: e instanceof Error ? e.message : e })
+    }
+  }
+  await waitForSignatureConfirmation(connection, signature)
   return { signature }
 }
 
@@ -168,6 +210,6 @@ export async function sendUsdt(p: { toAddress: string; amountMicro: bigint }): P
   tx.sign(treasury)
 
   const signature = await connection.sendRawTransaction(tx.serialize())
-  await connection.confirmTransaction(signature, 'confirmed')
+  await waitForSignatureConfirmation(connection, signature)
   return { signature }
 }

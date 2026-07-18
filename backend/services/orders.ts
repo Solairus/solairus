@@ -30,22 +30,14 @@ export interface OrderRow {
 const ALLOC_LOCK_KEY = 824_517_001
 
 /**
- * Allocate a per-order HD index: reuse a freed index from a cancelled/expired order
- * that no live order is using, else MAX+1. Never returns the reserved treasury index.
+ * Allocate a per-order HD index: always MAX+1, never reused. Reusing indices from
+ * cancelled/expired orders is unsafe without an on-chain zero-balance check — a late
+ * payment to an old order's address would settle whichever order holds the index next
+ * (and every user saw the same deposit address). The index space is unbounded; fresh
+ * per order is both safer and clearer. Never returns the reserved treasury index.
  * Must be called inside a transaction that holds the advisory lock.
  */
 async function allocateHdIndex(client: PoolClient): Promise<number> {
-  const reuse = await client.query<{ hd_index: string }>(
-    `SELECT hd_index FROM payment_orders
-       WHERE status IN ('cancelled','expired')
-         AND hd_index NOT IN (
-           SELECT hd_index FROM payment_orders WHERE status IN ('pending','processing','completed')
-         )
-       ORDER BY hd_index ASC
-       LIMIT 1`
-  )
-  if (reuse.rows[0]) return Number(reuse.rows[0].hd_index)
-
   const maxRes = await client.query<{ max: string | null }>('SELECT MAX(hd_index) AS max FROM payment_orders')
   const next = Number(maxRes.rows[0]?.max ?? 0) + 1
   return Math.max(next, TREASURY_HD_INDEX + 1)
@@ -123,7 +115,7 @@ export async function createOrder(input: CreateOrderInput): Promise<OrderRow> {
   }
 }
 
-/** Cancel a still-pending order (address becomes reusable once on-chain balance is 0). */
+/** Cancel a still-pending order (its HD index/address is retired, never reassigned). */
 export async function cancelOrder(orderRef: string, userId: number): Promise<boolean> {
   const res = await query(
     `UPDATE payment_orders SET status='cancelled', updated_at=NOW()

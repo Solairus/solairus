@@ -5,6 +5,7 @@
  */
 import { PublicKey } from '@solana/web3.js'
 import { query } from '../db'
+import { getWorkingConnection } from '../lib/rpc-manager'
 import { getUsdtBalanceMicro, sweepToTreasury } from '../lib/usdt-transfer'
 import { fulfillOrder, expireStaleOrders } from './fulfillment'
 import type { OrderRow } from './orders'
@@ -25,6 +26,14 @@ function meetsThreshold(order: PendingRow, balanceMicro: bigint): boolean {
   return balanceMicro >= minAccept
 }
 
+/** Persist the sweep signature the moment it is broadcast, before confirmation. */
+async function recordSweepBroadcast(orderId: number, signature: string, amountMicro: bigint): Promise<void> {
+  await query(
+    "UPDATE payment_orders SET metadata = metadata || $1::jsonb, updated_at=NOW() WHERE id=$2",
+    [JSON.stringify({ sweep_sig: signature, sweep_amount_micro: amountMicro.toString(), sweep_broadcast_at: new Date().toISOString() }), orderId]
+  )
+}
+
 export async function verifyAndSettleOrder(order: PendingRow): Promise<void> {
   const balanceMicro = await getUsdtBalanceMicro(new PublicKey(order.address))
   if (!meetsThreshold(order, balanceMicro)) return
@@ -37,7 +46,11 @@ export async function verifyAndSettleOrder(order: PendingRow): Promise<void> {
   if ((locked.rowCount ?? 0) === 0) return
 
   try {
-    const { signature } = await sweepToTreasury({ orderIndex: Number(order.hd_index), amountMicro: balanceMicro })
+    const { signature } = await sweepToTreasury({
+      orderIndex: Number(order.hd_index),
+      amountMicro: balanceMicro,
+      onSignature: (sig) => recordSweepBroadcast(order.id, sig, balanceMicro),
+    })
     await fulfillOrder(order, balanceMicro, signature, order.user_address)
   } catch (e) {
     // Leave the order in 'processing' for admin reconciliation — never blind-revert,
@@ -57,6 +70,63 @@ export async function verifyAndSettleOrder(order: PendingRow): Promise<void> {
   }
 }
 
+/**
+ * Recover orders stranded in 'processing' (e.g. sweep broadcast but confirmation timed out).
+ * - Recorded sweep_sig confirmed on-chain  -> fulfill with the recorded amount.
+ * - No confirmed sweep but funds still sit on the deposit address -> re-sweep + fulfill.
+ * - No sig and address empty -> ambiguous; leave for manual review (never guess with funds).
+ * Only touches rows idle for 2+ minutes so it never races an in-flight settle.
+ */
+export async function reconcileProcessingOrders(): Promise<void> {
+  const stuck = await query<PendingRow>(
+    `SELECT po.*, u.user_address
+       FROM payment_orders po
+       JOIN users u ON u.id = po.user_id
+      WHERE po.status = 'processing'
+        AND po.updated_at < NOW() - INTERVAL '2 minutes'`
+  )
+
+  for (const order of stuck.rows) {
+    try {
+      const meta = (order.metadata ?? {}) as Record<string, unknown>
+      const sig = typeof meta.sweep_sig === 'string' ? meta.sweep_sig : null
+
+      if (sig) {
+        const conn = await getWorkingConnection()
+        const st = (await conn.getSignatureStatuses([sig], { searchTransactionHistory: true })).value[0]
+        if (st && !st.err && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) {
+          const swept = typeof meta.sweep_amount_micro === 'string' ? BigInt(meta.sweep_amount_micro) : 0n
+          console.log('[order-monitor] reconciling confirmed sweep', { order_ref: order.order_ref, sig })
+          await fulfillOrder(order, swept, sig, order.user_address)
+          continue
+        }
+        if (st?.err) {
+          console.error('[order-monitor] recorded sweep FAILED on-chain; will retry from balance', { order_ref: order.order_ref, sig, err: st.err })
+        }
+      }
+
+      // No confirmed sweep — if the deposit address still holds the funds, redo sweep + fulfill.
+      const balanceMicro = await getUsdtBalanceMicro(new PublicKey(order.address))
+      if (balanceMicro > 0n && meetsThreshold(order, balanceMicro)) {
+        console.log('[order-monitor] re-sweeping stranded processing order', { order_ref: order.order_ref })
+        const { signature } = await sweepToTreasury({
+          orderIndex: Number(order.hd_index),
+          amountMicro: balanceMicro,
+          onSignature: (s) => recordSweepBroadcast(order.id, s, balanceMicro),
+        })
+        await fulfillOrder(order, balanceMicro, signature, order.user_address)
+        continue
+      }
+
+      if (!sig && balanceMicro === 0n) {
+        console.error('[order-monitor] processing order has no sweep sig and empty address — manual review needed', { order_ref: order.order_ref })
+      }
+    } catch (e) {
+      console.error('[order-monitor] reconcile failed', { order_ref: order.order_ref, error: e instanceof Error ? e.message : e })
+    }
+  }
+}
+
 async function runCycle(): Promise<void> {
   const pending = await query<PendingRow>(
     `SELECT po.*, u.user_address
@@ -64,11 +134,6 @@ async function runCycle(): Promise<void> {
        JOIN users u ON u.id = po.user_id
       WHERE po.status = 'pending' AND po.expires_at > NOW()`
   )
-
-  if (pending.rows.length === 0) {
-    await expireStaleOrders()
-    return
-  }
 
   for (const order of pending.rows) {
     try {
@@ -79,6 +144,7 @@ async function runCycle(): Promise<void> {
   }
 
   await expireStaleOrders()
+  await reconcileProcessingOrders()
 }
 
 let timer: NodeJS.Timeout | null = null
