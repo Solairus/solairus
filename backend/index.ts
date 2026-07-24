@@ -90,6 +90,15 @@ async function startServer() {
     setTimeout(() => { pingAllRpcEndpoints().catch(() => { }) }, 5000)
     setInterval(() => { pingAllRpcEndpoints().catch(() => { }) }, 24 * 60 * 60 * 1000)
     startOrderMonitor()
+
+    // Daily agent-yield scheduler. Runs hourly (idempotent: one result per agent per
+    // UTC day + 24h cooldown), so each active agent is credited shortly after it becomes
+    // eligible without depending on an external cron or a user loading the agents page.
+    const runEarnings = () => runDailyAgentEarnings()
+      .then((r) => console.log(`[earnings-cron] processed=${r.processed} credited=${r.credited} skipped=${r.skipped}`))
+      .catch((e) => console.error('[earnings-cron] failed:', e instanceof Error ? e.message : e))
+    setTimeout(runEarnings, 20000)
+    setInterval(runEarnings, 60 * 60 * 1000)
   })
 }
 

@@ -10,6 +10,7 @@ import {
   Bot,
   Landmark,
   PenLine,
+  KeyRound,
 } from 'lucide-react';
 import { ApiClient, API_CONFIG } from '@/config/service-endpoints';
 import { useToast } from '@/hooks/use-toast';
@@ -82,6 +83,14 @@ export function SystemKpiBoard() {
       sub: 'Admin-activated from credits — NOT on-chain',
       icon: PenLine,
       accent: 'text-rose-400 bg-rose-500/10',
+    },
+    {
+      key: 'license',
+      label: 'Total License Paid',
+      value: usd(stats?.deposited.license),
+      sub: 'On-chain license activations',
+      icon: KeyRound,
+      accent: 'text-cyan-400 bg-cyan-500/10',
     },
     {
       key: 'yield',
@@ -164,11 +173,6 @@ export function SystemKpiBoard() {
             );
           })}
         </div>
-        {stats && Number(stats.deposited.license) > 0 && (
-          <p className="text-xs text-gray-500 mt-4">
-            License fees collected (separate from deposits): {usd(stats.deposited.license)}
-          </p>
-        )}
       </CardContent>
     </Card>
   );
