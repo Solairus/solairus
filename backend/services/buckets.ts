@@ -144,7 +144,9 @@ async function depositDistribution(amountUsdt: number): Promise<DistributionMap>
 }
 
 /**
- * Compute agent activation distribution (90% total)
+ * Compute agent activation distribution. Buckets take 90% of the amount (the other
+ * 10% is affiliate L1/L2/L3 commission, distributed separately). Same fixed splits as
+ * deposit; `reserve` takes the remainder of the 90% pool (~45%) so rounding never leaks.
  */
 function agentDistribution(amountUsdt: number): DistributionMap {
   const pct = {
@@ -153,11 +155,17 @@ function agentDistribution(amountUsdt: number): DistributionMap {
     marketer_1: 0.05,
     marketer_2: 0.05,
     trader: 0.15,
-    reserve: 0.45,
   }
-  return Object.fromEntries(
-    Object.entries(pct).map(([k, v]) => [k, round6(amountUsdt * v)])
-  )
+  const bucketPool = round6(amountUsdt * 0.90) // 90%; remaining 10% → affiliate
+  const result: DistributionMap = {}
+  let allocated = 0
+  for (const [k, v] of Object.entries(pct)) {
+    const amt = round6(amountUsdt * v)
+    result[k] = amt
+    allocated += amt
+  }
+  result.reserve = round6(bucketPool - allocated)
+  return result
 }
 
 /**
@@ -210,9 +218,16 @@ export async function distributeLicense(amountUsdt: number, transactionId: numbe
 }
 
 /**
- * Distribute agent activation amount into buckets (USDT)
+ * Distribute agent activation amount into buckets (USDT).
+ * Idempotent: skips if transactionId has already been processed for buckets.
  */
 export async function distributeAgent(amountUsdt: number, transactionId: number) {
+  const checkRes = await pool.query('SELECT 1 FROM bucket_histories WHERE transaction_id = $1 LIMIT 1', [transactionId])
+  if ((checkRes.rowCount ?? 0) > 0) {
+    console.warn(`[distributeAgent] Skipping: Transaction ${transactionId} already processed in bucket_histories`)
+    return
+  }
+
   const dist = agentDistribution(amountUsdt)
   await applyDistribution(dist, transactionId)
 }

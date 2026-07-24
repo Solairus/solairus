@@ -9,7 +9,7 @@
 import type { PoolClient } from 'pg'
 import { pool, query } from '../db'
 import { applyBalanceBucketChange, getOrCreateBalanceId } from './balance'
-import { distributeLicense, distributeDeposit } from './buckets'
+import { distributeLicense, distributeAgent, distributeDeposit } from './buckets'
 import { distributeAffiliateBonuses } from './affiliate'
 import type { OrderRow } from './orders'
 
@@ -34,6 +34,7 @@ async function getTermDays(client: PoolClient): Promise<number> {
 
 type PostCommit =
   | { kind: 'license'; costUsdt: number; feeMicro: number; userId: number; txId: number }
+  | { kind: 'agent'; costUsdt: number; feeMicro: number; userId: number; txId: number }
   | { kind: 'deposit'; amountUsdt: number; txId: number }
 
 /**
@@ -119,6 +120,8 @@ export async function fulfillOrder(
         "UPDATE payment_orders SET status='completed', tx_signature=$1, transaction_id=$2, updated_at=NOW() WHERE id=$3",
         [sweepSig, txId, order.id]
       )
+
+      postCommit = { kind: 'agent', costUsdt: Number(priceMicro) / 1_000_000, feeMicro: Number(priceMicro), userId: order.user_id, txId }
     } else {
       // deposit / top-up → credit the user's credit_balance with the captured amount
       const txRes = await client.query<{ id: number }>(
@@ -159,6 +162,15 @@ export async function fulfillOrder(
       await distributeAffiliateBonuses(postCommit.userId, postCommit.feeMicro, postCommit.txId)
     } catch (e) {
       console.error('[fulfillment] license distribution failed (order settled, retry manually)', {
+        order_ref: order.order_ref, txId: postCommit.txId, error: e instanceof Error ? e.message : e,
+      })
+    }
+  } else if (postCommit?.kind === 'agent') {
+    try {
+      await distributeAgent(postCommit.costUsdt, postCommit.txId)
+      await distributeAffiliateBonuses(postCommit.userId, postCommit.feeMicro, postCommit.txId)
+    } catch (e) {
+      console.error('[fulfillment] agent distribution failed (order settled, retry manually)', {
         order_ref: order.order_ref, txId: postCommit.txId, error: e instanceof Error ? e.message : e,
       })
     }
