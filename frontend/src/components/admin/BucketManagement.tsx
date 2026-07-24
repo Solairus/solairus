@@ -39,10 +39,12 @@ export function BucketManagement() {
   const [withdrawAmount, setWithdrawAmount] = useState('');
 
   // Use centralized role and context from AdminProvider
-  // Normalize accessible buckets: map `systemreserve` → `reserve` for backend compatibility
-  const accessibleBuckets = (context.accessibleBuckets || []).map((b) => (
-    b === 'systemreserve' ? 'reserve' : b
-  )) as BucketType[];
+  // Normalize buckets: map `systemreserve` → `reserve` for backend compatibility.
+  const normalize = (list: string[]): BucketType[] =>
+    (list || []).map((b) => (b === 'systemreserve' ? 'reserve' : b)) as BucketType[];
+  // accessibleBuckets = what the role can SEE; withdrawableBuckets = what it can cash out.
+  const accessibleBuckets = normalize(context.accessibleBuckets || []);
+  const withdrawableBuckets = normalize(context.withdrawableBuckets || []);
 
   const loadBalances = async () => {
     try {
@@ -219,7 +221,7 @@ export function BucketManagement() {
           </div>
           <p className="text-gray-400 text-sm">
             Manage system bucket balances and withdrawals.
-            You can withdraw from {accessibleBuckets.map((b) => displayName(b)).join(', ')} buckets.
+            You can withdraw from {withdrawableBuckets.map((b) => displayName(b)).join(', ')} buckets.
           </p>
         </CardHeader>
       </Card>
@@ -227,7 +229,7 @@ export function BucketManagement() {
       {/* Bucket Balances Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {(accessibleBuckets as BucketType[]).map((bucketType) => {
-          const canWithdraw = accessibleBuckets.includes(bucketType);
+          const canWithdraw = withdrawableBuckets.includes(bucketType);
           const balance = balances ? formatBalance(balances[bucketType]) : '0.00';
 
           return (

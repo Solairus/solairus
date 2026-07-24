@@ -10,14 +10,17 @@ import { z } from 'zod'
 import { query, pool } from '../db'
 import { randomUUID } from 'crypto'
 import { applyBalanceBucketChange, getOrCreateBalanceId } from '../services/balance'
-import { sendUsdt, isValidSolAddress, recipientUsdtAtaExists, RecipientAtaMissingError } from '../lib/usdt-transfer'
+import { sendUsdt, isValidSolAddress, recipientUsdtAtaExists, RecipientAtaMissingError, getUsdtBalanceMicro } from '../lib/usdt-transfer'
 import { ataSetupRequiredPayload, isPostBroadcastError } from '../lib/withdrawal-gate'
+import { getTreasuryKeypair } from '../lib/hd-wallet'
+import { getWorkingConnection } from '../lib/rpc-manager'
 
 // Extend Request interface for admin middleware
 declare module 'express' {
   interface Request {
     adminRole?: Role
     accessibleBuckets?: BucketType[]
+    viewableBuckets?: BucketType[]
   }
 }
 
@@ -44,10 +47,23 @@ function getUserRole(walletAddress: string): Role {
   return 'none'
 }
 
-// Get accessible buckets for a role
+// Withdrawable buckets for a role — governs who may DEBIT/withdraw a bucket.
+// Admin intentionally CANNOT withdraw `dev` (dev's cut is view-only for admin).
 function getAccessibleBuckets(role: Role): BucketType[] {
   switch (role) {
     case 'admin': return ['admin', 'trader', 'reserve', 'marketer1', 'marketer2']
+    case 'dev': return ['admin', 'dev', 'trader', 'reserve', 'marketer1', 'marketer2']
+    case 'marketer1': return ['marketer1']
+    case 'marketer2': return ['marketer2']
+    default: return []
+  }
+}
+
+// Viewable buckets for a role — governs what balances the role may SEE.
+// Admin can view `dev` (for the audit board) but not withdraw it, so viewable ⊇ withdrawable.
+function getViewableBuckets(role: Role): BucketType[] {
+  switch (role) {
+    case 'admin': return ['admin', 'dev', 'trader', 'reserve', 'marketer1', 'marketer2']
     case 'dev': return ['admin', 'dev', 'trader', 'reserve', 'marketer1', 'marketer2']
     case 'marketer1': return ['marketer1']
     case 'marketer2': return ['marketer2']
@@ -65,6 +81,7 @@ function requireAdmin(req: Request, res: Response, next: (err?: Error) => void) 
 
   req.adminRole = role
   req.accessibleBuckets = getAccessibleBuckets(role)
+  req.viewableBuckets = getViewableBuckets(role)
   next()
 }
 
@@ -290,10 +307,10 @@ router.get('/buckets', requireAdmin, async (req: Request, res: Response) => {
         VALUES (0, 0, 0, 0, 0, 0)
       `)
       const { rows: newRows } = await query('SELECT * FROM bucket_balances WHERE id = 1')
-      const filtered = filterBucketsByAccess(newRows[0], req.accessibleBuckets || [])
+      const filtered = filterBucketsByAccess(newRows[0], req.viewableBuckets || [])
       return res.json(filtered)
     }
-    const filtered = filterBucketsByAccess(rows[0], req.accessibleBuckets || [])
+    const filtered = filterBucketsByAccess(rows[0], req.viewableBuckets || [])
     res.json(filtered)
   } catch (error) {
     console.error('Error fetching bucket balances:', error)
@@ -312,14 +329,85 @@ router.get('/admin/buckets', requireAdmin, async (req: Request, res: Response) =
         VALUES (0, 0, 0, 0, 0, 0)
       `)
       const { rows: newRows } = await query('SELECT * FROM bucket_balances WHERE id = 1')
-      const filtered = filterBucketsByAccess(newRows[0], req.accessibleBuckets || [])
+      const filtered = filterBucketsByAccess(newRows[0], req.viewableBuckets || [])
       return res.json(filtered)
     }
-    const filtered = filterBucketsByAccess(rows[0], req.accessibleBuckets || [])
+    const filtered = filterBucketsByAccess(rows[0], req.viewableBuckets || [])
     res.json(filtered)
   } catch (error) {
     console.error('Error fetching bucket balances (alias):', error)
     res.status(500).json({ error: 'Failed to fetch bucket balances' })
+  }
+})
+
+// System KPI / audit board — read-only financial aggregates for admin + dev roles.
+// All amounts are micro-USDT (6 decimals) returned as strings; the client divides by 1e6.
+router.get('/admin/stats', requireAdmin, async (req: Request, res: Response) => {
+  if (req.adminRole !== 'admin' && req.adminRole !== 'dev') {
+    return res.status(403).json({ error: 'Stats restricted to admin/dev' })
+  }
+  try {
+    // 1. On-chain inflows, split by type. "Total deposited" = deposit + agent activation.
+    const depRes = await query<{ type: string; micro: string }>(
+      `SELECT type, COALESCE(SUM(amount),0)::text AS micro
+         FROM transactions
+        WHERE type IN ('deposit','agent_activation','license_activation')
+          AND status = 'confirmed' AND signature IS NOT NULL
+        GROUP BY type`
+    )
+    const byType: Record<string, string> = { deposit: '0', agent_activation: '0', license_activation: '0' }
+    for (const r of depRes.rows) byType[r.type] = r.micro
+    const depositedTotalMicro = (BigInt(byType.deposit) + BigInt(byType.agent_activation)).toString()
+
+    // 2. User cashout (withdrawals paid out to users). Real payouts settle 'confirmed'
+    //    with an on-chain signature; signature IS NOT NULL excludes internal bookkeeping.
+    const userCash = await query<{ micro: string }>(
+      `SELECT COALESCE(SUM(amount),0)::text AS micro FROM transactions
+        WHERE type='user_withdrawal' AND status='confirmed' AND signature IS NOT NULL`
+    )
+    // 3. Bucket/role cashout (admin/role withdrawals out of the buckets). Same guard —
+    //    excludes "Manual system reset to 0" entries which carry no on-chain signature.
+    const bucketCash = await query<{ micro: string }>(
+      `SELECT COALESCE(SUM(amount),0)::text AS micro FROM transactions
+        WHERE type='role_withdrawal' AND status='confirmed' AND signature IS NOT NULL`
+    )
+    // 4. Affiliate commissions paid to users (credits into the bonus bucket).
+    const aff = await query<{ micro: string }>(
+      `SELECT COALESCE(SUM(amount),0)::text AS micro FROM balance_history
+        WHERE metadata->>'source'='affiliate' AND metadata->>'action'='credit' AND metadata->>'bucket'='bonus'`
+    )
+    // 5. Lifetime agent yield (sum of every daily agent result ever earned).
+    const yieldRes = await query<{ micro: string }>(
+      `SELECT COALESCE(SUM(result_micro),0)::text AS micro FROM agent_results`
+    )
+
+    // 6. Treasury on-chain USDT balance (live RPC) — non-fatal; null if unavailable.
+    let treasuryMicro: string | null = null
+    try {
+      const treasury = getTreasuryKeypair()
+      const conn = await getWorkingConnection()
+      const bal = await getUsdtBalanceMicro(treasury.publicKey, conn)
+      treasuryMicro = bal.toString()
+    } catch (e) {
+      console.warn('[admin.stats] treasury balance unavailable:', e instanceof Error ? e.message : e)
+    }
+
+    res.json({
+      deposited: {
+        deposit: byType.deposit,
+        agent: byType.agent_activation,
+        license: byType.license_activation,
+        total: depositedTotalMicro,
+      },
+      userCashout: userCash.rows[0].micro,
+      bucketCashout: bucketCash.rows[0].micro,
+      affiliateEarnings: aff.rows[0].micro,
+      agentYield: yieldRes.rows[0].micro,
+      treasury: treasuryMicro,
+    })
+  } catch (error) {
+    console.error('Error building admin stats:', error)
+    res.status(500).json({ error: 'Failed to build admin stats' })
   }
 })
 

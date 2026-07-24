@@ -12,6 +12,7 @@ import { MarketerDashboard } from './MarketerDashboard';
 import { AdminErrorBoundary } from './AdminErrorBoundary';
 import { ResponsiveCard, InfoCard, ActionCard } from './ResponsiveCard';
 import { WithdrawalManagement } from './WithdrawalManagement';
+import { SystemKpiBoard } from './SystemKpiBoard';
 import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
 import {
@@ -61,6 +62,9 @@ export const AdminDashboard: React.FC = () => {
           <span>System operational and ready for administration</span>
         </div>
       </ResponsiveCard>
+
+      {/* System KPI / audit board — admin + dev only */}
+      {(role === 'admin' || role === 'dev') && <SystemKpiBoard />}
 
       {/* Role and Permissions Overview */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">

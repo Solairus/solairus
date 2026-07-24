@@ -7,7 +7,11 @@ export interface AdminContext {
   canAccessConfig: boolean;
   canManageUsers: boolean;
   canViewAllBuckets: boolean;
+  // Buckets the role may SEE (view-only + withdrawable).
   accessibleBuckets: string[];
+  // Subset of accessibleBuckets the role may actually WITHDRAW from.
+  // Admin can view `dev` but not withdraw it, so this is narrower for admin.
+  withdrawableBuckets: string[];
 }
 
 /**
@@ -75,7 +79,9 @@ export const getAdminContext = (role: UserRole): AdminContext => {
         canAccessConfig: false,
         canManageUsers: true,
         canViewAllBuckets: false,
-        accessibleBuckets: ['admin', 'trader', 'systemreserve'],
+        // Admin sees `dev` (view-only for the audit board) but cannot withdraw it.
+        accessibleBuckets: ['admin', 'dev', 'trader', 'systemreserve'],
+        withdrawableBuckets: ['admin', 'trader', 'systemreserve'],
       };
 
     case 'dev':
@@ -85,6 +91,7 @@ export const getAdminContext = (role: UserRole): AdminContext => {
         canManageUsers: true,
         canViewAllBuckets: true,
         accessibleBuckets: ['admin', 'dev', 'marketer1', 'marketer2', 'trader', 'systemreserve'],
+        withdrawableBuckets: ['admin', 'dev', 'marketer1', 'marketer2', 'trader', 'systemreserve'],
       };
 
     case 'marketer1':
@@ -94,6 +101,7 @@ export const getAdminContext = (role: UserRole): AdminContext => {
         canManageUsers: false,
         canViewAllBuckets: false,
         accessibleBuckets: ['marketer1'],
+        withdrawableBuckets: ['marketer1'],
       };
 
     case 'marketer2':
@@ -103,6 +111,7 @@ export const getAdminContext = (role: UserRole): AdminContext => {
         canManageUsers: false,
         canViewAllBuckets: false,
         accessibleBuckets: ['marketer2'],
+        withdrawableBuckets: ['marketer2'],
       };
 
     default:
@@ -112,6 +121,7 @@ export const getAdminContext = (role: UserRole): AdminContext => {
         canManageUsers: false,
         canViewAllBuckets: false,
         accessibleBuckets: [],
+        withdrawableBuckets: [],
       };
   }
 };
