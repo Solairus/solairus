@@ -34,6 +34,11 @@ const MARKETER_1_PUBKEY = process.env.MARKETER_1_PUBKEY || ''
 const MARKETER_2_PUBKEY = process.env.MARKETER_2_PUBKEY || ''
 const DEV_ADDRESS = process.env.DEV_ADDRESS || process.env.VITE_DEV_ADDRESS || ''
 
+// Mainnet cutover: the platform ran on devnet until 2026-06-21, when the smart-contract
+// layer was removed and the backend flipped to mainnet-beta + real USDT. All rows before
+// this are devnet TEST data and must be excluded from real-money KPIs. Env-overridable.
+const MAINNET_CUTOVER = process.env.MAINNET_CUTOVER_AT || '2026-06-21T00:00:00Z'
+
 type Role = 'admin' | 'dev' | 'marketer1' | 'marketer2' | 'none'
 type BucketType = 'admin' | 'dev' | 'marketer1' | 'marketer2' | 'trader' | 'reserve'
 
@@ -347,13 +352,20 @@ router.get('/admin/stats', requireAdmin, async (req: Request, res: Response) => 
     return res.status(403).json({ error: 'Stats restricted to admin/dev' })
   }
   try {
+    // All KPIs are scoped to post-mainnet-cutover rows ($1) — pre-cutover rows are
+    // devnet TEST data and would wildly inflate every figure (e.g. $442 vs the real $70
+    // of agent activations). See MAINNET_CUTOVER.
+    const cut = MAINNET_CUTOVER
+
     // 1. On-chain inflows, split by type. "Total deposited" = deposit + agent activation.
     const depRes = await query<{ type: string; micro: string }>(
       `SELECT type, COALESCE(SUM(amount),0)::text AS micro
          FROM transactions
         WHERE type IN ('deposit','agent_activation','license_activation')
           AND status = 'confirmed' AND signature IS NOT NULL
-        GROUP BY type`
+          AND created_at >= $1
+        GROUP BY type`,
+      [cut]
     )
     const byType: Record<string, string> = { deposit: '0', agent_activation: '0', license_activation: '0' }
     for (const r of depRes.rows) byType[r.type] = r.micro
@@ -363,22 +375,27 @@ router.get('/admin/stats', requireAdmin, async (req: Request, res: Response) => 
     //    with an on-chain signature; signature IS NOT NULL excludes internal bookkeeping.
     const userCash = await query<{ micro: string }>(
       `SELECT COALESCE(SUM(amount),0)::text AS micro FROM transactions
-        WHERE type='user_withdrawal' AND status='confirmed' AND signature IS NOT NULL`
+        WHERE type='user_withdrawal' AND status='confirmed' AND signature IS NOT NULL AND created_at >= $1`,
+      [cut]
     )
     // 3. Bucket/role cashout (admin/role withdrawals out of the buckets). Same guard —
     //    excludes "Manual system reset to 0" entries which carry no on-chain signature.
     const bucketCash = await query<{ micro: string }>(
       `SELECT COALESCE(SUM(amount),0)::text AS micro FROM transactions
-        WHERE type='role_withdrawal' AND status='confirmed' AND signature IS NOT NULL`
+        WHERE type='role_withdrawal' AND status='confirmed' AND signature IS NOT NULL AND created_at >= $1`,
+      [cut]
     )
     // 4. Affiliate commissions paid to users (credits into the bonus bucket).
     const aff = await query<{ micro: string }>(
       `SELECT COALESCE(SUM(amount),0)::text AS micro FROM balance_history
-        WHERE metadata->>'source'='affiliate' AND metadata->>'action'='credit' AND metadata->>'bucket'='bonus'`
+        WHERE metadata->>'source'='affiliate' AND metadata->>'action'='credit' AND metadata->>'bucket'='bonus'
+          AND created_at >= $1`,
+      [cut]
     )
-    // 5. Lifetime agent yield (sum of every daily agent result ever earned).
+    // 5. Agent yield (sum of every daily agent result since cutover).
     const yieldRes = await query<{ micro: string }>(
-      `SELECT COALESCE(SUM(result_micro),0)::text AS micro FROM agent_results`
+      `SELECT COALESCE(SUM(result_micro),0)::text AS micro FROM agent_results WHERE created_at >= $1`,
+      [cut]
     )
 
     // 7. Admin manual credits vs debits — INTERNAL balance adjustments, NOT on-chain
@@ -389,7 +406,8 @@ router.get('/admin/stats', requireAdmin, async (req: Request, res: Response) => 
          COALESCE(SUM(amount) FILTER (WHERE type='admin_credit'),0)::text AS credit,
          COALESCE(SUM(amount) FILTER (WHERE type='admin_debit'),0)::text AS debit
        FROM transactions
-       WHERE type IN ('admin_credit','admin_debit') AND status='confirmed'`
+       WHERE type IN ('admin_credit','admin_debit') AND status='confirmed' AND created_at >= $1`,
+      [cut]
     )
     const adminCreditNet = (BigInt(adminCred.rows[0].credit) - BigInt(adminCred.rows[0].debit)).toString()
 
