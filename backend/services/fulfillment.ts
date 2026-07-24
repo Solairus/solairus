@@ -9,7 +9,7 @@
 import type { PoolClient } from 'pg'
 import { pool, query } from '../db'
 import { applyBalanceBucketChange, getOrCreateBalanceId } from './balance'
-import { distributeLicense } from './buckets'
+import { distributeLicense, distributeDeposit } from './buckets'
 import { distributeAffiliateBonuses } from './affiliate'
 import type { OrderRow } from './orders'
 
@@ -32,7 +32,9 @@ async function getTermDays(client: PoolClient): Promise<number> {
   return DEFAULT_TERM_DAYS
 }
 
-interface PostCommit { kind: 'license'; costUsdt: number; feeMicro: number; userId: number; txId: number }
+type PostCommit =
+  | { kind: 'license'; costUsdt: number; feeMicro: number; userId: number; txId: number }
+  | { kind: 'deposit'; amountUsdt: number; txId: number }
 
 /**
  * Fulfill a settled order. `capturedMicro` is the amount actually swept on-chain;
@@ -137,6 +139,8 @@ export async function fulfillOrder(
         "UPDATE payment_orders SET status='completed', tx_signature=$1, transaction_id=$2, updated_at=NOW() WHERE id=$3",
         [sweepSig, txId, order.id]
       )
+
+      postCommit = { kind: 'deposit', amountUsdt: Number(capturedMicro) / 1_000_000, txId }
     }
 
     await client.query('COMMIT')
@@ -147,13 +151,22 @@ export async function fulfillOrder(
     client.release()
   }
 
-  // Post-commit distributions (license only), matching routes/license.ts. Non-fatal on failure.
-  if (postCommit && postCommit.kind === 'license') {
+  // Post-commit distributions, matching routes/license.ts. Non-fatal on failure — the
+  // order is already settled; bucket distribution can be retried independently.
+  if (postCommit?.kind === 'license') {
     try {
       await distributeLicense(postCommit.costUsdt, postCommit.txId)
       await distributeAffiliateBonuses(postCommit.userId, postCommit.feeMicro, postCommit.txId)
     } catch (e) {
       console.error('[fulfillment] license distribution failed (order settled, retry manually)', {
+        order_ref: order.order_ref, txId: postCommit.txId, error: e instanceof Error ? e.message : e,
+      })
+    }
+  } else if (postCommit?.kind === 'deposit') {
+    try {
+      await distributeDeposit(postCommit.amountUsdt, postCommit.txId)
+    } catch (e) {
+      console.error('[fulfillment] deposit bucket distribution failed (order settled, retry manually)', {
         order_ref: order.order_ref, txId: postCommit.txId, error: e instanceof Error ? e.message : e,
       })
     }

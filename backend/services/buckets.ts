@@ -85,6 +85,65 @@ type AppDistribution = {
 }
 
 /**
+ * Compute deposit distribution (100% total). Unlike license/agent, this does not
+ * reduce the depositor's credit_balance — it mirrors the deposit into the internal
+ * role buckets in parallel. `reserve` takes the remainder so rounding never leaks.
+ */
+async function depositDistribution(amountUsdt: number): Promise<DistributionMap> {
+  const settingsSql = `
+    SELECT key, value FROM settings
+    WHERE key IN ('distribution.deposit.admin', 'distribution.deposit.dev', 'distribution.deposit.marketer_1', 'distribution.deposit.marketer_2', 'distribution.deposit.trader')
+  `
+  const { rows } = await pool.query<{ key: string; value: unknown }>(settingsSql)
+
+  const defaults: Record<'admin' | 'dev' | 'marketer_1' | 'marketer_2' | 'trader', number> = {
+    admin: 0.10,
+    dev: 0.10,
+    marketer_1: 0.05,
+    marketer_2: 0.05,
+    trader: 0.15,
+  }
+
+  const parsePct = (val: unknown): number => {
+    if (typeof val === 'number') return val
+    if (typeof val === 'string') return Number(val)
+    if (typeof val === 'object' && val !== null) {
+      const v = (val as { value?: unknown }).value
+      return Number(v)
+    }
+    return 0
+  }
+
+  const keyMap: Record<string, keyof typeof defaults> = {
+    'distribution.deposit.admin': 'admin',
+    'distribution.deposit.dev': 'dev',
+    'distribution.deposit.marketer_1': 'marketer_1',
+    'distribution.deposit.marketer_2': 'marketer_2',
+    'distribution.deposit.trader': 'trader',
+  }
+
+  const pct: Record<string, number> = {}
+  for (const row of rows) {
+    const field = keyMap[row.key]
+    if (field) pct[field] = parsePct(row.value)
+  }
+  for (const [k, v] of Object.entries(defaults)) {
+    if (pct[k] === undefined) pct[k] = v
+  }
+
+  const result: DistributionMap = {}
+  let allocated = 0
+  for (const k of ['admin', 'dev', 'marketer_1', 'marketer_2', 'trader']) {
+    const amt = round6(amountUsdt * pct[k])
+    result[k] = amt
+    allocated += amt
+  }
+  result.reserve = round6(amountUsdt - allocated)
+
+  return result
+}
+
+/**
  * Compute agent activation distribution (90% total)
  */
 function agentDistribution(amountUsdt: number): DistributionMap {
@@ -155,5 +214,21 @@ export async function distributeLicense(amountUsdt: number, transactionId: numbe
  */
 export async function distributeAgent(amountUsdt: number, transactionId: number) {
   const dist = agentDistribution(amountUsdt)
+  await applyDistribution(dist, transactionId)
+}
+
+/**
+ * Distribute a deposit amount into buckets (USDT). Additive only — the depositor's
+ * credit_balance already holds 100% of the deposit; this does not touch it.
+ * Idempotent: skips if transactionId has already been processed for buckets.
+ */
+export async function distributeDeposit(amountUsdt: number, transactionId: number) {
+  const checkRes = await pool.query('SELECT 1 FROM bucket_histories WHERE transaction_id = $1 LIMIT 1', [transactionId])
+  if ((checkRes.rowCount ?? 0) > 0) {
+    console.warn(`[distributeDeposit] Skipping: Transaction ${transactionId} already processed in bucket_histories`)
+    return
+  }
+
+  const dist = await depositDistribution(amountUsdt)
   await applyDistribution(dist, transactionId)
 }
