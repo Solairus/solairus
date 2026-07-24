@@ -381,6 +381,18 @@ router.get('/admin/stats', requireAdmin, async (req: Request, res: Response) => 
       `SELECT COALESCE(SUM(result_micro),0)::text AS micro FROM agent_results`
     )
 
+    // 7. Admin manual credits vs debits — INTERNAL balance adjustments, NOT on-chain
+    //    funds (these rows carry no signature). Surfaced so real blockchain inflows
+    //    (#1, signature-gated) are never conflated with money the admin credited by hand.
+    const adminCred = await query<{ credit: string; debit: string }>(
+      `SELECT
+         COALESCE(SUM(amount) FILTER (WHERE type='admin_credit'),0)::text AS credit,
+         COALESCE(SUM(amount) FILTER (WHERE type='admin_debit'),0)::text AS debit
+       FROM transactions
+       WHERE type IN ('admin_credit','admin_debit') AND status='confirmed'`
+    )
+    const adminCreditNet = (BigInt(adminCred.rows[0].credit) - BigInt(adminCred.rows[0].debit)).toString()
+
     // 6. Treasury on-chain USDT balance (live RPC) — non-fatal; null if unavailable.
     let treasuryMicro: string | null = null
     try {
@@ -393,11 +405,18 @@ router.get('/admin/stats', requireAdmin, async (req: Request, res: Response) => 
     }
 
     res.json({
+      // On-chain (real) inflows only — every figure here is signature-gated.
       deposited: {
         deposit: byType.deposit,
         agent: byType.agent_activation,
         license: byType.license_activation,
         total: depositedTotalMicro,
+      },
+      // Internal, admin-injected balance credits — NOT real funds. Kept separate.
+      adminCredits: {
+        gross: adminCred.rows[0].credit,
+        debit: adminCred.rows[0].debit,
+        net: adminCreditNet,
       },
       userCashout: userCash.rows[0].micro,
       bucketCashout: bucketCash.rows[0].micro,

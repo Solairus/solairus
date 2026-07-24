@@ -9,6 +9,7 @@ import {
   Users,
   Bot,
   Landmark,
+  PenLine,
 } from 'lucide-react';
 import { ApiClient, API_CONFIG } from '@/config/service-endpoints';
 import { useToast } from '@/hooks/use-toast';
@@ -16,6 +17,7 @@ import { useToast } from '@/hooks/use-toast';
 // All amounts arrive as micro-USDT strings (6 decimals); the client divides by 1e6.
 interface AdminStats {
   deposited: { deposit: string; agent: string; license: string; total: string };
+  adminCredits: { gross: string; debit: string; net: string };
   userCashout: string;
   bucketCashout: string;
   affiliateEarnings: string;
@@ -58,11 +60,19 @@ export function SystemKpiBoard() {
   const tiles = [
     {
       key: 'deposited',
-      label: 'Total Deposited',
+      label: 'Total Deposited (Blockchain)',
       value: usd(stats?.deposited.total),
-      sub: stats ? `Deposits ${usd(stats.deposited.deposit)} · Agents ${usd(stats.deposited.agent)}` : '',
+      sub: stats ? `Real on-chain · Deposits ${usd(stats.deposited.deposit)} · Agents ${usd(stats.deposited.agent)}` : '',
       icon: TrendingUp,
       accent: 'text-green-400 bg-green-500/10',
+    },
+    {
+      key: 'adminCredits',
+      label: 'Admin Manual Credits',
+      value: usd(stats?.adminCredits.net),
+      sub: 'Internal credits — NOT on-chain funds',
+      icon: PenLine,
+      accent: 'text-rose-400 bg-rose-500/10',
     },
     {
       key: 'yield',
