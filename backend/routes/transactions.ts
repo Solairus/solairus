@@ -16,8 +16,7 @@ import { getConnection, getCurrentCluster, getRpcManager, getWorkingConnection }
 import { attemptExpiredWithdrawalRefund, attemptExpiredBucketWithdrawalRefund } from '../services/refund_manager'
 
 import { distributeAffiliateBonuses } from '../services/affiliate'
-import { applyBucketChange } from '../services/bucket'
-import { pool } from '../db'
+import { distributeLicense, distributeAgent } from '../services/buckets'
 
 /**
  * Reusable function to find transaction signature by PaymentMade events
@@ -1266,75 +1265,22 @@ async function applyPostConfirmation(record: Transaction) {
     const userId = ures.rows[0]?.id
 
     if (userId) {
-      const client = await pool.connect()
+      // Canonical distribution (services/buckets.ts) — the SAME path the order-monitor
+      // fulfillment uses. Each fn manages its own transaction and is idempotent on
+      // record.id (bucket_histories / balance_history guards), so a re-confirmation of
+      // the same signature is a no-op. Non-fatal: the tx is already confirmed.
+      const amountUsdt = record.amount / 1_000_000
       try {
-        await client.query('BEGIN')
-
-        // Distribute affiliate bonuses
+        if (record.type === 'license_activation') {
+          await distributeLicense(amountUsdt, record.id)
+        } else {
+          await distributeAgent(amountUsdt, record.id)
+        }
         await distributeAffiliateBonuses(userId, record.amount, record.id)
-
-        // Distribute payment to buckets based on transaction type
-        const amountUsdt = (record.amount / 1_000_000).toFixed(6)
-
-        const settingsKey = record.type === 'license_activation' ? 'license' : 'agent'
-        const settingsRes = await client.query(`
-          SELECT key, value FROM settings
-          WHERE key LIKE '${settingsKey}.%_pct'
-        `)
-
-        // Default fallback percentages (should be overridden by settings)
-        let adminPct = record.type === 'license_activation' ? 30 : 10
-        let devPct = record.type === 'license_activation' ? 30 : 10
-        let traderPct = record.type === 'license_activation' ? 0 : 15
-        let reservePct = record.type === 'license_activation' ? 20 : 45
-        let marketer1Pct = 5 // 5% for marketer1 bucket
-        let marketer2Pct = 5 // 5% for marketer2 bucket
-
-        for (const row of settingsRes.rows) {
-          const parseVal = (v: unknown): number => {
-            if (typeof v === 'number') return v
-            if (typeof v === 'string') return Number(v)
-            if (typeof v === 'object' && v !== null) {
-              const inner = (v as Record<string, unknown>).value
-              return typeof inner === 'number' ? inner : Number(inner as string)
-            }
-            return 0
-          }
-
-          switch (row.key) {
-            case `${settingsKey}.admin_pct`: adminPct = parseVal(row.value) || adminPct; break
-            case `${settingsKey}.dev_pct`: devPct = parseVal(row.value) || devPct; break
-            case `${settingsKey}.trader_pct`: traderPct = parseVal(row.value) || traderPct; break
-            case `${settingsKey}.reserve_pct`: reservePct = parseVal(row.value) || reservePct; break
-            case `${settingsKey}.marketer1_pct`: marketer1Pct = parseVal(row.value) || marketer1Pct; break
-            case `${settingsKey}.marketer2_pct`: marketer2Pct = parseVal(row.value) || marketer2Pct; break
-          }
-        }
-
-        // Distribute payment to buckets
-        const totalPct = adminPct + devPct + traderPct + reservePct + marketer1Pct + marketer2Pct
-        if (totalPct > 0) {
-          const adminAmount = (parseFloat(amountUsdt) * adminPct / totalPct).toFixed(6)
-          const devAmount = (parseFloat(amountUsdt) * devPct / totalPct).toFixed(6)
-          const traderAmount = (parseFloat(amountUsdt) * traderPct / totalPct).toFixed(6)
-          const reserveAmount = (parseFloat(amountUsdt) * reservePct / totalPct).toFixed(6)
-          const marketer1Amount = (parseFloat(amountUsdt) * marketer1Pct / totalPct).toFixed(6)
-          const marketer2Amount = (parseFloat(amountUsdt) * marketer2Pct / totalPct).toFixed(6)
-
-          if (parseFloat(adminAmount) > 0) await applyBucketChange(client, 'admin', 'credit', adminAmount, record.id)
-          if (parseFloat(devAmount) > 0) await applyBucketChange(client, 'dev', 'credit', devAmount, record.id)
-          if (parseFloat(traderAmount) > 0) await applyBucketChange(client, 'trader', 'credit', traderAmount, record.id)
-          if (parseFloat(reserveAmount) > 0) await applyBucketChange(client, 'reserve', 'credit', reserveAmount, record.id)
-          if (parseFloat(marketer1Amount) > 0) await applyBucketChange(client, 'marketer_1', 'credit', marketer1Amount, record.id)
-          if (parseFloat(marketer2Amount) > 0) await applyBucketChange(client, 'marketer_2', 'credit', marketer2Amount, record.id)
-        }
-
-        await client.query('COMMIT')
       } catch (error) {
-        await client.query('ROLLBACK')
-        console.error('Error distributing payment:', error)
-      } finally {
-        client.release()
+        console.error('[applyPostConfirmation] distribution failed (tx confirmed, retry manually):', {
+          txId: record.id, type: record.type, error: error instanceof Error ? error.message : error,
+        })
       }
     }
   }
