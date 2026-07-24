@@ -392,11 +392,23 @@ router.get('/admin/stats', requireAdmin, async (req: Request, res: Response) => 
           AND created_at >= $1`,
       [cut]
     )
-    // 5. Agent yield (sum of every daily agent result since cutover).
-    const yieldRes = await query<{ micro: string }>(
+    // 5. Agent yield since cutover, split by how the agent was funded. An agent
+    //    activated on-chain carries activation_signature; credit/admin-funded agents
+    //    do not — so "real" yield is only what real-money agents produced. Total is
+    //    summed independently (orphan results, if any, fall into manual as unproven).
+    const yieldTotalRes = await query<{ micro: string }>(
       `SELECT COALESCE(SUM(result_micro),0)::text AS micro FROM agent_results WHERE created_at >= $1`,
       [cut]
     )
+    const yieldRealRes = await query<{ micro: string }>(
+      `SELECT COALESCE(SUM(ar.result_micro),0)::text AS micro
+         FROM agent_results ar JOIN agents ag ON ag.id = ar.agent_id
+        WHERE ar.created_at >= $1 AND ag.activation_signature IS NOT NULL`,
+      [cut]
+    )
+    const yieldTotal = yieldTotalRes.rows[0].micro
+    const yieldReal = yieldRealRes.rows[0].micro
+    const yieldManual = (BigInt(yieldTotal) - BigInt(yieldReal)).toString()
 
     // 7. Admin manual credits vs debits — INTERNAL balance adjustments, NOT on-chain
     //    funds (these rows carry no signature). Surfaced so real blockchain inflows
@@ -410,6 +422,19 @@ router.get('/admin/stats', requireAdmin, async (req: Request, res: Response) => 
       [cut]
     )
     const adminCreditNet = (BigInt(adminCred.rows[0].credit) - BigInt(adminCred.rows[0].debit)).toString()
+
+    // 8. Manual (admin-made) activations — funded from credited balances, NOT on-chain
+    //    (no signature). Displayed alongside the blockchain figures so the admin can see
+    //    exactly how much of the activity was hand-injected vs real money.
+    const manualAct = await query<{ agent: string; deposit: string }>(
+      `SELECT
+         COALESCE(SUM(amount) FILTER (WHERE type='agent_activation'),0)::text AS agent,
+         COALESCE(SUM(amount) FILTER (WHERE type='deposit'),0)::text AS deposit
+       FROM transactions
+       WHERE type IN ('agent_activation','deposit') AND status='confirmed'
+         AND signature IS NULL AND created_at >= $1`,
+      [cut]
+    )
 
     // 6. Treasury on-chain USDT balance (live RPC) — non-fatal; null if unavailable.
     let treasuryMicro: string | null = null
@@ -436,10 +461,17 @@ router.get('/admin/stats', requireAdmin, async (req: Request, res: Response) => 
         debit: adminCred.rows[0].debit,
         net: adminCreditNet,
       },
+      // Admin-made (manual) activations/deposits — funded from credited balances, no
+      // on-chain payment. Shown so the board never hides hand-injected activity.
+      manual: {
+        agentActivations: manualAct.rows[0].agent,
+        deposits: manualAct.rows[0].deposit,
+      },
       userCashout: userCash.rows[0].micro,
       bucketCashout: bucketCash.rows[0].micro,
       affiliateEarnings: aff.rows[0].micro,
-      agentYield: yieldRes.rows[0].micro,
+      // Agent yield split by funding source (real on-chain agents vs credit-funded).
+      agentYield: { total: yieldTotal, real: yieldReal, manual: yieldManual },
       treasury: treasuryMicro,
     })
   } catch (error) {

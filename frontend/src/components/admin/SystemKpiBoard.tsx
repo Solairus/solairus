@@ -18,10 +18,11 @@ import { useToast } from '@/hooks/use-toast';
 interface AdminStats {
   deposited: { deposit: string; agent: string; license: string; total: string };
   adminCredits: { gross: string; debit: string; net: string };
+  manual: { agentActivations: string; deposits: string };
   userCashout: string;
   bucketCashout: string;
   affiliateEarnings: string;
-  agentYield: string;
+  agentYield: { total: string; real: string; manual: string };
   treasury: string | null;
 }
 
@@ -68,17 +69,25 @@ export function SystemKpiBoard() {
     },
     {
       key: 'adminCredits',
-      label: 'Admin Manual Credits',
+      label: 'Admin Manual Deposits',
       value: usd(stats?.adminCredits.net),
-      sub: 'Internal credits — NOT on-chain funds',
+      sub: 'Credited to user balances — NOT on-chain',
+      icon: PenLine,
+      accent: 'text-rose-400 bg-rose-500/10',
+    },
+    {
+      key: 'manualAgents',
+      label: 'Manual Agent Activations',
+      value: usd(stats?.manual.agentActivations),
+      sub: 'Admin-activated from credits — NOT on-chain',
       icon: PenLine,
       accent: 'text-rose-400 bg-rose-500/10',
     },
     {
       key: 'yield',
       label: 'Total Agent Yield',
-      value: usd(stats?.agentYield),
-      sub: 'Lifetime daily agent earnings',
+      value: usd(stats?.agentYield.total),
+      sub: stats ? `Real ${usd(stats.agentYield.real)} · Manual ${usd(stats.agentYield.manual)}` : '',
       icon: Bot,
       accent: 'text-emerald-400 bg-emerald-500/10',
     },
